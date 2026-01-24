@@ -8,7 +8,7 @@ Using GitHub flavored markdown style by [sindresorhus](https://github.com/sindre
 
 
 > [!NOTE]
-## Changes in v2.1.1
+> ## Changes in v2.1.1
 > - Added tabs (alpha)
 > - Updated app and file icon
 > ## Changes in v2.1.0
