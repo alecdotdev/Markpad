@@ -10,6 +10,10 @@ Using GitHub flavored markdown style by [sindresorhus](https://github.com/sindre
 
 
 > [!NOTE]
+> ## Changes in v2.2.1
+> - Added zoom (ctrl + mouse wheel/ctrl + +/ctrl + -/ctrl + 0) in viewer and editor
+> - Fixed titlebar dragging
+> - Shadow fix on W10
 > ## Changes in v2.2.0
 > - Added [Monaco](https://github.com/microsoft/monaco-editor) for embedded text editing
 > - Added tabs

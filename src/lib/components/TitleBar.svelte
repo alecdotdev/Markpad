@@ -20,6 +20,8 @@
 		isEditing,
 		ondetach,
 		ontabclick,
+		zoomLevel,
+		onresetZoom,
 	} = $props<{
 		isFocused: boolean;
 		isScrolled: boolean;
@@ -35,6 +37,8 @@
 		isEditing: boolean;
 		ondetach: (tabId: string) => void;
 		ontabclick?: () => void;
+		zoomLevel?: number;
+		onresetZoom?: () => void;
 	}>();
 
 	const appWindow = getCurrentWindow();
@@ -62,6 +66,11 @@
 	{/if}
 
 	<div class="title-actions" data-tauri-drag-region>
+		{#if zoomLevel && zoomLevel !== 100}
+			<button class="zoom-indicator" onclick={onresetZoom} transition:fly={{ y: -10, duration: 150 }} aria-label="Reset Zoom" title="Reset zoom">
+				{zoomLevel}%
+			</button>
+		{/if}
 		{#if currentFile}
 			<div class="actions-wrapper" transition:slide={{ axis: 'x', duration: 200 }}>
 				<button class="title-action-btn" onclick={ononpenFileLocation} aria-label="Open File Location" title="Open folder" transition:fly={{ x: 10, duration: 100, delay: 0 }}>
@@ -225,7 +234,6 @@
 		display: flex;
 		justify-content: center;
 		align-items: center;
-		pointer-events: none;
 		z-index: 5;
 	}
 
@@ -276,5 +284,27 @@
 
 	.close-btn:hover {
 		background: #e81123 !important;
+	}
+
+	.zoom-indicator {
+		background: var(--color-canvas-subtle);
+		color: var(--color-fg-muted);
+		border: 1px solid var(--color-border-default);
+		border-radius: 4px;
+		padding: 2px 8px;
+		font-size: 11px;
+		cursor: pointer;
+		margin-right: 8px;
+		display: flex;
+		align-items: center;
+		height: 24px;
+		align-self: center;
+		transition: all 0.1s;
+	}
+
+	.zoom-indicator:hover {
+		background: var(--color-btn-hover-bg);
+		color: var(--color-fg-default);
+		border-color: var(--color-border-muted);
 	}
 </style>

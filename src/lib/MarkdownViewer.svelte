@@ -465,6 +465,18 @@
 		}
 	}
 
+	let zoomLevel = $state(100);
+
+	function handleWheel(e: WheelEvent) {
+		if (e.ctrlKey) {
+			if (e.deltaY < 0) {
+				zoomLevel = Math.min(zoomLevel + 10, 500);
+			} else {
+				zoomLevel = Math.max(zoomLevel - 10, 25);
+			}
+		}
+	}
+
 	function handleKeyDown(e: KeyboardEvent) {
 		if (mode !== 'app') return;
 		if (e.ctrlKey && e.key === 'w') {
@@ -482,6 +494,19 @@
 		if (e.ctrlKey && e.key === 'Tab') {
 			e.preventDefault();
 			tabManager.cycleTab(e.shiftKey ? 'prev' : 'next');
+		}
+		// Zoom shortcuts
+		if (e.ctrlKey && (e.key === '=' || e.key === '+')) {
+			e.preventDefault();
+			zoomLevel = Math.min(zoomLevel + 10, 500);
+		}
+		if (e.ctrlKey && e.key === '-') {
+			e.preventDefault();
+			zoomLevel = Math.max(zoomLevel - 10, 25);
+		}
+		if (e.ctrlKey && e.key === '0') {
+			e.preventDefault();
+			zoomLevel = 100;
 		}
 	}
 
@@ -615,6 +640,42 @@
 				}),
 			);
 			unlisteners.push(
+				await appWindow.onCloseRequested(async (event) => {
+					const dirtyTabs = tabManager.tabs.filter((t) => t.isDirty);
+					if (dirtyTabs.length > 0) {
+						event.preventDefault();
+						const response = await askCustom(`You have ${dirtyTabs.length} unsaved file(s). Do you want to save your changes?`, {
+							title: 'Unsaved Changes',
+							kind: 'warning',
+							showSave: true,
+						});
+
+						if (response === 'save') {
+							// Attempt to save all dirty tabs
+							for (const tab of dirtyTabs) {
+								tabManager.setActive(tab.id);
+								await tick();
+								const saved = await saveContent();
+								if (!saved) return; // Cancelled or failed
+							}
+							// If all saved successfully, close the app
+							appWindow.close();
+						} else if (response === 'discard') {
+							// Force close by removing this listener or skipping check?
+							// Since we are inside the event handler, we can't easily remove "this" listener specifically
+							// without refactoring how unlisteners are stored/accessed relative to this callback.
+							// However, if we just want to exit, we can use exit() from rust or just appWindow.destroy()?
+							// WebviewWindow.close() triggers this event again.
+							// Solution: invoke a command to exit forcefully or set a flag.
+							// The simplest might be to just clear the dirty flags and close.
+							tabManager.tabs.forEach((t) => (t.isDirty = false));
+							appWindow.close();
+						}
+					}
+				}),
+			);
+
+			unlisteners.push(
 				await appWindow.onDragDropEvent((event) => {
 					if (isEditing) {
 						isDragging = false;
@@ -664,6 +725,7 @@
 		{liveMode}
 		{windowTitle}
 		{showHome}
+		{zoomLevel}
 		onselectFile={selectFile}
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
@@ -671,10 +733,11 @@
 		ontoggleEdit={toggleEdit}
 		{isEditing}
 		ondetach={handleDetach}
-		ontabclick={() => (showHome = false)} />
+		ontabclick={() => (showHome = false)}
+		onresetZoom={() => (zoomLevel = 100)} />
 
 	{#if tabManager.activeTab && (tabManager.activeTab.path !== '' || tabManager.activeTab.title !== 'Recents') && !showHome}
-		<div class="markdown-container">
+		<div class="markdown-container" style="zoom: {zoomLevel}%" onwheel={handleWheel} role="presentation">
 			{#if isEditing}
 				<div class="editor-wrapper">
 					<Editor bind:value={rawContent} onsave={saveContent} />

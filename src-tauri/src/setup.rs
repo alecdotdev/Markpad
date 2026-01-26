@@ -283,25 +283,46 @@ pub async fn uninstall_app(handle: AppHandle, target_all_users: Option<bool>) ->
     }
 
     // 3. Self-destruction
+    // We create a batch file to delete the app, but run it via VBScript to keep it invisible
     let batch_content = format!(
         "@echo off\r\n\
+        set /a retries=0\r\n\
         :loop\r\n\
         taskkill /F /IM {} > nul 2>&1\r\n\
         timeout /t 1 /nobreak > nul\r\n\
         del /f /q \"{}\" > nul 2>&1\r\n\
-        if exist \"{}\" goto loop\r\n\
+        if exist \"{}\" (\r\n\
+            set /a retries+=1\r\n\
+            if %retries% geq 20 goto cleanup\r\n\
+            goto loop\r\n\
+        )\r\n\
         rmdir /s /q \"{}\" > nul 2>&1\r\n\
-        (goto) 2>nul & del \"%~f0\"",
+        :cleanup\r\n\
+        del \"%~f0\" > nul 2>&1",
         EXE_NAME,
-        install_dir.join(EXE_NAME).display(), // Target the installed exe
+        install_dir.join(EXE_NAME).display(),
         install_dir.join(EXE_NAME).display(),
         install_dir.display()
     );
-    let batch_path = env::temp_dir().join("uninstall_markdown_viewer.bat");
-    fs::write(&batch_path, batch_content).map_err(|e| e.to_string())?;
     
-    std::process::Command::new("cmd")
-        .args(&["/c", "start", "/min", batch_path.to_str().unwrap()])
+    let temp_dir = env::temp_dir();
+    let batch_path = temp_dir.join("uninstall_markdown_viewer.bat");
+    let vbs_path = temp_dir.join("uninstall_markdown_viewer.vbs");
+
+    fs::write(&batch_path, batch_content).map_err(|e| e.to_string())?;
+
+    // VBScript to run the batch file invisibly
+    let vbs_content = format!(
+        "CreateObject(\"Wscript.Shell\").Run \"\"\"{}\"\"\", 0, False\r\n\
+        Set fso = CreateObject(\"Scripting.FileSystemObject\")\r\n\
+        fso.DeleteFile WScript.ScriptFullName",
+        batch_path.display()
+    );
+    
+    fs::write(&vbs_path, vbs_content).map_err(|e| e.to_string())?;
+    
+    std::process::Command::new("wscript")
+        .arg(&vbs_path)
         .spawn()
         .map_err(|e| e.to_string())?;
 
