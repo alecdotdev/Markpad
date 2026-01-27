@@ -11,9 +11,9 @@ use winreg::enums::*;
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
 
-const APP_NAME: &str = "MarkdownViewer";
+const APP_NAME: &str = "Markpad";
 #[cfg(target_os = "windows")]
-const EXE_NAME: &str = "MarkdownViewer.exe";
+const EXE_NAME: &str = "Markpad.exe";
 
 #[derive(Serialize)]
 pub struct InstallStatus {
@@ -29,7 +29,7 @@ pub fn get_install_path(all_users: bool) -> PathBuf {
         let program_files = env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
         PathBuf::from(program_files).join(APP_NAME)
     } else {
-        // AppData/Local/MarkdownViewer
+        // AppData/Local/Markpad
         let local_app_data = env::var("LOCALAPPDATA").unwrap_or_else(|_| {
             let user_profile = env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".to_string());
             format!("{}\\AppData\\Local", user_profile)
@@ -279,7 +279,7 @@ pub async fn uninstall_app(handle: AppHandle, target_all_users: Option<bool>) ->
         let _ = root.delete_subkey(format!("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", APP_NAME));
         let _ = root.delete_subkey_all("Software\\Classes\\.md");
         let _ = root.delete_subkey_all("Software\\Classes\\.markdown");
-        let _ = root.delete_subkey_all("Software\\Classes\\MarkdownViewer.File");
+        let _ = root.delete_subkey_all("Software\\Classes\\Markpad.File");
     }
 
     // 3. Self-destruction
@@ -343,15 +343,15 @@ fn register_file_association(exe_path: &Path, all_users: bool) -> Result<(), std
     
     // .md
     let (md_key, _) = root.create_subkey("Software\\Classes\\.md")?;
-    md_key.set_value("", &"MarkdownViewer.File")?;
+    md_key.set_value("", &"Markpad.File")?;
     
     // .markdown
     let (markdown_key, _) = root.create_subkey("Software\\Classes\\.markdown")?;
-    markdown_key.set_value("", &"MarkdownViewer.File")?;
+    markdown_key.set_value("", &"Markpad.File")?;
 
-    // MarkdownViewer.File
-    let (file_key, _) = root.create_subkey("Software\\Classes\\MarkdownViewer.File")?;
-    file_key.set_value("", &"Markdown File")?;
+    // Markpad.File
+    let (file_key, _) = root.create_subkey("Software\\Classes\\Markpad.File")?;
+    file_key.set_value("", &"Markpad File")?;
     
     let (icon_key, _) = file_key.create_subkey("DefaultIcon")?;
     icon_key.set_value("", &format!("\"{}\",0", exe_path.display()))?;

@@ -549,7 +549,7 @@
 		const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
 		const webview = new WebviewWindow(label, {
 			url: 'index.html?file=' + encodeURIComponent(path),
-			title: 'Markdown Viewer - ' + path.split(/[/\\]/).pop(),
+			title: 'Markpad - ' + path.split(/[/\\]/).pop(),
 			width: 1000,
 			height: 800,
 		});

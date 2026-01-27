@@ -100,7 +100,6 @@
 			<img src={iconUrl} alt="App Icon" class="app-icon" />
 			{#if isInstalled}
 				<h1>Markdown Viewer</h1>
-				<p class="subtitle">Version {installedVersion} is installed</p>
 			{:else}
 				<h1>Markdown Viewer</h1>
 				<p class="subtitle">A simple markdown viewer</p>
@@ -189,7 +188,7 @@
 		{:else}
 			<div class="installing-state">
 				<div class="spinner"></div>
-				<p>{isInstalled ? 'Updating' : 'Installing'} Markdown Viewer...</p>
+				<p>{isInstalled ? 'Updating' : 'Installing'} Markpad...</p>
 			</div>
 		{/if}
 	</div>
