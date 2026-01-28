@@ -4,6 +4,7 @@ export interface Tab {
 	title: string;
 	content: string;
 	rawContent: string;
+	originalContent: string;
 	scrollTop: number;
 	isDirty: boolean;
 	isEditing: boolean;
@@ -33,6 +34,7 @@ class TabManager {
 			title,
 			content,
 			rawContent,
+			originalContent: rawContent,
 			scrollTop: 0,
 			isDirty: false,
 			isEditing: false
@@ -48,6 +50,7 @@ class TabManager {
 			title: 'Untitled',
 			content: '',
 			rawContent: '',
+			originalContent: '',
 			scrollTop: 0,
 			isDirty: false,
 			isEditing: true
@@ -63,6 +66,7 @@ class TabManager {
 			title: 'Recents',
 			content: '',
 			rawContent: '',
+			originalContent: '',
 			scrollTop: 0,
 			isDirty: false,
 			isEditing: false
@@ -106,7 +110,16 @@ class TabManager {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
 			tab.rawContent = raw;
-			tab.isDirty = true;
+			tab.isDirty = tab.rawContent !== tab.originalContent;
+		}
+	}
+
+	setTabRawContent(id: string, raw: string) {
+		const tab = this.tabs.find((t) => t.id === id);
+		if (tab) {
+			tab.rawContent = raw;
+			tab.originalContent = raw;
+			tab.isDirty = false;
 		}
 	}
 

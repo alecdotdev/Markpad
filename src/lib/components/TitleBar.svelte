@@ -22,6 +22,7 @@
 		ontabclick,
 		zoomLevel,
 		onresetZoom,
+		oncloseTab,
 	} = $props<{
 		isFocused: boolean;
 		isScrolled: boolean;
@@ -39,6 +40,7 @@
 		ontabclick?: () => void;
 		zoomLevel?: number;
 		onresetZoom?: () => void;
+		oncloseTab?: (id: string) => void;
 	}>();
 
 	const appWindow = getCurrentWindow();
@@ -72,7 +74,7 @@
 
 	{#if tabManager.tabs.length > 0}
 		<div class="tab-area">
-			<TabList onnewTab={() => tabManager.addHomeTab()} {ondetach} {showHome} {ontabclick} />
+			<TabList onnewTab={() => tabManager.addHomeTab()} {ondetach} {showHome} {ontabclick} {oncloseTab} />
 		</div>
 	{:else}
 		<div class="window-title-container" data-tauri-drag-region>
@@ -91,6 +93,8 @@
 			</button>
 		{/if}
 		{#if currentFile}
+			{@const ext = currentFile.split('.').pop()?.toLowerCase() || ''}
+			{@const isMarkdown = ['md', 'markdown', 'mdown', 'mkd'].includes(ext)}
 			<div class="actions-wrapper" transition:slide={{ axis: 'x', duration: 200 }}>
 				<button class="title-action-btn" onclick={ononpenFileLocation} aria-label="Open File Location" title="Open folder" transition:fly={{ x: 10, duration: 100, delay: 0 }}>
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
@@ -101,24 +105,26 @@
 							y2="10"></line
 						></svg>
 				</button>
-				<button
-					class="title-action-btn {liveMode ? 'active' : ''}"
-					onclick={ontoggleLiveMode}
-					aria-label="Toggle Live Mode"
-					title="Live update mode"
-					transition:fly={{ x: 20, duration: 100, delay: 50 }}>
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-						><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0z" /><circle cx="12" cy="12" r="3" /></svg>
-				</button>
-				<button
-					class="title-action-btn {isEditing ? 'active' : ''}"
-					onclick={ontoggleEdit}
-					aria-label="Edit File"
-					title="Edit file"
-					transition:fly={{ x: 30, duration: 100, delay: 100 }}>
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-						><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
-				</button>
+				{#if isMarkdown}
+					<button
+						class="title-action-btn {liveMode ? 'active' : ''}"
+						onclick={ontoggleLiveMode}
+						aria-label="Toggle Live Mode"
+						title="Live update mode"
+						transition:fly={{ x: 20, duration: 100, delay: 50 }}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0z" /><circle cx="12" cy="12" r="3" /></svg>
+					</button>
+					<button
+						class="title-action-btn {isEditing ? 'active' : ''}"
+						onclick={ontoggleEdit}
+						aria-label="Edit File"
+						title="Edit file"
+						transition:fly={{ x: 30, duration: 100, delay: 100 }}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+					</button>
+				{/if}
 			</div>
 		{/if}
 	</div>

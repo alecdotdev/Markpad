@@ -11,11 +11,13 @@
 		ondetach,
 		showHome = false,
 		ontabclick,
+		oncloseTab,
 	} = $props<{
 		onnewTab: () => void;
 		ondetach?: (tabId: string) => void;
 		showHome?: boolean;
 		ontabclick?: () => void;
+		oncloseTab?: (id: string) => void;
 	}>();
 
 	$effect(() => {
@@ -158,7 +160,7 @@
 							tabManager.setActive(tab.id);
 							ontabclick?.();
 						}}
-						onclose={() => tabManager.closeTab(tab.id)} />
+						onclose={() => oncloseTab?.(tab.id)} />
 				</div>
 			{/each}
 		</div>

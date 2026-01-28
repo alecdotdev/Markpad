@@ -60,6 +60,8 @@
 			wordWrap: 'on',
 		});
 
+		editor.focus();
+
 		editor.onDidChangeModelContent(() => {
 			const newValue = editor.getValue();
 			if (value !== newValue) {
@@ -77,8 +79,6 @@
 		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => {
 			editor.trigger('keyboard', 'editor.action.quickCommand', {});
 		});
-
-
 
 		return () => {
 			editor.dispose();

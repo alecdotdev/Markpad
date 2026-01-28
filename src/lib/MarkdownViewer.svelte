@@ -764,7 +764,12 @@
 		{isEditing}
 		ondetach={handleDetach}
 		ontabclick={() => (showHome = false)}
-		onresetZoom={() => (zoomLevel = 100)} />
+		onresetZoom={() => (zoomLevel = 100)}
+		oncloseTab={(id) => {
+			canCloseTab(id).then((can) => {
+				if (can) tabManager.closeTab(id);
+			});
+		}} />
 
 	{#if tabManager.activeTab && (tabManager.activeTab.path !== '' || tabManager.activeTab.title !== 'Recents') && !showHome}
 		{#key currentFile}
