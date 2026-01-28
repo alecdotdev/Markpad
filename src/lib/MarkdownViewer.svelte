@@ -25,7 +25,7 @@
 	let recentFiles = $state<string[]>([]);
 	let isFocused = $state(true);
 	let markdownBody = $state<HTMLElement | null>(null);
-	let liveMode = $state(false);
+
 	let isDragging = $state(false);
 
 	// derived from tab manager
@@ -213,8 +213,6 @@
 				const content = (await invoke('read_file_content', { path: filePath })) as string;
 				tabManager.setTabRawContent(activeId, content);
 			}
-
-			if (liveMode) invoke('watch_file', { path: filePath }).catch(console.error);
 
 			await tick();
 			if (filePath) saveRecentFile(filePath);
@@ -444,7 +442,6 @@
 				tabManager.closeTab(tabManager.activeTabId);
 			}
 		}
-		if (liveMode && tabManager.tabs.length === 0) invoke('unwatch_file').catch(console.error);
 	}
 
 	async function openFileLocation() {
@@ -501,16 +498,6 @@
 	function handleScroll(e: Event) {
 		if (tabManager.activeTabId) {
 			tabManager.updateTabScroll(tabManager.activeTabId, (e.target as HTMLElement).scrollTop);
-		}
-	}
-
-	async function toggleLiveMode() {
-		liveMode = !liveMode;
-		if (liveMode && currentFile) {
-			await invoke('watch_file', { path: currentFile });
-			if (tabManager.activeTabId) await loadMarkdown(currentFile);
-		} else {
-			await invoke('unwatch_file');
 		}
 	}
 
@@ -624,11 +611,7 @@
 					isFocused = focused;
 				}),
 			);
-			unlisteners.push(
-				await listen('file-changed', () => {
-					if (liveMode && currentFile) loadMarkdown(currentFile);
-				}),
-			);
+
 			unlisteners.push(
 				await listen('file-path', (event) => {
 					const filePath = event.payload as string;
@@ -796,14 +779,12 @@
 		{isFocused}
 		{isScrolled}
 		{currentFile}
-		{liveMode}
 		{windowTitle}
 		{showHome}
 		{zoomLevel}
 		onselectFile={selectFile}
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
-		ontoggleLiveMode={toggleLiveMode}
 		ontoggleEdit={toggleEdit}
 		{isEditing}
 		ondetach={handleDetach}
