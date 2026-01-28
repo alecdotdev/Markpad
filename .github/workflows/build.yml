@@ -46,21 +46,22 @@ jobs:
       - name: install frontend dependencies
         run: npm install
 
-      - name: Build app
-        env:
-          NODE_OPTIONS: "--max_old_space_size=4096"
-        run: npm run tauri build -- ${{ matrix.args }}
-
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Build and bundle
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_OPTIONS: "--max_old_space_size=4096"
         with:
-          draft: true
-          files: |
-            src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/bundle/appimage/*.AppImage
-            src-tauri/target/release/bundle/rpm/*.rpm
-            src-tauri/target/*/release/bundle/dmg/*.dmg
-            src-tauri/target/release/*.exe
+          tagName: v__VERSION__
+          releaseName: 'Markpad v__VERSION__'
+          releaseBody: 'See the assets to download this version and install.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Upload Windows EXE
+        if: matrix.platform == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload v${{ steps.tauri.outputs.appVersion }} "src-tauri/target/release/Markpad.exe"
