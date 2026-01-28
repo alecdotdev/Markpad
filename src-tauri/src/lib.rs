@@ -345,7 +345,6 @@ pub fn run() {
                 .visible(false)
                 .resizable(true)
                 .decorations(false)
-                .transparent(true)
                 .shadow(false)
                 .build()?;
 
