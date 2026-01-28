@@ -3,7 +3,7 @@ name = "Markpad"
 version = "2.3.0"
 description = "Simple Markdown viewer and text editor"
 authors = ["you"]
-edition = "2026"
+edition = "2021"
 
 [[bin]]
 name = "Markpad"
