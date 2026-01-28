@@ -268,6 +268,7 @@ pub fn run() {
             let _ = app.get_webview_window("main").expect("no main window").set_focus();
         }))
         .plugin(tauri_plugin_prevent_default::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .on_menu_event(|app, event| {
              let id = event.id().as_ref();
              let state = app.state::<ContextMenuState>();
@@ -346,6 +347,7 @@ pub fn run() {
                 .resizable(true)
                 .decorations(false)
                 .shadow(false)
+                .center()
                 .build()?;
 
             let _ = _window.set_shadow(true);
