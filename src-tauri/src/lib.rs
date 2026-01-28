@@ -62,13 +62,25 @@ fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
 
 
 
+
+struct AppState {
+    startup_file: Mutex<Option<String>>,
+}
+
 #[tauri::command]
-fn send_markdown_path() -> Vec<String> {
-    let args: Vec<String> = std::env::args().collect();
-    args.into_iter()
+fn send_markdown_path(state: State<'_, AppState>) -> Vec<String> {
+    let mut files: Vec<String> = std::env::args()
         .skip(1)
         .filter(|arg| !arg.starts_with("-"))
-        .collect()
+        .collect();
+
+    if let Some(startup_path) = state.startup_file.lock().unwrap().as_ref() {
+        if !files.contains(startup_path) {
+            files.insert(0, startup_path.clone());
+        }
+    }
+    
+    files
 }
 
 #[tauri::command]
@@ -195,6 +207,9 @@ pub fn run() {
 
     tauri::Builder::default()
 
+        .manage(AppState {
+            startup_file: Mutex::new(None),
+        })
         .manage(ContextMenuState {
             active_path: Mutex::new(None),
             active_tab_id: Mutex::new(None),
@@ -324,6 +339,24 @@ pub fn run() {
             show_context_menu,
             show_window
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
-}
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Opened { urls } = event {
+                if let Some(url) = urls.first() {
+                    if let Ok(path_buf) = url.to_file_path() {
+                         let path_str = path_buf.to_string_lossy().to_string();
+                         
+                         // Store in state
+                         let state = app_handle.state::<AppState>();
+                         *state.startup_file.lock().unwrap() = Some(path_str.clone());
+                         
+                         // Emit to window if it exists
+                         if let Some(window) = app_handle.get_webview_window("main") {
+                             let _ = window.emit("file-path", path_str);
+                             let _ = window.set_focus();
+                         }
+                    }
+                }
+            }
+        });}
