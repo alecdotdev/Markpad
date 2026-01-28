@@ -63,4 +63,4 @@ jobs:
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/rpm/*.rpm
             src-tauri/target/*/release/bundle/dmg/*.dmg
-            src-tauri/target/release/Markpad.exe
+            src-tauri/target/release/*.exe
