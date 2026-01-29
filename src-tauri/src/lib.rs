@@ -347,7 +347,7 @@ pub fn run() {
 
             let _window = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("index.html".into()))
                 .title("Markpad")
-                .inner_size(800.0, 600.0)
+                .inner_size(850.0, 650.0)
                 .min_inner_size(400.0, 300.0)
                 .visible(false)
                 .resizable(true)
