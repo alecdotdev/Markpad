@@ -3,7 +3,7 @@ use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
-use tauri::{menu::MenuBuilder, AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri::menu::ContextMenu;
 
 
@@ -339,7 +339,16 @@ pub fn run() {
              }
         })
         .setup(|app| {
-            let _window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+            let args: Vec<String> = std::env::args().collect();
+            println!("Setup Args: {:?}", args);
+
+            let current_exe = std::env::current_exe().unwrap_or_default();
+            let exe_name = current_exe.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+            let is_installer_mode = args.iter().any(|arg| arg == "--install") || exe_name.contains("installer");
+
+            let label = if is_installer_mode { "installer" } else { "main" };
+
+            let _window = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("index.html".into()))
                 .title("Markpad")
                 .inner_size(800.0, 600.0)
                 .min_inner_size(400.0, 300.0)
@@ -348,14 +357,19 @@ pub fn run() {
                 .decorations(false)
                 .shadow(false)
                 .center()
+                .visible(false)
                 .build()?;
+                
+            #[cfg(target_os = "windows")]
+            {
+               use tauri::window::Color;
+               let _ = _window.set_background_color(Some(Color(18, 18, 18, 255)));
+            }
 
             let _ = _window.set_shadow(true);
 
-            let args: Vec<String> = std::env::args().collect();
-            println!("Setup Args: {:?}", args);
 
-            let window = app.get_webview_window("main").unwrap();
+            let window = app.get_webview_window(label).unwrap();
 
             let file_path = args.iter().skip(1).find(|arg| !arg.starts_with("-"));
 
@@ -363,14 +377,10 @@ pub fn run() {
                 let _ = window.emit("file-path", path.as_str());
             }
 
-
-            let args: Vec<String> = std::env::args().collect();
-            let is_uninstall = args.iter().any(|arg| arg == "--uninstall");
-            if !setup::is_installed() || is_uninstall {
-                if args.len() <= 1 || args[1].starts_with('-') {
-                   let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 450.0, height: 550.0 }));
-                   let _ = window.center();
-                }
+            // If installer, force size (this will be saved to installer-state, not main-state)
+            if is_installer_mode {
+                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 450.0, height: 550.0 }));
+                let _ = window.center();
             }
 
             Ok(())

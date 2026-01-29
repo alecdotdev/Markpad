@@ -6,7 +6,7 @@
 html,
 body {
 	/* background-color: var(--color-canvas-default); */
-	background-color: transparent;
+	background-color: var(--color-canvas-default);
 	margin: 0;
 	padding: 0;
 	height: 100%;

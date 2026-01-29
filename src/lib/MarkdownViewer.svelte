@@ -14,11 +14,11 @@
 	import { tabManager } from './stores/tabs.svelte.js';
 
 	// syntax highlighting & latex
-	import hljs from 'highlight.js';
+	let hljs: any = $state(null);
+	let renderMathInElement: any = $state(null);
+
 	import 'highlight.js/styles/github-dark.css';
 	import 'katex/dist/katex.min.css';
-	// @ts-ignore
-	import renderMathInElement from 'katex/dist/contrib/auto-render';
 
 	let mode = $state<'loading' | 'app' | 'installer' | 'uninstall'>('loading');
 
@@ -121,18 +121,20 @@
 		showHome = false;
 	});
 
-	async function loadMarkdown(filePath: string) {
+	async function loadMarkdown(filePath: string, options: { navigate?: boolean; skipTabManagement?: boolean } = {}) {
 		showHome = false;
 		try {
-			// Check if file is already open
-			const existing = tabManager.tabs.find((t) => t.path === filePath);
-			if (existing) {
-				tabManager.setActive(existing.id);
-			} else if (tabManager.activeTab && tabManager.activeTab.path === '') {
-				// Reuse the current empty tab (e.g. New Tab page)
-				tabManager.updateTabPath(tabManager.activeTab.id, filePath);
-			} else {
-				tabManager.addTab(filePath);
+			if (options.navigate && tabManager.activeTab) {
+				tabManager.navigate(tabManager.activeTab.id, filePath);
+			} else if (!options.skipTabManagement) {
+				const existing = tabManager.tabs.find((t) => t.path === filePath);
+				if (existing) {
+					tabManager.setActive(existing.id);
+				} else if (tabManager.activeTab && tabManager.activeTab.path === '') {
+					tabManager.updateTabPath(tabManager.activeTab.id, filePath);
+				} else {
+					tabManager.addTab(filePath);
+				}
 			}
 			const activeId = tabManager.activeTabId;
 			if (!activeId) return;
@@ -224,8 +226,10 @@
 		}
 	}
 
-	function renderRichContent() {
+	async function renderRichContent() {
 		if (!markdownBody) return;
+
+		if (!hljs || !renderMathInElement) return;
 
 		markdownBody.querySelectorAll('pre code').forEach((block) => {
 			hljs.highlightElement(block as HTMLElement);
@@ -255,7 +259,7 @@
 	}
 
 	$effect(() => {
-		if (htmlContent && markdownBody && !isEditing) renderRichContent();
+		if (htmlContent && markdownBody && !isEditing && hljs && renderMathInElement) renderRichContent();
 	});
 
 	$effect(() => {
@@ -502,7 +506,24 @@
 		while (target && target.tagName !== 'A' && target !== document.body) target = target.parentElement as HTMLElement;
 		if (target?.tagName === 'A') {
 			const anchor = target as HTMLAnchorElement;
-			if (anchor.href && !anchor.href.startsWith('#')) {
+			const rawHref = anchor.getAttribute('href');
+			if (!rawHref) return;
+
+			if (rawHref.startsWith('#')) return;
+			const isMarkdown = ['.md', '.markdown', '.mdown', '.mkd'].some((ext) => {
+				const urlNoHash = rawHref.split('#')[0].split('?')[0];
+				return urlNoHash.toLowerCase().endsWith(ext);
+			});
+
+			if (isMarkdown && !rawHref.match(/^[a-z]+:\/\//i)) {
+				event.preventDefault();
+				const urlNoHash = rawHref.split('#')[0].split('?')[0];
+				const resolved = resolvePath(currentFile, urlNoHash);
+				await loadMarkdown(resolved, { navigate: true });
+				return;
+			}
+
+			if (anchor.href) {
 				event.preventDefault();
 				await openUrl(anchor.href);
 			}
@@ -578,6 +599,24 @@
 		}
 	}
 
+	function handleMouseUp(e: MouseEvent) {
+		if (e.button === 3) {
+			// Back
+			e.preventDefault();
+			if (tabManager.activeTabId) {
+				const path = tabManager.goBack(tabManager.activeTabId);
+				if (path) loadMarkdown(path, { skipTabManagement: true });
+			}
+		} else if (e.button === 4) {
+			// Forward
+			e.preventDefault();
+			if (tabManager.activeTabId) {
+				const path = tabManager.goForward(tabManager.activeTabId);
+				if (path) loadMarkdown(path, { skipTabManagement: true });
+			}
+		}
+	}
+
 	async function handleUndoCloseTab() {
 		const path = tabManager.popRecentlyClosed();
 		if (path) {
@@ -605,13 +644,20 @@
 
 	onMount(() => {
 		loadRecentFiles();
-		loadRecentFiles();
+
+		Promise.all([import('highlight.js'), import('katex/dist/contrib/auto-render')]).then(([hljsModule, katexModule]) => {
+			hljs = hljsModule.default;
+			renderMathInElement = katexModule.default;
+		});
+
 		let unlisteners: (() => void)[] = [];
+
+		invoke('show_window').catch(console.error);
 
 		const init = async () => {
 			const { getCurrentWindow } = await import('@tauri-apps/api/window');
 			const appWindow = getCurrentWindow();
-			mode = (await invoke('get_app_mode')) as any;
+			const appMode = (await invoke('get_app_mode')) as any;
 
 			const urlParams = new URLSearchParams(window.location.search);
 			const fileParam = urlParams.get('file');
@@ -765,12 +811,14 @@
 
 			try {
 				const args: string[] = await invoke('send_markdown_path');
-				if (args?.length > 0) await loadMarkdown(args[0]);
+				if (args?.length > 0) {
+					await loadMarkdown(args[0]);
+				}
 			} catch (error) {
 				console.error('Error receiving Markdown file path:', error);
 			}
 
-			await invoke('show_window');
+			mode = appMode;
 		};
 
 		init();
@@ -781,7 +829,13 @@
 	});
 </script>
 
-<svelte:document onclick={handleDocumentClick} oncontextmenu={handleContextMenu} onmouseover={handleMouseOver} onmouseout={handleMouseOut} onkeydown={handleKeyDown} />
+<svelte:document
+	onclick={handleDocumentClick}
+	oncontextmenu={handleContextMenu}
+	onmouseover={handleMouseOver}
+	onmouseout={handleMouseOut}
+	onkeydown={handleKeyDown}
+	onmouseup={handleMouseUp} />
 
 {#if mode === 'loading'}
 	<div class="loading-screen">

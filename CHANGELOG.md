@@ -1,20 +1,21 @@
 # Changelog
+## v2.3.3
+- Added window position memory
+- Added window size memory
 
 ## v2.3.1
 - Fixed tab rearranging on all platforms
 - Added portable mode
 
 ## v2.3.0
-- Added macOS and Linux support
+- Added macOS and Linux support (preview)
 - Added support for common text files
-- Improved first launch time
 
 ## v2.2.1
-- Renamed to **Markpad**
-- Added zoom (`ctrl + mouse wheel`/`ctrl + +`/`ctrl + -`/`ctrl + 0`) in viewer and editor
+- Renamed to **Markpad** (formerly **Markdown Viewer**)
+- Added zoom (`Ctrl/Cmd + Mouse Wheel`/`Ctrl/Cmd + +`/`Ctrl/Cmd + -`/`Ctrl/Cmd + 0`) in viewer and editor
 - Fixed titlebar dragging
-- Shadow fix on W10
-- Added `ctrl+e` for toggling between viewer and editor
+- Added `Ctrl/Cmd + E` for toggling between viewer and editor
 
 ## v2.2.0
 - Integrated [Monaco](https://github.com/microsoft/monaco-editor) for embedded text editing
