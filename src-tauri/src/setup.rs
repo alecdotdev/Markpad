@@ -83,11 +83,15 @@ pub fn is_installed() -> bool {
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
-pub fn check_install_status() -> InstallStatus {
+pub async fn check_install_status() -> InstallStatus {
+    println!("Checking install status...");
+    
     // Check HKCU
+    println!("Checking HKCU...");
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    if let Ok(key) = hkcu.open_subkey(format!("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", APP_NAME)) {
+    if let Ok(key) = hkcu.open_subkey_with_flags(format!("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", APP_NAME), KEY_READ) {
         if let Ok(version) = key.get_value::<String, _>("DisplayVersion") {
+            println!("Found in HKCU: {}", version);
             return InstallStatus {
                 is_installed: true,
                 all_users: false,
@@ -97,9 +101,11 @@ pub fn check_install_status() -> InstallStatus {
     }
 
     // Check HKLM
+    println!("Checking HKLM...");
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    if let Ok(key) = hklm.open_subkey(format!("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", APP_NAME)) {
+    if let Ok(key) = hklm.open_subkey_with_flags(format!("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", APP_NAME), KEY_READ) {
         if let Ok(version) = key.get_value::<String, _>("DisplayVersion") {
+            println!("Found in HKLM: {}", version);
             return InstallStatus {
                 is_installed: true,
                 all_users: true,
@@ -107,6 +113,8 @@ pub fn check_install_status() -> InstallStatus {
             };
         }
     }
+    
+    println!("Not found.");
 
     InstallStatus {
         is_installed: false,
@@ -117,7 +125,9 @@ pub fn check_install_status() -> InstallStatus {
 
 #[tauri::command]
 #[cfg(not(target_os = "windows"))]
-pub fn check_install_status() -> InstallStatus {
+#[tauri::command]
+#[cfg(not(target_os = "windows"))]
+pub async fn check_install_status() -> InstallStatus {
     InstallStatus {
         is_installed: true,
         all_users: false,
@@ -139,18 +149,25 @@ pub async fn install_app(
     let install_dir = get_install_path(all_users);
     let target_exe = install_dir.join(EXE_NAME);
 
+    println!("Installing to: {}", install_dir.display());
+
     // 1. Create directory
     if !install_dir.exists() {
         fs::create_dir_all(&install_dir).map_err(|e| e.to_string())?;
     }
 
     // 2. Copy executable
+    println!("Copying executable...");
     // Retry loop in case the app is closing slowly during update
     let mut retries = 0;
     while retries < 5 {
         match fs::copy(&current_exe, &target_exe) {
-            Ok(_) => break,
+            Ok(_) => {
+                println!("Copy success.");
+                break;
+            }
             Err(e) => {
+                println!("Copy failed (attempt {}): {}", retries, e);
                 if retries == 4 {
                     return Err(format!("Failed to copy executable: {}", e));
                 }
@@ -161,6 +178,7 @@ pub async fn install_app(
     }
 
     // 3. Shortcuts
+    println!("Creating shortcuts...");
     if desktop_shortcut {
         let desktop = if all_users {
             env::var("PUBLIC").unwrap_or_else(|_| "C:\\Users\\Public".to_string()) + "\\Desktop"
@@ -184,6 +202,7 @@ pub async fn install_app(
     }
 
     // 4. Registry - Uninstaller
+    println!("Updating registry...");
     let root_h = if all_users { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER };
     
     // If we are installing for all users (Admin), try to clean up old NSIS key from HKLM first
@@ -200,7 +219,10 @@ pub async fn install_app(
     key.set_value("QuietUninstallString", &format!("\"{}\" --uninstall", target_exe.display())).map_err(|e| e.to_string())?;
     key.set_value("DisplayIcon", &target_exe.to_str().unwrap()).map_err(|e| e.to_string())?;
     key.set_value("Publisher", &"alecdotdev").map_err(|e| e.to_string())?;
-    key.set_value("DisplayVersion", &"2.0.0").map_err(|e| e.to_string())?;
+    
+    let version = handle.package_info().version.to_string();
+    key.set_value("DisplayVersion", &version).map_err(|e| e.to_string())?;
+    
     key.set_value("InstallLocation", &install_dir.to_str().unwrap()).map_err(|e| e.to_string())?;
     key.set_value("NoModify", &1u32).map_err(|e| e.to_string())?;
     key.set_value("NoRepair", &1u32).map_err(|e| e.to_string())?;
@@ -216,11 +238,13 @@ pub async fn install_app(
     }
 
     // 5. File Associations
+    println!("Registering file associations...");
     if register_md {
         register_file_association(&target_exe, all_users).map_err(|e| e.to_string())?;
     }
 
     // 6. Launch and Exit
+    println!("Launching app...");
     if launch_after {
         std::process::Command::new(target_exe).spawn().map_err(|e| e.to_string())?;
     }

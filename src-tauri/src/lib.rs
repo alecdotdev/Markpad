@@ -120,10 +120,7 @@ fn send_markdown_path(state: State<'_, AppState>) -> Vec<String> {
 }
 
 #[tauri::command]
-fn get_app_mode() -> String {
-    if cfg!(debug_assertions) {
-        return "app".to_string();
-    }
+async fn get_app_mode() -> String {
 
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|arg| arg == "--uninstall") {

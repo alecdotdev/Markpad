@@ -838,6 +838,28 @@
 	onmouseup={handleMouseUp} />
 
 {#if mode === 'loading'}
+	<TitleBar
+		{isFocused}
+		isScrolled={false}
+		currentFile={''}
+		{liveMode}
+		windowTitle="Markpad"
+		showHome={false}
+		{zoomLevel}
+		onselectFile={selectFile}
+		ontoggleHome={toggleHome}
+		ononpenFileLocation={openFileLocation}
+		ontoggleLiveMode={toggleLiveMode}
+		ontoggleEdit={toggleEdit}
+		{isEditing}
+		ondetach={handleDetach}
+		ontabclick={() => (showHome = false)}
+		onresetZoom={() => (zoomLevel = 100)}
+		oncloseTab={(id) => {
+			canCloseTab(id).then((can) => {
+				if (can) tabManager.closeTab(id);
+			});
+		}} />
 	<div class="loading-screen">
 		<svg class="spinner" viewBox="0 0 50 50">
 			<circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="4"></circle>
@@ -1065,15 +1087,15 @@
 
 	.loading-screen {
 		position: fixed;
-		top: 0;
+		top: 36px;
 		left: 0;
 		width: 100%;
-		height: 100%;
+		height: calc(100% - 36px);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		background: var(--color-canvas-default);
-		z-index: 50000;
+		z-index: 5000;
 	}
 
 	.spinner {
