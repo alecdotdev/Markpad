@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getCurrentWindow } from '@tauri-apps/api/window';
+	import { invoke } from '@tauri-apps/api/core';
 	import { fly, slide } from 'svelte/transition';
 	import iconUrl from '../../assets/icon.png';
 	import TabList from './TabList.svelte';
@@ -53,9 +54,24 @@
 	const DEBUG_MACOS = false;
 
 	const isMac = typeof navigator !== 'undefined' && (navigator.userAgent.includes('Macintosh') || DEBUG_MACOS);
+
+	let isWin11 = $state(false);
+
+	$effect(() => {
+		invoke('is_win11')
+			.then((res) => {
+				isWin11 = res as boolean;
+			})
+			.catch(() => {
+				isWin11 = false;
+			});
+	});
 </script>
 
-<div class="custom-title-bar {isScrolled ? 'scrolled' : ''}">
+<div class="custom-title-bar {isScrolled ? 'scrolled' : ''} {!isMac ? 'windows' : ''}">
+	{#if !isMac && !isWin11}
+		<div class="window-top-border"></div>
+	{/if}
 	<div class="window-controls-left" data-tauri-drag-region>
 		{#if isMac}
 			<div class="macos-traffic-lights" class:visible={isMac}>
@@ -170,6 +186,17 @@
 		font-family: var(--win-font);
 		border-bottom: 1px solid transparent;
 		transition: border-color 0.2s;
+	}
+
+	.window-top-border {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 1px;
+		background-color: var(--color-window-border-top);
+		z-index: 10002;
+		pointer-events: none;
 	}
 
 	.custom-title-bar.scrolled {

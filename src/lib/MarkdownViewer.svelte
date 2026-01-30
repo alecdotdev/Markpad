@@ -645,6 +645,7 @@
 	onMount(() => {
 		loadRecentFiles();
 
+		// @ts-ignore
 		Promise.all([import('highlight.js'), import('katex/dist/contrib/auto-render')]).then(([hljsModule, katexModule]) => {
 			hljs = hljsModule.default;
 			renderMathInElement = katexModule.default;

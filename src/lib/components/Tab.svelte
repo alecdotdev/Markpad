@@ -118,14 +118,6 @@
 		text-align: left;
 	}
 
-	.tab-status-icon {
-		display: flex;
-		opacity: 0.8;
-		flex-shrink: 0;
-		color: var(--color-accent-fg);
-		margin-right: 4px;
-	}
-
 	.tab-label {
 		white-space: nowrap;
 		overflow: hidden;

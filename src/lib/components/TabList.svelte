@@ -188,6 +188,7 @@
 				}
 			}}>
 			{#each tabManager.tabs as tab, i (tab.id)}
+				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<div
 					class="tab-item-wrapper"
 					animate:flip={{ duration: 200 }}

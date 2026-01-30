@@ -146,6 +146,25 @@ async fn get_app_mode() -> String {
 }
 
 #[tauri::command]
+fn is_win11() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::RegKey;
+        use winreg::enums::*;
+
+        let hklim = RegKey::predef(HKEY_LOCAL_MACHINE);
+        if let Ok(current_version) = hklim.open_subkey("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion") {
+            if let Ok(current_build) = current_version.get_value::<String, _>("CurrentBuild") {
+                if let Ok(build_num) = current_build.parse::<u32>() {
+                    return build_num >= 22000;
+                }
+            }
+        }
+    }
+    false
+}
+
+#[tauri::command]
 fn show_context_menu(
     app: AppHandle,
     state: State<'_, ContextMenuState>,
@@ -394,6 +413,7 @@ pub fn run() {
             setup::install_app,
             setup::uninstall_app,
             setup::check_install_status,
+            is_win11,
             open_file_folder,
             open_file_folder,
             rename_file,
