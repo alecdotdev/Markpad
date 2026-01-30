@@ -21,12 +21,71 @@
 		oncancel: () => void;
 	}>();
 
+	let modalContent = $state<HTMLDivElement>();
+	let previousActiveElement: HTMLElement | null = null;
+
+	$effect(() => {
+		if (show) {
+			previousActiveElement = document.activeElement as HTMLElement;
+			setTimeout(() => {
+				const focusable = modalContent?.querySelector('button.primary') as HTMLElement;
+				if (focusable) {
+					focusable.focus();
+				} else {
+					modalContent?.focus();
+				}
+			}, 50);
+		} else if (previousActiveElement) {
+			previousActiveElement.focus();
+		}
+	});
+
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') oncancel();
-		if (e.key === 'Enter') onconfirm();
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			oncancel();
+		}
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			if (showSave && onsave) {
+				onsave();
+			} else {
+				onconfirm();
+			}
+		}
+		// Y for Yes/Confirm
+		if (e.key.toLowerCase() === 'y' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+			e.preventDefault();
+			onconfirm();
+		}
+		// N for No/Cancel
+		if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+			e.preventDefault();
+			oncancel();
+		}
 		if (e.ctrlKey && e.key === 's' && showSave && onsave) {
 			e.preventDefault();
 			onsave();
+		}
+
+		// Focus trap
+		if (e.key === 'Tab') {
+			const focusableElements = modalContent?.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') || [];
+			if (focusableElements.length === 0) return;
+			const first = focusableElements[0] as HTMLElement;
+			const last = focusableElements[focusableElements.length - 1] as HTMLElement;
+
+			if (e.shiftKey) {
+				if (document.activeElement === first) {
+					e.preventDefault();
+					last.focus();
+				}
+			} else {
+				if (document.activeElement === last) {
+					e.preventDefault();
+					first.focus();
+				}
+			}
 		}
 	}
 
@@ -39,6 +98,7 @@
 	<div class="modal-backdrop" transition:fade={{ duration: 150 }} onclick={handleBackdropClick} role="presentation">
 		<div
 			class="modal-content {kind}"
+			bind:this={modalContent}
 			transition:scale={{ duration: 200, start: 0.95 }}
 			onclick={(e) => e.stopPropagation()}
 			role="dialog"
@@ -73,7 +133,7 @@
 		right: 0;
 		bottom: 0;
 		background: rgba(0, 0, 0, 0.4);
-		backdrop-filter: blur(2px);
+		/* backdrop-filter: blur(2px); */
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -83,7 +143,7 @@
 	.modal-content {
 		background: var(--color-canvas-default);
 		border: 1px solid var(--color-border-default);
-		border-radius: 12px;
+		border-radius: 6px;
 		width: 400px;
 		max-width: 90vw;
 		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);

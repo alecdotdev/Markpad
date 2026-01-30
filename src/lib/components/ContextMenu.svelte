@@ -11,10 +11,27 @@
 		oncloseFile: () => void;
 		onhide: () => void;
 	}>();
+	let menuEl = $state<HTMLDivElement>();
+
+	$effect(() => {
+		if (show && menuEl) {
+			// Small timeout to ensure element exists in DOM/transition starts
+			setTimeout(() => {
+				menuEl?.focus();
+			}, 10);
+		}
+	});
 </script>
 
 {#if show}
-	<div class="context-menu" style="left: {x}px; top: {y}px;" onclick={(e) => e.stopPropagation()} role="menu" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && onhide()}>
+	<div
+		class="context-menu"
+		bind:this={menuEl}
+		style="left: {x}px; top: {y}px;"
+		onclick={(e) => e.stopPropagation()}
+		role="menu"
+		tabindex="-1"
+		onkeydown={(e) => e.key === 'Escape' && onhide()}>
 		<button class="menu-item" onclick={oncopy}>Copy</button>
 		<button class="menu-item" onclick={onselectAll}>Select All</button>
 		<div class="menu-separator"></div>
@@ -37,6 +54,7 @@
 		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 		font-family: var(--win-font);
 		animation: menuFade 0.1s ease-out;
+		outline: none;
 	}
 
 	@keyframes menuFade {

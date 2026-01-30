@@ -1,4 +1,16 @@
 # Changelog
+## v2.3.5
+- Fixed window positioning and sizing
+- Fixed light mode startup and editor theme
+- Added Command Palette additional features and keybinds
+	- Bold `Ctrl/Cmd + B`
+	- Italic `Ctrl/Cmd + I`
+	- Underline `Ctrl/Cmd + U`
+	- Insert Table
+	- Toggle Minimap
+	- Toggle Word Wrap
+	- Toggle Line Numbers
+
 ## v2.3.3
 - Added window position memory
 - Added window size memory

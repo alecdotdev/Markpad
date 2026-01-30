@@ -645,6 +645,7 @@
 	onMount(() => {
 		loadRecentFiles();
 
+		// @ts-ignore
 		Promise.all([import('highlight.js'), import('katex/dist/contrib/auto-render')]).then(([hljsModule, katexModule]) => {
 			hljs = hljsModule.default;
 			renderMathInElement = katexModule.default;
@@ -850,7 +851,7 @@
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
-		ontoggleEdit={toggleEdit}
+		ontoggleEdit={() => toggleEdit()}
 		{isEditing}
 		ondetach={handleDetach}
 		ontabclick={() => (showHome = false)}
@@ -882,7 +883,7 @@
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
-		ontoggleEdit={toggleEdit}
+		ontoggleEdit={() => toggleEdit()}
 		{isEditing}
 		ondetach={handleDetach}
 		ontabclick={() => (showHome = false)}
@@ -898,7 +899,20 @@
 			<div class="markdown-container" style="zoom: {zoomLevel}%" onwheel={handleWheel} role="presentation">
 				{#if isEditing}
 					<div class="editor-wrapper">
-						<Editor bind:value={rawContent} language={editorLanguage} onsave={saveContent} />
+						<Editor
+							bind:value={rawContent}
+							language={editorLanguage}
+							onsave={saveContent}
+							onnew={handleNewFile}
+							onopen={selectFile}
+							onclose={closeFile}
+							onreveal={openFileLocation}
+							ontoggleEdit={() => toggleEdit()}
+							ontoggleLive={toggleLiveMode}
+							onhome={() => (showHome = true)}
+							onnextTab={() => tabManager.cycleTab('next')}
+							onprevTab={() => tabManager.cycleTab('prev')}
+							onundoClose={handleUndoCloseTab} />
 					</div>
 				{:else}
 					<article bind:this={markdownBody} contenteditable="false" class="markdown-body" bind:innerHTML={htmlContent} onscroll={handleScroll}></article>

@@ -27,7 +27,7 @@ body {
 	--color-fg-default: #1f2328;
 	--color-fg-muted: #656d76;
 	--color-fg-subtle: #6e7781;
-	--color-canvas-default: #ffffff;
+	--color-canvas-default: #FDFDFD;
 	--color-canvas-subtle: #00000011;
 	--color-border-default: #d0d7de;
 	--color-border-muted: hsla(210, 18%, 87%, 1);
@@ -43,6 +43,7 @@ body {
 	--color-danger-emphasis: #cf222e;
 	--color-done-fg: #8250df;
 	--color-done-emphasis: #8250df;
+	--color-window-border-top: #B5B5B5;
 
 	/* Light Syntax Highlighting */
 	--hljs-bg: #f6f8fa;
@@ -75,6 +76,7 @@ body {
 		--color-danger-emphasis: #da3633;
 		--color-done-fg: #a371f7;
 		--color-done-emphasis: #8957e5;
+		--color-window-border-top: #3E3E3E;
 
 		/* Dark Syntax Highlighting */
 		--hljs-bg: #0d1117;
