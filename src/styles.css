@@ -43,6 +43,7 @@ body {
 	--color-danger-emphasis: #cf222e;
 	--color-done-fg: #8250df;
 	--color-done-emphasis: #8250df;
+	--color-window-border-top: #B5B5B5;
 
 	/* Light Syntax Highlighting */
 	--hljs-bg: #f6f8fa;
@@ -75,6 +76,7 @@ body {
 		--color-danger-emphasis: #da3633;
 		--color-done-fg: #a371f7;
 		--color-done-emphasis: #8957e5;
+		--color-window-border-top: #3E3E3E;
 
 		/* Dark Syntax Highlighting */
 		--hljs-bg: #0d1117;

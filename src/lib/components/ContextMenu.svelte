@@ -17,7 +17,7 @@
 		if (show && menuEl) {
 			// Small timeout to ensure element exists in DOM/transition starts
 			setTimeout(() => {
-				menuEl.focus();
+				menuEl?.focus();
 			}, 10);
 		}
 	});
