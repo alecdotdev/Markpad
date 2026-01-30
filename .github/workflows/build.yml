@@ -49,13 +49,24 @@ jobs:
         include:
           - platform: windows-latest
             os: windows
-            target: '' 
+            arch: x64
+            target: ''
+            rust_target: ''
+          - platform: windows-latest
+            os: windows
+            arch: arm64
+            target: 'aarch64-pc-windows-msvc'
+            rust_target: 'aarch64-pc-windows-msvc'
           - platform: ubuntu-22.04
             os: linux
+            arch: x64
             target: ''
+            rust_target: ''
           - platform: macos-latest
             os: macos
+            arch: universal
             target: 'universal-apple-darwin'
+            rust_target: 'aarch64-apple-darwin,x86_64-apple-darwin'
 
     runs-on: ${{ matrix.platform }}
 
@@ -70,9 +81,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          # macos: install targets for universal build
-          # windows/linux: standard
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.rust_target }}
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -83,20 +92,35 @@ jobs:
       - name: Install Frontend Dependencies
         run: npm install
 
-      # --- Windows Build ---
-      - name: Build Windows
-        if: matrix.platform == 'windows-latest'
+      # --- Windows Build (x64) ---
+      - name: Build Windows x64
+        if: matrix.platform == 'windows-latest' && matrix.arch == 'x64'
         run: npm run tauri build
 
-      - name: Upload Windows Artifacts
-        if: matrix.platform == 'windows-latest'
+      - name: Upload Windows x64 Artifacts
+        if: matrix.platform == 'windows-latest' && matrix.arch == 'x64'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp src-tauri/target/release/Markpad.exe Markpad.exe
-          cp Markpad.exe MarkpadInstaller.exe
-          gh release upload v${{ needs.create-release.outputs.version }} Markpad.exe MarkpadInstaller.exe --clobber
+          cp src-tauri/target/release/Markpad.exe Markpad-x64.exe
+          cp Markpad-x64.exe MarkpadInstaller-x64.exe
+          gh release upload v${{ needs.create-release.outputs.version }} Markpad-x64.exe MarkpadInstaller-x64.exe --clobber
+
+      # --- Windows Build (ARM64) ---
+      - name: Build Windows ARM64
+        if: matrix.platform == 'windows-latest' && matrix.arch == 'arm64'
+        run: npm run tauri build -- --target aarch64-pc-windows-msvc
+
+      - name: Upload Windows ARM64 Artifacts
+        if: matrix.platform == 'windows-latest' && matrix.arch == 'arm64'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp src-tauri/target/aarch64-pc-windows-msvc/release/Markpad.exe Markpad-arm64.exe
+          cp Markpad-arm64.exe MarkpadInstaller-arm64.exe
+          gh release upload v${{ needs.create-release.outputs.version }} Markpad-arm64.exe MarkpadInstaller-arm64.exe --clobber
 
       # --- Linux Build ---
       - name: Build Linux
