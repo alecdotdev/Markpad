@@ -22,9 +22,7 @@ async fn show_window(window: tauri::Window) {
 }
 
 #[tauri::command]
-fn open_markdown(path: String) -> Result<String, String> {
-    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-
+fn convert_markdown(content: &str) -> String {
     let mut options = ComrakOptions {
         extension: ComrakExtensionOptions {
             strikethrough: true,
@@ -42,9 +40,18 @@ fn open_markdown(path: String) -> Result<String, String> {
     options.render.hardbreaks = true;
     options.render.sourcepos = true;
 
-    let html_output = markdown_to_html(&content, &options);
+    markdown_to_html(content, &options)
+}
 
-    Ok(html_output)
+#[tauri::command]
+fn open_markdown(path: String) -> Result<String, String> {
+    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    Ok(convert_markdown(&content))
+}
+
+#[tauri::command]
+fn render_markdown(content: String) -> String {
+    convert_markdown(&content)
 }
 
 #[tauri::command]
@@ -406,6 +413,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_markdown,
+            render_markdown,
             send_markdown_path,
             read_file_content,
             save_file_content,

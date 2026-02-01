@@ -789,3 +789,56 @@ body {
 	color: var(--color-danger-fg);
 	background-color: var(--color-canvas-subtle);
 }
+
+.split-view {
+	display: flex;
+	flex-direction: row;
+	width: 100%;
+	height: 100vh;
+	padding-top: 36px;
+	box-sizing: border-box;
+}
+
+.split-editor {
+	flex: 1;
+	height: 100%;
+	position: relative;
+	border-right: 1px solid var(--color-border-default);
+	min-width: 0;
+}
+
+.split-editor .editor-container {
+	padding-top: 0 !important;
+}
+
+.split-preview {
+	flex: 1;
+	height: 100%;
+	overflow: hidden;
+	min-width: 0;
+	background-color: var(--color-canvas-default);
+}
+
+.split-preview .markdown-body {
+	margin: 0 !important;
+	height: 100% !important;
+	padding: 20px 40px !important;
+	width: 100% !important;
+	max-width: none !important;
+	box-sizing: border-box;
+}
+
+.split-bar {
+	width: 4px;
+	height: 100%;
+	background-color: var(--color-border-default);
+	cursor: col-resize;
+	z-index: 10;
+	transition: background-color 0.2s;
+	flex-shrink: 0;
+}
+
+.split-bar:hover,
+.split-bar:active {
+	background-color: var(--color-accent-fg);
+}

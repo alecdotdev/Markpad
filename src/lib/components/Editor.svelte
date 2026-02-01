@@ -24,6 +24,7 @@
 		onnextTab,
 		onprevTab,
 		onundoClose,
+		onscrollsync,
 		zoomLevel = $bindable(100),
 	} = $props<{
 		value: string;
@@ -39,6 +40,7 @@
 		onnextTab?: () => void;
 		onprevTab?: () => void;
 		onundoClose?: () => void;
+		onscrollsync?: (line: number, ratio?: number) => void;
 		zoomLevel?: number;
 	}>();
 
@@ -98,7 +100,7 @@
 			dragAndDrop: true,
 			automaticLayout: true,
 			minimap: { enabled: settings.minimap },
-			scrollBeyondLastLine: true,
+			scrollBeyondLastLine: false,
 			wordWrap: settings.wordWrap as 'on' | 'off' | 'wordWrapColumn' | 'bounded',
 			lineNumbers: settings.lineNumbers as 'on' | 'off' | 'relative' | 'interval',
 		});
@@ -206,34 +208,6 @@
 			}
 		};
 
-		const toggleList = () => {
-			const selection = editor.getSelection();
-			if (!selection) return;
-
-			const model = editor.getModel();
-			if (!model) return;
-
-			const startLine = selection.startLineNumber;
-			const endLine = selection.endLineNumber;
-			let edits = [];
-
-			for (let i = startLine; i <= endLine; i++) {
-				const lineContent = model.getLineContent(i);
-				if (lineContent.trimStart().startsWith('- ')) {
-					const match = lineContent.match(/^(\s*)-\s/);
-					if (match) {
-						const range = new monaco.Range(i, 1, i, match[0].length + 1);
-						edits.push({ range, text: match[1] }); // replace "- " with original whitespace
-					}
-				} else {
-					// Add
-					const range = new monaco.Range(i, 1, i, 1);
-					edits.push({ range, text: '- ' });
-				}
-			}
-			editor.executeEdits('toggle-list', edits);
-		};
-
 		editor.addAction({
 			id: 'fmt-bold',
 			label: 'Format: Bold',
@@ -333,6 +307,17 @@
 		});
 
 		editor.addAction({
+			id: 'view-toggle-split',
+			label: 'Toggle Split View',
+			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyH],
+			run: () => {
+				if (currentTabId) {
+					tabManager.toggleSplit(currentTabId);
+				}
+			},
+		});
+
+		editor.addAction({
 			id: 'tab-next',
 			label: 'Next Tab',
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Tab],
@@ -394,7 +379,6 @@
 				const ranges = editor.getVisibleRanges();
 				if (ranges.length > 0) {
 					const startLine = ranges[0].startLineNumber;
-					// Anchor to 3rd line
 					const anchorLine = startLine + 2;
 					tabManager.updateTabAnchorLine(currentTabId, anchorLine);
 				}
@@ -402,6 +386,34 @@
 
 			editor.dispose();
 		};
+	});
+
+	$effect(() => {
+		if (editor && onscrollsync) {
+			const emitSync = () => {
+				const position = editor.getPosition();
+				if (position) {
+					const top = editor.getTopForLineNumber(position.lineNumber);
+					const scrollTop = editor.getScrollTop();
+					const layout = editor.getLayoutInfo();
+					const ratio = (top - scrollTop) / layout.height;
+					onscrollsync?.(position.lineNumber, ratio);
+				}
+			};
+
+			const d1 = editor.onDidChangeCursorPosition((e) => {
+				emitSync();
+			});
+			const d2 = editor.onDidScrollChange((e) => {
+				if (e.scrollTopChanged) {
+					emitSync();
+				}
+			});
+			return () => {
+				d1.dispose();
+				d2.dispose();
+			};
+		}
 	});
 
 	$effect(() => {

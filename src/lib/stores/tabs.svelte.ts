@@ -13,6 +13,9 @@ export interface Tab {
 	editorViewState: any; // monaco.editor.ICodeEditorViewState | null
 	scrollPercentage: number;
 	anchorLine: number;
+	isSplit: boolean;
+	splitRatio: number;
+	isScrollSynced: boolean;
 }
 
 class TabManager {
@@ -41,7 +44,10 @@ class TabManager {
 			historyIndex: 0,
 			editorViewState: null,
 			scrollPercentage: 0,
-			anchorLine: 0
+			anchorLine: 0,
+			isSplit: false,
+			splitRatio: 0.5,
+			isScrollSynced: false
 		});
 
 		this.activeTabId = id;
@@ -65,7 +71,10 @@ class TabManager {
 			historyIndex: 0,
 			editorViewState: null,
 			scrollPercentage: 0,
-			anchorLine: 0
+			anchorLine: 0,
+			isSplit: false,
+			splitRatio: 0.5,
+			isScrollSynced: false
 		});
 
 		this.activeTabId = id;
@@ -94,7 +103,10 @@ class TabManager {
 			historyIndex: 0,
 			editorViewState: null,
 			scrollPercentage: 0,
-			anchorLine: 0
+			anchorLine: 0,
+			isSplit: false,
+			splitRatio: 0.5,
+			isScrollSynced: false
 		});
 
 		this.activeTabId = id;
@@ -110,7 +122,8 @@ class TabManager {
 		}
 
 		const tab = this.tabs[index];
-		if (tab.path) {
+		// Don't add HOME to history
+		if (tab.path && tab.path !== 'HOME') {
 			this.recentlyClosed.push(tab.path);
 		}
 		this.tabs.splice(index, 1);
@@ -174,6 +187,27 @@ class TabManager {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
 			tab.anchorLine = line;
+		}
+	}
+
+	toggleSplit(id: string) {
+		const tab = this.tabs.find((t) => t.id === id);
+		if (tab) {
+			tab.isSplit = !tab.isSplit;
+		}
+	}
+
+	setSplitRatio(id: string, ratio: number) {
+		const tab = this.tabs.find((t) => t.id === id);
+		if (tab) {
+			tab.splitRatio = Math.max(0.1, Math.min(0.9, ratio));
+		}
+	}
+
+	toggleScrollSync(id: string) {
+		const tab = this.tabs.find((t) => t.id === id);
+		if (tab) {
+			tab.isScrollSynced = !tab.isScrollSynced;
 		}
 	}
 

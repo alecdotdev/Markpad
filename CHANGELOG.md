@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.4.0
+- Added split view
+- Added scroll sync between editor and viewer
+
 ## v2.3.6
 - Fixed zoom handling in editor
 - Added ARM64 support

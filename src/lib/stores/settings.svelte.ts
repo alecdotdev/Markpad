@@ -1,5 +1,5 @@
 export class SettingsStore {
-	minimap = $state(true);
+	minimap = $state(false);
 	wordWrap = $state('on');
 	lineNumbers = $state('on');
 

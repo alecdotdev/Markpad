@@ -2,6 +2,7 @@
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { onMount, tick, untrack } from 'svelte';
+	import { fly } from 'svelte/transition';
 	import { openUrl } from '@tauri-apps/plugin-opener';
 	import { open, save, ask } from '@tauri-apps/plugin-dialog';
 	import Installer from './Installer.svelte';
@@ -28,10 +29,13 @@
 	let liveMode = $state(false);
 
 	let isDragging = $state(false);
+	let isProgrammaticScroll = false;
 
 	// derived from tab manager
-	let isEditing = $derived(tabManager.activeTab?.isEditing ?? false);
-	let rawContent = $derived(tabManager.activeTab?.rawContent ?? '');
+	let activeTab = $derived(tabManager.activeTab);
+	let isEditing = $derived(activeTab?.isEditing ?? false);
+	let rawContent = $derived(activeTab?.rawContent ?? '');
+	let isSplit = $derived(activeTab?.isSplit ?? false);
 
 	// derived from tab manager
 	let currentFile = $derived(tabManager.activeTab?.path ?? '');
@@ -40,11 +44,14 @@
 	let scrollTop = $derived(tabManager.activeTab?.scrollTop ?? 0);
 	let isScrolled = $derived(scrollTop > 0);
 	let windowTitle = $derived(tabManager.activeTab?.title ?? 'Markpad');
+	let isScrollSynced = $derived(tabManager.activeTab?.isScrollSynced ?? false);
 
 	let showHome = $state(false);
 
 	// ui state
 	let tooltip = $state({ show: false, text: '', x: 0, y: 0 });
+	let caretEl: HTMLElement;
+	let caretAbsoluteTop = 0;
 	let modalState = $state<{
 		show: boolean;
 		title: string;
@@ -116,10 +123,76 @@
 	}
 
 	$effect(() => {
-		// Dismiss home view when switching tabs
 		const _ = tabManager.activeTabId;
 		showHome = false;
 	});
+
+	function processMarkdownHtml(html: string, filePath: string): string {
+		const parser = new DOMParser();
+		const doc = parser.parseFromString(html, 'text/html');
+
+		// resolve relative image paths
+		for (const img of doc.querySelectorAll('img')) {
+			const src = img.getAttribute('src');
+			if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+				img.setAttribute('src', convertFileSrc(resolvePath(filePath, src)));
+			} else if (src && isYoutubeLink(src)) {
+				const videoId = getYoutubeId(src);
+				if (videoId) replaceWithYoutubeEmbed(img, videoId);
+			}
+		}
+
+		// convert youtube links to embeds
+		for (const a of doc.querySelectorAll('a')) {
+			const href = a.getAttribute('href');
+			if (href && isYoutubeLink(href)) {
+				const parent = a.parentElement;
+				if (parent && (parent.tagName === 'P' || parent.tagName === 'DIV') && parent.childNodes.length === 1) {
+					const videoId = getYoutubeId(href);
+					if (videoId) replaceWithYoutubeEmbed(a, videoId);
+				}
+			}
+		}
+
+		// parse gfm alerts
+		for (const bq of doc.querySelectorAll('blockquote')) {
+			const firstP = bq.querySelector('p');
+			if (firstP) {
+				const text = firstP.textContent || '';
+				const match = text.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i);
+				if (match) {
+					const alertIcons: Record<string, string> = {
+						note: '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>',
+						tip: '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.21c-.044-.312-.18-.692-.41-1.025-.23-.333-.524-.681-.797-1.004l-.213-.252C2.962 7.325 2.5 6.395 2.5 5.25c0-2.978 2.304-5.25 5.5-5.25S13.5 2.272 13.5 5.25c0 1.145-.462 2.075-1.087 2.819l-.213.252c-.273.323-.567.671-.797 1.004-.23.333-.366.713-.41 1.025a.75.75 0 0 1-1.484-.21c.084-.594.337-1.079.621-1.49.203-.292.45-.584.673-.848l.214-.253c.56-.679.984-1.32.984-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6.25 14.5h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1 0-1.5Z"></path></svg>',
+						important:
+							'<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>',
+						warning:
+							'<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.03 11.315a1.75 1.75 0 0 1-1.543 2.573H1.97a1.75 1.75 0 0 1-1.543-2.573ZM9 4.25a.75.75 0 0 0-1.5 0V9a.75.75 0 0 0 1.5 0ZM9 11a1 1 0 1 0-2 0 1 1 0 0 0 2 0Z"></path></svg>',
+						caution:
+							'<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .39.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.39.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>',
+					};
+
+					const type = match[1].toLowerCase();
+					const alertDiv = doc.createElement('div');
+					alertDiv.className = `markdown-alert markdown-alert-${type}`;
+
+					const titleP = doc.createElement('p');
+					titleP.className = 'markdown-alert-title';
+					titleP.innerHTML = `${alertIcons[type] || ''} <span>${type.charAt(0).toUpperCase() + type.slice(1)}</span>`;
+
+					alertDiv.appendChild(titleP);
+
+					firstP.textContent = text.replace(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i, '').trim() || '';
+					if (firstP.textContent === '' && firstP.nextSibling) firstP.remove();
+
+					while (bq.firstChild) alertDiv.appendChild(bq.firstChild);
+					bq.replaceWith(alertDiv);
+				}
+			}
+		}
+
+		return doc.body.innerHTML;
+	}
 
 	async function loadMarkdown(filePath: string, options: { navigate?: boolean; skipTabManagement?: boolean } = {}) {
 		showHome = false;
@@ -146,71 +219,8 @@
 			if (isMarkdown) {
 				if (tab) tab.isEditing = false;
 				const html = (await invoke('open_markdown', { path: filePath })) as string;
-
-				const parser = new DOMParser();
-				const doc = parser.parseFromString(html, 'text/html');
-
-				// resolve relative image paths
-				for (const img of doc.querySelectorAll('img')) {
-					const src = img.getAttribute('src');
-					if (src && !src.startsWith('http') && !src.startsWith('data:')) {
-						img.setAttribute('src', convertFileSrc(resolvePath(filePath, src)));
-					} else if (src && isYoutubeLink(src)) {
-						const videoId = getYoutubeId(src);
-						if (videoId) replaceWithYoutubeEmbed(img, videoId);
-					}
-				}
-
-				// convert youtube links to embeds
-				for (const a of doc.querySelectorAll('a')) {
-					const href = a.getAttribute('href');
-					if (href && isYoutubeLink(href)) {
-						const parent = a.parentElement;
-						if (parent && (parent.tagName === 'P' || parent.tagName === 'DIV') && parent.childNodes.length === 1) {
-							const videoId = getYoutubeId(href);
-							if (videoId) replaceWithYoutubeEmbed(a, videoId);
-						}
-					}
-				}
-
-				// parse gfm alerts
-				for (const bq of doc.querySelectorAll('blockquote')) {
-					const firstP = bq.querySelector('p');
-					if (firstP) {
-						const text = firstP.textContent || '';
-						const match = text.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i);
-						if (match) {
-							const alertIcons: Record<string, string> = {
-								note: '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>',
-								tip: '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.21c-.044-.312-.18-.692-.41-1.025-.23-.333-.524-.681-.797-1.004l-.213-.252C2.962 7.325 2.5 6.395 2.5 5.25c0-2.978 2.304-5.25 5.5-5.25S13.5 2.272 13.5 5.25c0 1.145-.462 2.075-1.087 2.819l-.213.252c-.273.323-.567.671-.797 1.004-.23.333-.366.713-.41 1.025a.75.75 0 0 1-1.484-.21c.084-.594.337-1.079.621-1.49.203-.292.45-.584.673-.848l.214-.253c.56-.679.984-1.32.984-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6.25 14.5h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1 0-1.5Z"></path></svg>',
-								important:
-									'<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>',
-								warning:
-									'<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.03 11.315a1.75 1.75 0 0 1-1.543 2.573H1.97a1.75 1.75 0 0 1-1.543-2.573ZM9 4.25a.75.75 0 0 0-1.5 0V9a.75.75 0 0 0 1.5 0ZM9 11a1 1 0 1 0-2 0 1 1 0 0 0 2 0Z"></path></svg>',
-								caution:
-									'<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .39.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.39.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>',
-							};
-
-							const type = match[1].toLowerCase();
-							const alertDiv = doc.createElement('div');
-							alertDiv.className = `markdown-alert markdown-alert-${type}`;
-
-							const titleP = doc.createElement('p');
-							titleP.className = 'markdown-alert-title';
-							titleP.innerHTML = `${alertIcons[type] || ''} <span>${type.charAt(0).toUpperCase() + type.slice(1)}</span>`;
-
-							alertDiv.appendChild(titleP);
-
-							firstP.textContent = text.replace(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i, '').trim() || '';
-							if (firstP.textContent === '' && firstP.nextSibling) firstP.remove();
-
-							while (bq.firstChild) alertDiv.appendChild(bq.firstChild);
-							bq.replaceWith(alertDiv);
-						}
-					}
-				}
-
-				tabManager.updateTabContent(activeId, doc.body.innerHTML);
+				const processedInfo = processMarkdownHtml(html, filePath);
+				tabManager.updateTabContent(activeId, processedInfo);
 			} else {
 				if (tab) tab.isEditing = true;
 				const content = (await invoke('read_file_content', { path: filePath })) as string;
@@ -271,7 +281,7 @@
 				if (tab) {
 					let scrolled = false;
 
-					if (tab.anchorLine > 0) {
+					if (markdownBody && tab.anchorLine > 0) {
 						// Interpolated Restore
 						// Find element containing the anchor line
 						const children = Array.from(markdownBody.children) as HTMLElement[];
@@ -303,7 +313,7 @@
 						}
 					}
 
-					if (!scrolled) {
+					if (!scrolled && markdownBody) {
 						if (markdownBody.scrollHeight > markdownBody.clientHeight && tab.scrollPercentage > 0) {
 							const targetScroll = tab.scrollPercentage * (markdownBody.scrollHeight - markdownBody.clientHeight);
 							markdownBody.scrollTop = targetScroll;
@@ -316,10 +326,63 @@
 		}
 	});
 
-	// ... (helper functions if needed) ...
+	function scrollToLine(line: number, ratio: number = 0) {
+		if (!markdownBody) return;
+
+		const children = Array.from(markdownBody.children) as HTMLElement[];
+		for (const el of children) {
+			const sourcepos = el.dataset.sourcepos;
+			if (sourcepos) {
+				const [start, end] = sourcepos.split('-');
+				const startLine = parseInt(start.split(':')[0]);
+				const endLine = parseInt(end.split(':')[0]);
+
+				if (!isNaN(startLine) && !isNaN(endLine)) {
+					if (line >= startLine && line <= endLine) {
+						const totalLines = endLine - startLine;
+						let lineRatio = 0;
+						if (totalLines > 0) {
+							lineRatio = (line - startLine) / totalLines;
+						}
+						lineRatio = Math.max(0, Math.min(1, lineRatio));
+
+						const elementTop = el.offsetTop + el.offsetHeight * lineRatio;
+
+						const viewportHeight = markdownBody.clientHeight;
+						const targetScroll = elementTop - viewportHeight * ratio;
+
+						if (Math.abs(markdownBody.scrollTop - targetScroll) > 5) {
+							isProgrammaticScroll = true;
+							markdownBody.scrollTop = Math.max(0, targetScroll);
+						}
+						return;
+					}
+				}
+			}
+		}
+	}
+
+	function handleEditorScrollSync(line: number, ratio: number = 0) {
+		if (tabManager.activeTab?.isScrollSynced) {
+			scrollToLine(line, ratio);
+		}
+	}
 
 	function handleScroll(e: Event) {
 		const target = e.target as HTMLElement;
+
+		if (isProgrammaticScroll) {
+			isProgrammaticScroll = false;
+			if (tabManager.activeTabId) {
+				tabManager.updateTabScroll(tabManager.activeTabId, target.scrollTop);
+			}
+			return;
+		}
+
+		if (tabManager.activeTab?.isScrollSynced) {
+			tabManager.toggleScrollSync(tabManager.activeTab.id);
+		}
+
 		if (tabManager.activeTabId) {
 			// Update raw scroll pos
 			tabManager.updateTabScroll(tabManager.activeTabId, target.scrollTop);
@@ -483,7 +546,7 @@
 
 	async function saveContent(): Promise<boolean> {
 		const tab = tabManager.activeTab;
-		if (!tab || !tab.isEditing) return false;
+		if (!tab || (!tab.isEditing && !tab.isSplit)) return false;
 
 		let targetPath = tab.path;
 
@@ -636,52 +699,94 @@
 		}
 	}
 
+	let debounceTimer: number;
+
+	$effect(() => {
+		const tab = tabManager.activeTab;
+		if (tab && tab.isSplit && tab.rawContent !== undefined) {
+			clearTimeout(debounceTimer);
+			debounceTimer = setTimeout(() => {
+				invoke('render_markdown', { content: tab.rawContent })
+					.then((html) => {
+						const processed = processMarkdownHtml(html as string, tab.path);
+						tabManager.updateTabContent(tab.id, processed);
+						tick().then(renderRichContent);
+					})
+					.catch(console.error);
+			}, 16);
+		}
+	});
+
+	async function toggleSplitView(tabId: string) {
+		const tab = tabManager.tabs.find((t) => t.id === tabId);
+		if (!tab) return;
+
+		if (!tab.isSplit) {
+			if (!tab.isEditing && !tab.rawContent && tab.path) {
+				try {
+					const content = (await invoke('read_file_content', { path: tab.path })) as string;
+					tab.rawContent = content;
+					tab.originalContent = content;
+				} catch (e) {
+					console.error('Failed to load raw content for split view', e);
+				}
+			}
+			tab.isSplit = true;
+			if (liveMode) toggleLiveMode();
+		} else {
+			tab.isSplit = false;
+		}
+	}
+
 	function handleKeyDown(e: KeyboardEvent) {
 		if (mode !== 'app') return;
 
 		const cmdOrCtrl = e.ctrlKey || e.metaKey;
+		const key = e.key.toLowerCase();
+		const code = e.code;
 
-		if (cmdOrCtrl && e.key === 'w') {
+		const isSplit = tabManager.activeTab?.isSplit;
+
+		if (cmdOrCtrl && key === 'w') {
 			e.preventDefault();
 			closeFile();
 		}
-		if (cmdOrCtrl && e.key === 't') {
+		if (cmdOrCtrl && !e.shiftKey && key === 't') {
 			e.preventDefault();
 			tabManager.addHomeTab();
 		}
-		// Edit toggle
-		if (cmdOrCtrl && e.key === 'e') {
+		if (cmdOrCtrl && key === 'h') {
 			e.preventDefault();
-			toggleEdit(true);
+			if (tabManager.activeTabId) toggleSplitView(tabManager.activeTabId);
 		}
-		// Save
-		if (cmdOrCtrl && e.key === 's') {
-			// e.preventDefault(); // Don't prevent default blindly?
-			// If we are in edit mode, Editor.svelte handles it usually, but if focus is not in editor...
-			if (isEditing) {
+		if (cmdOrCtrl && key === 'e') {
+			e.preventDefault();
+			if (!isSplit) toggleEdit(true);
+		}
+		if (cmdOrCtrl && key === 's') {
+			if (isEditing || isSplit) {
 				e.preventDefault();
 				saveContent();
 			}
 		}
 
-		if (cmdOrCtrl && e.shiftKey && e.key === 'T') {
+		if (cmdOrCtrl && e.shiftKey && key === 't') {
 			e.preventDefault();
 			handleUndoCloseTab();
 		}
-		if (cmdOrCtrl && e.key === 'Tab') {
+		if (cmdOrCtrl && code === 'Tab') {
 			e.preventDefault();
 			tabManager.cycleTab(e.shiftKey ? 'prev' : 'next');
 		}
-		// Zoom shortcuts
-		if (cmdOrCtrl && (e.key === '=' || e.key === '+')) {
+		if (cmdOrCtrl && (key === '=' || key === '+')) {
 			e.preventDefault();
 			zoomLevel = Math.min(zoomLevel + 10, 500);
 		}
-		if (cmdOrCtrl && e.key === '-') {
+		if (cmdOrCtrl && key === '-') {
 			e.preventDefault();
 			zoomLevel = Math.max(zoomLevel - 10, 25);
 		}
-		if (cmdOrCtrl && e.key === '0') {
+		if (cmdOrCtrl && key === '0') {
 			e.preventDefault();
 			zoomLevel = 100;
 		}
@@ -728,6 +833,55 @@
 			width: 1000,
 			height: 800,
 		});
+	}
+
+	function startDrag(e: MouseEvent, tabId: string | null) {
+		if (!tabId) return;
+		e.preventDefault();
+		const startX = e.clientX;
+		const tab = tabManager.tabs.find((t) => t.id === tabId);
+		if (!tab) return;
+
+		const startRatio = tab.splitRatio ?? 0.5;
+		const containerWidth = window.innerWidth;
+
+		const onMove = (moveEvent: MouseEvent) => {
+			const deltaX = moveEvent.clientX - startX;
+			const deltaRatio = deltaX / containerWidth;
+			tabManager.setSplitRatio(tabId, startRatio + deltaRatio);
+		};
+
+		const onUp = () => {
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+			document.body.style.cursor = '';
+		};
+
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
+		document.body.style.cursor = 'col-resize';
+	}
+
+	function getSplitTransition(node: Element, { isEditing, side }: { isEditing: boolean; side: 'left' | 'right' }) {
+		let shouldAnimate = false;
+		let x = 0;
+
+		if (side === 'left') {
+			if (!isEditing) {
+				shouldAnimate = true;
+				x = -50;
+			}
+		} else {
+			if (isEditing) {
+				shouldAnimate = true;
+				x = 50;
+			}
+		}
+
+		if (shouldAnimate) {
+			return fly(node, { x, duration: 250 });
+		}
+		return { duration: 0 };
 	}
 
 	onMount(() => {
@@ -800,7 +954,7 @@
 							localStorage.setItem('recent-files', JSON.stringify(recentFiles));
 						} catch (e) {
 							console.error('Failed to rename file', e);
-							await ask(`Failed to rename file: ${e}`, { title: 'Error', kind: 'error' });
+							await askCustom(`Failed to rename file: ${e}`, { title: 'Error', kind: 'error' });
 						}
 					}
 				}),
@@ -940,6 +1094,7 @@
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
 		ontoggleEdit={() => toggleEdit()}
+		ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 		{isEditing}
 		ondetach={handleDetach}
 		ontabclick={() => (showHome = false)}
@@ -972,6 +1127,7 @@
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
 		ontoggleEdit={() => toggleEdit()}
+		ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 		{isEditing}
 		ondetach={handleDetach}
 		ontabclick={() => (showHome = false)}
@@ -980,32 +1136,47 @@
 			canCloseTab(id).then((can) => {
 				if (can) tabManager.closeTab(id);
 			});
-		}} />
+		}}
+		{isScrollSynced}
+		ontoggleSync={() => tabManager.activeTabId && tabManager.toggleScrollSync(tabManager.activeTabId)} />
 
 	{#if tabManager.activeTab && (tabManager.activeTab.path !== '' || tabManager.activeTab.title !== 'Recents') && !showHome}
 		{#key tabManager.activeTabId}
-			<div class="markdown-container" style="zoom: {isEditing ? 1 : zoomLevel / 100}" onwheel={handleWheel} role="presentation">
-				{#if isEditing}
-					<div class="editor-wrapper">
-						<Editor
-							bind:value={tabManager.activeTab.rawContent}
-							language={editorLanguage}
-							onsave={saveContent}
-							bind:zoomLevel
-							onnew={handleNewFile}
-							onopen={selectFile}
-							onclose={closeFile}
-							onreveal={openFileLocation}
-							ontoggleEdit={() => toggleEdit()}
-							ontoggleLive={toggleLiveMode}
-							onhome={() => (showHome = true)}
-							onnextTab={() => tabManager.cycleTab('next')}
-							onprevTab={() => tabManager.cycleTab('prev')}
-							onundoClose={handleUndoCloseTab} />
+			<div class="markdown-container" style="zoom: {isEditing && !isSplit ? 1 : zoomLevel / 100}" onwheel={handleWheel} role="presentation">
+				<div class="layout-container" class:split={isSplit} class:editing={isEditing}>
+					<!-- Editor Pane -->
+					<div class="pane editor-pane" class:active={isEditing || isSplit} style="flex: {isSplit ? tabManager.activeTab.splitRatio : isEditing ? 1 : 0}">
+						{#if isEditing || isSplit}
+							<Editor
+								bind:value={tabManager.activeTab.rawContent}
+								language={editorLanguage}
+								onsave={saveContent}
+								bind:zoomLevel
+								onnew={handleNewFile}
+								onopen={selectFile}
+								onclose={closeFile}
+								onreveal={openFileLocation}
+								ontoggleEdit={() => toggleEdit()}
+								ontoggleLive={toggleLiveMode}
+								onhome={() => (showHome = true)}
+								onnextTab={() => tabManager.cycleTab('next')}
+								onprevTab={() => tabManager.cycleTab('prev')}
+								onundoClose={handleUndoCloseTab}
+								onscrollsync={handleEditorScrollSync} />
+						{/if}
 					</div>
-				{:else}
-					<article bind:this={markdownBody} contenteditable="false" class="markdown-body" bind:innerHTML={htmlContent} onscroll={handleScroll}></article>
-				{/if}
+
+					<!-- Splitter -->
+					{#if isSplit}
+						<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+						<div class="split-bar" onmousedown={(e) => startDrag(e, tabManager.activeTabId)} role="separator" aria-orientation="vertical" tabindex="0"></div>
+					{/if}
+
+					<!-- Viewer Pane -->
+					<div class="pane viewer-pane" class:active={!isEditing || isSplit} style="flex: {isSplit ? 1 - tabManager.activeTab.splitRatio : !isEditing ? 1 : 0}">
+						<article bind:this={markdownBody} contenteditable="false" class="markdown-body" bind:innerHTML={htmlContent} onscroll={handleScroll}></article>
+					</div>
+				</div>
 			</div>
 		{/key}
 	{:else}
@@ -1069,21 +1240,39 @@
 	.markdown-body {
 		box-sizing: border-box;
 		min-width: 200px;
-		margin: 36px 0px 0px 0px;
+		margin: 0;
 		padding: 50px clamp(calc(calc(50% - 390px)), 5vw, 50px);
-		height: calc(100vh - 36px);
+		height: 100%;
 		overflow-y: auto;
-		animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+		transform: translate3d(0, 0, 0); /* Create stacking context */
+	}
+
+	.caret-indicator {
+		position: absolute;
+		height: 2px;
+		background-color: #0078d4;
+		width: 100%;
+		left: 0;
+		right: 0;
+		pointer-events: none;
+		z-index: 100;
+		opacity: 0.8;
+		transform: translateY(2px); /* visual adjustment */
+	}
+
+	/* Disable animation in split view to prevent jumpiness */
+	.split-view .markdown-body {
+		animation: none;
 	}
 
 	@keyframes slideIn {
 		from {
 			opacity: 0;
-			margin-top: 48px;
+			transform: translateY(12px);
 		}
 		to {
 			opacity: 1;
-			margin-top: 36px;
+			transform: translateY(0);
 		}
 	}
 
@@ -1233,5 +1422,87 @@
 			stroke-dasharray: 90, 150;
 			stroke-dashoffset: -124;
 		}
+	}
+	/* Layout System */
+	.layout-container {
+		display: flex;
+		width: 100%;
+		height: 100%;
+		position: absolute;
+		top: 0;
+		left: 0;
+		padding-top: 36px;
+		box-sizing: border-box;
+		overflow: hidden;
+	}
+
+	.pane {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		transition:
+			flex 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+			transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+		min-width: 0;
+	}
+
+	.pane.editor-pane {
+		background: var(--color-canvas-default);
+	}
+
+	.pane.viewer-pane {
+		background: var(--color-canvas-default);
+	}
+
+	/* View Mode */
+	.layout-container:not(.split):not(.editing) .editor-pane {
+		width: 0 !important;
+		flex: 0 !important;
+		opacity: 0;
+	}
+
+	.layout-container:not(.split):not(.editing) .viewer-pane {
+		width: 100%;
+		flex: 1 !important;
+	}
+
+	/* Edit Mode */
+	.layout-container:not(.split).editing .editor-pane {
+		width: 100%;
+		flex: 1 !important;
+	}
+
+	.layout-container:not(.split).editing .viewer-pane {
+		width: 0 !important;
+		flex: 0 !important;
+		opacity: 0;
+	}
+
+	/* Split Mode Transition Logic */
+	/* Editor slides in from left */
+	/* Viewer slides right */
+
+	.pane {
+		height: 100%;
+		position: relative;
+	}
+
+	.split-bar {
+		width: 4px;
+		background: var(--color-border-default);
+		cursor: col-resize;
+		position: relative;
+		z-index: 100;
+		transition: background 0.2s;
+	}
+
+	.split-bar:hover {
+		background: var(--color-accent-fg);
+	}
+
+	.editor-wrapper {
+		/* Legacy mapping */
+		width: 100%;
+		height: 100%;
 	}
 </style>

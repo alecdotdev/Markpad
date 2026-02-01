@@ -2,6 +2,7 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { invoke } from '@tauri-apps/api/core';
 	import { fly, slide } from 'svelte/transition';
+	import { flip } from 'svelte/animate';
 	import iconUrl from '../../assets/icon.png';
 	import TabList from './TabList.svelte';
 	import { tabManager } from '../stores/tabs.svelte.js';
@@ -20,12 +21,15 @@
 		ontoggleLiveMode,
 
 		ontoggleEdit,
+		ontoggleSplit,
 		isEditing,
 		ondetach,
 		ontabclick,
 		zoomLevel,
 		onresetZoom,
 		oncloseTab,
+		isScrollSynced,
+		ontoggleSync,
 	} = $props<{
 		isFocused: boolean;
 		isScrolled: boolean;
@@ -40,12 +44,16 @@
 		ontoggleLiveMode: () => void;
 
 		ontoggleEdit: () => void;
+		ontoggleSplit?: () => void;
 		isEditing: boolean;
 		ondetach: (tabId: string) => void;
 		ontabclick?: () => void;
 		zoomLevel?: number;
 		onresetZoom?: () => void;
+
 		oncloseTab?: (id: string) => void;
+		isScrollSynced?: boolean;
+		ontoggleSync?: () => void;
 	}>();
 
 	const appWindow = getCurrentWindow();
@@ -65,6 +73,68 @@
 			.catch(() => {
 				isWin11 = false;
 			});
+	});
+
+	let tooltip = $state({
+		visible: false,
+		text: '',
+		shortcut: '',
+		x: 0,
+		y: 0,
+		align: 'center' as 'left' | 'center' | 'right',
+	});
+
+	function showTooltip(e: MouseEvent, text: string, shortcutKey: string = '') {
+		const target = e.currentTarget as HTMLElement;
+		const rect = target.getBoundingClientRect();
+		const modifier = isMac ? 'Cmd' : 'Ctrl';
+		const windowWidth = window.innerWidth;
+		const edgeThreshold = 100;
+
+		tooltip.text = text;
+		tooltip.shortcut = shortcutKey ? `${modifier}+${shortcutKey}` : '';
+
+		if (rect.left < edgeThreshold) {
+			tooltip.align = 'left';
+			tooltip.x = rect.left;
+		} else if (rect.right > windowWidth - edgeThreshold) {
+			tooltip.align = 'right';
+			tooltip.x = rect.right;
+		} else {
+			tooltip.align = 'center';
+			tooltip.x = rect.left + rect.width / 2;
+		}
+
+		tooltip.y = rect.bottom + 8;
+		tooltip.visible = true;
+	}
+
+	function hideTooltip() {
+		tooltip.visible = false;
+	}
+
+	let visibleActionIds = $derived.by(() => {
+		const list: string[] = [];
+		if (zoomLevel && zoomLevel !== 100) list.push('zoom');
+
+		if (currentFile && !showHome) {
+			list.push('open_loc');
+			const ext = currentFile.split('.').pop()?.toLowerCase() || '';
+			const isMarkdown = ['md', 'markdown', 'mdown', 'mkd'].includes(ext);
+
+			if (isMarkdown) {
+				list.push('split');
+				if (tabManager.activeTab?.isSplit) {
+					list.push('sync');
+				} else if (!isEditing) {
+					list.push('live');
+				}
+				if (!tabManager.activeTab?.isSplit) {
+					list.push('edit');
+				}
+			}
+		}
+		return list;
 	});
 </script>
 
@@ -87,7 +157,7 @@
 				</button>
 			</div>
 		{/if}
-		<button class="icon-home-btn {showHome ? 'active' : ''}" onclick={ontoggleHome} aria-label="Go to Home" title="Go to home">
+		<button class="icon-home-btn {showHome ? 'active' : ''}" onclick={ontoggleHome} aria-label="Home" onmouseenter={(e) => showTooltip(e, 'Home')} onmouseleave={hideTooltip}>
 			<img src={iconUrl} alt="icon" class="window-icon" />
 		</button>
 	</div>
@@ -107,46 +177,89 @@
 	{/if}
 
 	<div class="title-actions" data-tauri-drag-region>
-		{#if zoomLevel && zoomLevel !== 100}
-			<button class="zoom-indicator" onclick={onresetZoom} transition:fly={{ y: -10, duration: 150 }} aria-label="Reset Zoom" title="Reset zoom">
-				{zoomLevel}%
-			</button>
-		{/if}
-		{#if currentFile}
-			{@const ext = currentFile.split('.').pop()?.toLowerCase() || ''}
-			{@const isMarkdown = ['md', 'markdown', 'mdown', 'mkd'].includes(ext)}
-			<div class="actions-wrapper" transition:slide={{ axis: 'x', duration: 200 }}>
-				<button class="title-action-btn" onclick={ononpenFileLocation} aria-label="Open File Location" title="Open folder" transition:fly={{ x: 10, duration: 100, delay: 0 }}>
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-						><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><polyline points="15 13 18 13 18 10"></polyline><line
-							x1="14"
-							y1="14"
-							x2="18"
-							y2="10"></line
-						></svg>
-				</button>
-				{#if isMarkdown}
+		{#each visibleActionIds as id (id)}
+			<div animate:flip={{ duration: 250 }} class="action-btn-wrapper">
+				{#if id === 'zoom'}
+					<button
+						class="zoom-indicator"
+						onclick={onresetZoom}
+						transition:fly={{ y: -10, duration: 150 }}
+						aria-label="Reset Zoom"
+						onmouseenter={(e) => showTooltip(e, 'Reset zoom')}
+						onmouseleave={hideTooltip}>
+						{zoomLevel}%
+					</button>
+				{:else if id === 'open_loc'}
+					<button
+						class="title-action-btn"
+						onclick={ononpenFileLocation}
+						aria-label="Open File Location"
+						onmouseenter={(e) => showTooltip(e, 'Open file location')}
+						onmouseleave={hideTooltip}
+						transition:fly={{ x: 10, duration: 200 }}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><polyline points="15 13 18 13 18 10"></polyline><line
+								x1="14"
+								y1="14"
+								x2="18"
+								y2="10"></line
+							></svg>
+					</button>
+				{:else if id === 'split'}
+					<button
+						class="title-action-btn {tabManager.activeTab?.isSplit ? 'active' : ''}"
+						onclick={() => ontoggleSplit?.()}
+						aria-label="Toggle Split View"
+						onmouseenter={(e) => showTooltip(e, 'Split view', 'H')}
+						onmouseleave={hideTooltip}
+						transition:fly={{ x: 10, duration: 200 }}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line><rect
+								x="13"
+								y="2"
+								width="9"
+								height="20"
+								rx="2"
+								ry="2"
+								transform="rotate(0 13 2)"></rect
+							></svg>
+					</button>
+				{:else if id === 'sync'}
+					<button
+						class="title-action-btn {isScrollSynced ? 'active' : ''}"
+						onclick={() => ontoggleSync?.()}
+						aria-label="Toggle Scroll Sync"
+						onmouseenter={(e) => showTooltip(e, 'Scroll sync')}
+						onmouseleave={hideTooltip}
+						transition:fly={{ x: 10, duration: 200 }}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+					</button>
+				{:else if id === 'live'}
 					<button
 						class="title-action-btn {liveMode ? 'active' : ''}"
 						onclick={ontoggleLiveMode}
-						aria-label="Toggle Live Mode"
-						title="Live update mode"
-						transition:fly={{ x: 20, duration: 100, delay: 50 }}>
+						aria-label="Toggle Live Mode "
+						onmouseenter={(e) => showTooltip(e, 'Watcher mode')}
+						onmouseleave={hideTooltip}
+						transition:fly={{ x: 10, duration: 200 }}>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 							><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0z" /><circle cx="12" cy="12" r="3" /></svg>
 					</button>
+				{:else if id === 'edit'}
 					<button
 						class="title-action-btn {isEditing ? 'active' : ''}"
 						onclick={ontoggleEdit}
-						aria-label="Edit File"
-						title="Edit file"
-						transition:fly={{ x: 30, duration: 100, delay: 100 }}>
+						aria-label="Edit File (Ctrl+E)"
+						onmouseenter={(e) => showTooltip(e, 'Edit file', 'E')}
+						onmouseleave={hideTooltip}
+						transition:fly={{ x: 10, duration: 200 }}>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 							><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
 					</button>
 				{/if}
 			</div>
-		{/if}
+		{/each}
 	</div>
 
 	<div class="window-controls-right" data-tauri-drag-region>
@@ -168,6 +281,13 @@
 			</button>
 		{/if}
 	</div>
+</div>
+
+<div class="custom-tooltip {tooltip.visible ? 'visible' : ''} align-{tooltip.align}" style="left: {tooltip.x}px; top: {tooltip.y}px;">
+	<span class="tooltip-text">{tooltip.text}</span>
+	{#if tooltip.shortcut}
+		<span class="tooltip-shortcut">{tooltip.shortcut}</span>
+	{/if}
 </div>
 
 <style>
@@ -231,7 +351,6 @@
 	.actions-wrapper {
 		display: flex;
 		gap: 4px;
-		overflow: hidden; /* Essential for slide to work */
 	}
 
 	.title-action-btn {
@@ -431,5 +550,64 @@
 
 	.mac-btn:active {
 		filter: brightness(0.9);
+	}
+
+	.custom-tooltip {
+		position: fixed;
+		background: var(--color-canvas-overlay);
+		color: var(--color-fg-default);
+		padding: 4px 8px;
+		border-radius: 6px;
+		font-size: 11px;
+		font-family: var(--win-font), 'Segoe UI', sans-serif;
+		pointer-events: none;
+		z-index: 10005;
+		transform: translateX(-50%) translateY(-4px);
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+		border: 1px solid var(--color-border-default);
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		white-space: nowrap;
+		gap: 2px;
+		opacity: 0;
+		transition:
+			opacity 0.15s ease,
+			transform 0.15s ease,
+			width 0.2s cubic-bezier(0.2, 0, 0.2, 1),
+			height 0.2s cubic-bezier(0.2, 0, 0.2, 1);
+	}
+
+	/* Alignment Base Transforms (Hidden State) */
+	.custom-tooltip.align-center {
+		transform: translateX(-50%) translateY(-4px);
+	}
+	.custom-tooltip.align-left {
+		transform: translateX(0) translateY(-4px);
+		align-items: flex-start;
+	}
+	.custom-tooltip.align-right {
+		transform: translateX(-100%) translateY(-4px);
+		align-items: flex-end;
+	}
+
+	/* Alignment Visible Transforms */
+	.custom-tooltip.visible {
+		opacity: 1;
+	}
+	.custom-tooltip.visible.align-center {
+		transform: translateX(-50%) translateY(0);
+	}
+	.custom-tooltip.visible.align-left {
+		transform: translateX(0) translateY(0);
+	}
+	.custom-tooltip.visible.align-right {
+		transform: translateX(-100%) translateY(0);
+	}
+
+	.tooltip-shortcut {
+		color: var(--color-fg-muted);
+		font-size: 10px;
+		font-family: inherit;
 	}
 </style>
