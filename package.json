@@ -17,6 +17,8 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.5.0",
     "@tauri-apps/plugin-opener": "^2",
+    "@types/dompurify": "^3.0.5",
+    "dompurify": "^3.3.1",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.27",
     "monaco-editor": "^0.55.1"

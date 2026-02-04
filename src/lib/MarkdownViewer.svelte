@@ -11,6 +11,7 @@
 	import Editor from './components/Editor.svelte';
 	import Modal from './components/Modal.svelte';
 
+	import DOMPurify from 'dompurify';
 	import HomePage from './components/HomePage.svelte';
 	import { tabManager } from './stores/tabs.svelte.js';
 
@@ -41,6 +42,7 @@
 	let currentFile = $derived(tabManager.activeTab?.path ?? '');
 	let editorLanguage = $derived(getLanguage(currentFile));
 	let htmlContent = $derived(tabManager.activeTab?.content ?? '');
+	let sanitizedHtml = $derived(DOMPurify.sanitize(htmlContent));
 	let scrollTop = $derived(tabManager.activeTab?.scrollTop ?? 0);
 	let isScrolled = $derived(scrollTop > 0);
 	let windowTitle = $derived(tabManager.activeTab?.title ?? 'Markpad');
