@@ -36,7 +36,7 @@ fn convert_markdown(content: &str) -> String {
         },
         ..ComrakOptions::default()
     };
-    options.render.unsafe_ = true;
+    options.render.unsafe_ = false;
     options.render.hardbreaks = true;
     options.render.sourcepos = true;
 
