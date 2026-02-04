@@ -18,6 +18,7 @@
 	// syntax highlighting & latex
 	let hljs: any = $state(null);
 	let renderMathInElement: any = $state(null);
+	let mermaid: any = $state(null);
 
 	import 'highlight.js/styles/github-dark.css';
 	import 'katex/dist/katex.min.css';
@@ -241,24 +242,65 @@
 	async function renderRichContent() {
 		if (!markdownBody) return;
 
-		if (!hljs || !renderMathInElement) return;
+		if (!hljs || !renderMathInElement || !mermaid) return;
 
-		markdownBody.querySelectorAll('pre code').forEach((block) => {
-			hljs.highlightElement(block as HTMLElement);
+		// Initialize Mermaid with theme based on system preference
+		const isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
+		mermaid.initialize({ startOnLoad: false, theme: isDarkMode ? 'dark' : 'neutral' });
 
-			const pre = block.parentElement;
-			if (pre && pre.tagName === 'PRE') {
-				pre.querySelectorAll('.lang-label').forEach((l) => l.remove());
-				const langClass = Array.from(block.classList).find((c) => c.startsWith('language-'));
+		// Process code blocks
+		const codeBlocks = Array.from(markdownBody.querySelectorAll('pre code'));
+		for (const block of codeBlocks) {
+			const codeEl = block as HTMLElement;
+			const preEl = codeEl.parentElement as HTMLPreElement;
+
+			// Check for Mermaid blocks
+			if (codeEl.classList.contains('language-mermaid')) {
+				try {
+					const mermaidCode = codeEl.textContent || '';
+					const id = `mermaid-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+					// Render the diagram
+					const { svg } = await mermaid.render(id, mermaidCode);
+
+					// Create container and replace the <pre> block
+					const container = document.createElement('div');
+					container.className = 'mermaid-diagram';
+					// Allow foreignObject for Mermaid text rendering
+					container.innerHTML = DOMPurify.sanitize(svg, {
+						ADD_TAGS: ['foreignObject'],
+						ADD_ATTR: ['dominant-baseline', 'text-anchor']
+					});
+					preEl.replaceWith(container);
+				} catch (error) {
+					console.error('Failed to render Mermaid diagram:', error);
+					// Display error in place of diagram
+					const errorDiv = document.createElement('div');
+					errorDiv.className = 'mermaid-error';
+					errorDiv.style.color = 'red';
+					errorDiv.style.padding = '1em';
+					errorDiv.textContent = `Error rendering Mermaid diagram: ${error}`;
+					preEl.replaceWith(errorDiv);
+				}
+				continue; // Skip highlight.js for this block
+			}
+
+			// Existing highlight.js logic
+			hljs.highlightElement(codeEl);
+
+			if (preEl && preEl.tagName === 'PRE') {
+				preEl.querySelectorAll('.lang-label').forEach((l) => l.remove());
+				const langClass = Array.from(codeEl.classList).find((c) => c.startsWith('language-'));
 				if (langClass) {
 					const label = document.createElement('span');
 					label.className = 'lang-label';
 					label.textContent = langClass.replace('language-', '');
-					pre.appendChild(label);
+					preEl.appendChild(label);
 				}
 			}
-		});
+		}
 
+		// KaTeX math rendering
 		renderMathInElement(markdownBody, {
 			delimiters: [
 				{ left: '$$', right: '$$', display: true },
@@ -271,7 +313,7 @@
 	}
 
 	$effect(() => {
-		if (htmlContent && markdownBody && !isEditing && hljs && renderMathInElement) renderRichContent();
+		if (htmlContent && markdownBody && !isEditing && hljs && renderMathInElement && mermaid) renderRichContent();
 	});
 
 	$effect(() => {
@@ -892,9 +934,10 @@
 		loadRecentFiles();
 
 		// @ts-ignore
-		Promise.all([import('highlight.js'), import('katex/dist/contrib/auto-render')]).then(([hljsModule, katexModule]) => {
+		Promise.all([import('highlight.js'), import('katex/dist/contrib/auto-render'), import('mermaid')]).then(([hljsModule, katexModule, mermaidModule]) => {
 			hljs = hljsModule.default;
 			renderMathInElement = katexModule.default;
+			mermaid = mermaidModule.default;
 		});
 
 		let unlisteners: (() => void)[] = [];
@@ -1296,6 +1339,18 @@
 		width: 100%;
 		height: 100%;
 		border-radius: 8px;
+	}
+
+	:global(.mermaid-diagram) {
+		margin: 1em 0;
+		display: flex;
+		justify-content: center;
+		overflow-x: auto;
+	}
+
+	:global(.mermaid-diagram svg) {
+		max-width: 100%;
+		height: auto;
 	}
 
 	.tooltip {
