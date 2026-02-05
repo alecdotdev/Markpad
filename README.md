@@ -14,6 +14,7 @@ Download from [markpad.sftwr.dev](https://markpad.sftwr.dev)
 - Split view
 - Syntax highlighting both in editor and code blocks
 - Mermaid diagram support
+- Vim mode
 - Image and YouTube embeds
 - Familiar GitHub styled markdown rendering
 - Tiny memory usage (~10MB)

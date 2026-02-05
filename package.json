@@ -22,7 +22,8 @@
     "highlight.js": "^11.11.1",
     "katex": "^0.16.27",
     "mermaid": "^11.12.2",
-    "monaco-editor": "^0.55.1"
+    "monaco-editor": "^0.55.1",
+    "monaco-vim": "^0.4.4"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",

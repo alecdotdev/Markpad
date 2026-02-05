@@ -1,5 +1,12 @@
 # Changelog
 
+### Unreleased
+- Added Vim mode
+- Added theme toggle
+- Fixed titlebar icon color
+
+### Released
+
 ## v2.4.2
 - Added full width toggle
 

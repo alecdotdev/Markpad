@@ -9,6 +9,7 @@
 	import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
 	import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
 	import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
+	import { initVimMode } from 'monaco-vim';
 
 	let {
 		value = $bindable(),
@@ -47,6 +48,7 @@
 	}>();
 
 	let container: HTMLDivElement;
+	let vimStatusNode: HTMLDivElement;
 	let editor: monaco.editor.IStandaloneCodeEditor;
 	const currentTabId = tabManager.activeTabId;
 
@@ -152,6 +154,14 @@
 			label: 'Toggle Line Numbers',
 			run: () => {
 				settings.toggleLineNumbers();
+			},
+		});
+
+		editor.addAction({
+			id: 'toggle-vim-mode',
+			label: 'Toggle Vim Mode',
+			run: () => {
+				settings.toggleVimMode();
 			},
 		});
 
@@ -452,14 +462,38 @@
 			monaco.editor.setTheme(targetTheme);
 		}
 	});
+
+	$effect(() => {
+		if (editor && settings.vimMode && vimStatusNode) {
+			const vim = initVimMode(editor, vimStatusNode);
+			return () => {
+				vim.dispose();
+			};
+		}
+	});
 </script>
 
 <div class="editor-container" bind:this={container}></div>
+{#if settings.vimMode}
+	<div class="vim-status-bar" bind:this={vimStatusNode}></div>
+{/if}
 
 <style>
 	.editor-container {
 		width: 100%;
 		height: 100%;
 		overflow: hidden;
+	}
+
+	.vim-status-bar {
+		padding: 0 10px;
+		font-family: monospace;
+		font-size: 12px;
+		background: var(--bg-tertiary);
+		border-top: 1px solid var(--border-primary);
+		color: var(--text-primary);
+		display: flex;
+		align-items: center;
+		min-height: 20px;
 	}
 </style>
