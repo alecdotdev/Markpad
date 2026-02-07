@@ -40,8 +40,16 @@
     "fileAssociations": [
       {
         "ext": ["md", "markdown"],
+        "mimeType": "text/markdown",
         "name": "Markdown File",
         "description": "Opens Markdown files with Markpad",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["txt"],
+        "mimeType": "text/plain",
+        "name": "Text File",
+        "description": "Opens Text files with Markpad",
         "role": "Viewer"
       }
     ],
