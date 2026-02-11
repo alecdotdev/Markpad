@@ -314,13 +314,22 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             println!("Single Instance Args: {:?}", args);
             
-            // Allow for robust finding of the file argument
-            let path = args.iter().skip(1).find(|a| !a.starts_with("-")).map(|a| a.as_str()).unwrap_or("");
+            let path_str = args.iter().skip(1).find(|a| !a.starts_with("-")).map(|a| a.as_str()).unwrap_or("");
             
-            let _ = app.get_webview_window("main").expect("no main window").emit("file-path", path);
+            if !path_str.is_empty() {
+                let path = std::path::Path::new(path_str);
+                let resolved_path = if path.is_absolute() {
+                    path_str.to_string()
+                } else {
+                    let cwd_path = std::path::Path::new(&cwd);
+                    cwd_path.join(path).display().to_string()
+                };
+                
+                let _ = app.get_webview_window("main").expect("no main window").emit("file-path", resolved_path);
+            }
             let _ = app.get_webview_window("main").expect("no main window").set_focus();
         }))
         .plugin(tauri_plugin_prevent_default::init())

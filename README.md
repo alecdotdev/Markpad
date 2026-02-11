@@ -15,6 +15,8 @@ Download from [markpad.sftwr.dev](https://markpad.sftwr.dev)
 - Syntax highlighting both in editor and code blocks
 - Mermaid diagram support
 - Vim mode
+- Auto-reload
+- Zen mode
 - Image and YouTube embeds
 - Familiar GitHub styled markdown rendering
 - Tiny memory usage (~10MB)
