@@ -160,6 +160,14 @@ fn send_markdown_path(state: State<'_, AppState>) -> Vec<String> {
 }
 
 #[tauri::command]
+fn save_theme(app: AppHandle, theme: String) -> Result<(), String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+    let theme_path = config_dir.join("theme.txt");
+    fs::write(theme_path, theme).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn get_app_mode() -> String {
 
     let args: Vec<String> = std::env::args().collect();
@@ -415,7 +423,7 @@ pub fn run() {
 
             let _window = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("index.html".into()))
                 .title("Markpad")
-                .inner_size(850.0, 650.0)
+                .inner_size(900.0, 650.0)
                 .min_inner_size(400.0, 300.0)
                 .visible(false)
                 .resizable(true)
@@ -425,11 +433,28 @@ pub fn run() {
                 .visible(false)
                 .build()?;
                 
-            #[cfg(target_os = "windows")]
-            {
-               use tauri::window::Color;
-               let _ = _window.set_background_color(Some(Color(18, 18, 18, 255)));
-            }
+            let config_dir = app.path().app_config_dir()?;
+            let theme_path = config_dir.join("theme.txt");
+            let theme_pref = fs::read_to_string(theme_path).unwrap_or_else(|_| "system".to_string());
+
+            let window = app.get_webview_window(label).unwrap();
+            
+            let bg_color = match theme_pref.as_str() {
+                "dark" => Some(tauri::window::Color(24, 24, 24, 255)),
+                "light" => Some(tauri::window::Color(253, 253, 253, 255)),
+                _ => {
+                    if let Ok(t) = window.theme() {
+                        match t {
+                            tauri::Theme::Dark => Some(tauri::window::Color(24, 24, 24, 255)),
+                            _ => Some(tauri::window::Color(253, 253, 253, 255)),
+                        }
+                    } else {
+                        Some(tauri::window::Color(253, 253, 253, 255))
+                    }
+                }
+            };
+            
+            let _ = window.set_background_color(bg_color);
 
             let _ = _window.set_shadow(true);
 
@@ -469,7 +494,8 @@ pub fn run() {
             unwatch_file,
 
             show_context_menu,
-            show_window
+            show_window,
+            save_theme
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

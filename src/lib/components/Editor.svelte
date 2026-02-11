@@ -117,6 +117,7 @@
 			wordWrap: settings.wordWrap as 'on' | 'off' | 'wordWrapColumn' | 'bounded',
 			lineNumbers: settings.lineNumbers as 'on' | 'off' | 'relative' | 'interval',
 			renderLineHighlight: settings.renderLineHighlight ? 'line' : 'none',
+			occurrencesHighlight: settings.occurrencesHighlight ? 'singleFile' : 'off',
 		});
 
 		if (tabManager.activeTab?.editorViewState) {
@@ -193,6 +194,14 @@
 			label: 'Toggle Line Highlight',
 			run: () => {
 				settings.toggleLineHighlight();
+			},
+		});
+
+		editor.addAction({
+			id: 'toggle-occurrences-highlight',
+			label: 'Toggle Occurrences Highlight',
+			run: () => {
+				settings.toggleOccurrencesHighlight();
 			},
 		});
 
@@ -526,6 +535,7 @@
 				wordWrap: settings.wordWrap as 'on' | 'off' | 'wordWrapColumn' | 'bounded',
 				lineNumbers: settings.lineNumbers as 'on' | 'off' | 'relative' | 'interval',
 				renderLineHighlight: settings.renderLineHighlight as 'line' | 'none',
+				occurrencesHighlight: settings.occurrencesHighlight ? 'singleFile' : 'off',
 				fontSize: 14 * (zoomLevel / 100),
 			});
 		}

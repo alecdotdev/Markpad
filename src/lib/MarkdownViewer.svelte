@@ -62,10 +62,13 @@
 	onMount(() => {
 		const storedTheme = localStorage.getItem('theme') as 'system' | 'dark' | 'light' | null;
 		if (storedTheme) theme = storedTheme;
+		// Clear the forced background color from app.html
+		document.documentElement.style.removeProperty('background-color');
 	});
 
 	$effect(() => {
 		localStorage.setItem('theme', theme);
+		invoke('save_theme', { theme }).catch(console.error);
 
 		if (theme === 'system') {
 			delete document.documentElement.dataset.theme;
@@ -188,7 +191,7 @@
 					if (img.hasAttribute('title')) media.setAttribute('title', img.getAttribute('title')!);
 
 					img.replaceWith(media);
-					continue; 
+					continue;
 				}
 
 				if (isYoutubeLink(src)) {

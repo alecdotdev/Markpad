@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
+	import { getVersion } from '@tauri-apps/api/app';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount } from 'svelte';
 	import iconUrl from '../assets/icon.png';
@@ -11,6 +12,7 @@
 	let checking = $state(true);
 	let isInstalled = $state(false);
 	let installedVersion = $state('');
+	let installerVersion = $state('');
 	let installedAllUsers = $state(false);
 
 	let allUsers = $state(false);
@@ -83,7 +85,12 @@
 		await appWindow.close();
 	}
 
-	onMount(() => {
+	onMount(async () => {
+		try {
+			installerVersion = await getVersion();
+		} catch (e) {
+			console.error('Failed to get installer version:', e);
+		}
 		checkStatus();
 	});
 </script>
@@ -98,11 +105,15 @@
 	<div class="content">
 		<div class="header">
 			<img src={iconUrl} alt="App Icon" class="app-icon" />
+			<h1>Markdown Viewer</h1>
 			{#if isInstalled}
-				<h1>Markdown Viewer</h1>
+				<div class="version-comparison">
+					<span class="v-label">Current:</span> v{installedVersion}
+					<span class="v-arrow">→</span>
+					<span class="v-label">Target:</span> v{installerVersion}
+				</div>
 			{:else}
-				<h1>Markdown Viewer</h1>
-				<p class="subtitle">A simple markdown viewer</p>
+				<p class="subtitle">A simple markdown viewer <span class="v-lite">v{installerVersion}</span></p>
 			{/if}
 		</div>
 
@@ -252,12 +263,12 @@
 		width: 70px;
 		height: 70px;
 		margin-bottom: 12px;
-		filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.1));
+		filter: invert(0.8) drop-shadow(0 4px 12px rgba(0, 0, 0, 0.1));
 	}
 
 	@media (prefers-color-scheme: dark) {
 		.app-icon {
-			filter: invert(1) drop-shadow(0 4px 12px rgba(0, 0, 0, 0.1));
+			filter: invert(0) drop-shadow(0 4px 12px rgba(0, 0, 0, 0.1));
 		}
 	}
 
@@ -488,5 +499,32 @@
 			opacity: 1;
 			transform: translateY(0);
 		}
+	}
+
+	.version-comparison {
+		font-size: 11px;
+		margin-top: 8px;
+		opacity: 0.6;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		font-weight: 500;
+	}
+
+	.v-label {
+		opacity: 0.6;
+		font-weight: 400;
+	}
+
+	.v-arrow {
+		color: var(--color-accent-fg);
+		font-weight: bold;
+	}
+
+	.v-lite {
+		margin-left: 4px;
+		opacity: 0.4;
+		font-size: 11px;
 	}
 </style>

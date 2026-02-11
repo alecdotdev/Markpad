@@ -315,9 +315,12 @@
 							onclick={(e) => {
 								e.stopPropagation();
 								themeMenuOpen = !themeMenuOpen;
+								if (themeMenuOpen) hideTooltip();
 							}}
 							aria-label="Change Theme"
-							onmouseenter={(e) => showTooltip(e, 'Change Theme')}
+							onmouseenter={(e) => {
+								if (!themeMenuOpen) showTooltip(e, 'Change Theme');
+							}}
 							onmouseleave={hideTooltip}
 							transition:fly={{ x: 10, duration: 200 }}>
 							{#if theme === 'light'}

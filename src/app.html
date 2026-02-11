@@ -2,6 +2,26 @@
 <html lang="en">
 
 <head>
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem('theme');
+        var theme = stored;
+        if (!theme || theme === 'system') {
+          theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        if (stored === 'dark' || stored === 'light') {
+          document.documentElement.setAttribute('data-theme', stored);
+        }
+
+        var bg = theme === 'dark' ? '#181818' : '#FDFDFD';
+        document.documentElement.style.backgroundColor = bg;
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+  </script>
   <meta charset="utf-8" />
   <link rel="icon" href="%sveltekit.assets%/favicon.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />

@@ -44,6 +44,7 @@ body {
 	--color-done-fg: #8250df;
 	--color-done-emphasis: #8250df;
 	--color-window-border-top: #B5B5B5;
+	--color-canvas-overlay: #FDFDFD;
 	--tab-active-bg: #dee1e6;
 
 	/* Light Syntax Highlighting */
@@ -78,6 +79,7 @@ body {
 	--color-done-fg: #8250df;
 	--color-done-emphasis: #8250df;
 	--color-window-border-top: #B5B5B5;
+	--color-canvas-overlay: #FDFDFD;
 	--tab-active-bg: #dee1e6;
 
 	/* Light Syntax Highlighting */
@@ -114,6 +116,7 @@ body {
 		--color-done-fg: #a371f7;
 		--color-done-emphasis: #8957e5;
 		--color-window-border-top: #3E3E3E;
+		--color-canvas-overlay: #2d2e30;
 		--tab-active-bg: #2d2e30;
 
 		/* Dark Syntax Highlighting */
@@ -151,6 +154,7 @@ body {
 	--color-done-fg: #a371f7;
 	--color-done-emphasis: #8957e5;
 	--color-window-border-top: #3E3E3E;
+	--color-canvas-overlay: #2d2e30;
 	--tab-active-bg: #2d2e30;
 
 	/* Dark Syntax Highlighting */

@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { getVersion } from '@tauri-apps/api/app';
+	import { onMount } from 'svelte';
+
 	let { recentFiles, onselectFile, onloadFile, onremoveRecentFile, onnewFile } = $props<{
 		recentFiles: string[];
 		onselectFile: () => void;
@@ -6,6 +9,16 @@
 		onremoveRecentFile: (file: string, e: MouseEvent) => void;
 		onnewFile: () => void;
 	}>();
+
+	let version = $state('');
+
+	onMount(async () => {
+		try {
+			version = await getVersion();
+		} catch (e) {
+			console.error('Failed to get version:', e);
+		}
+	});
 
 	function getFileName(path: string) {
 		return path.split(/[/\\]/).pop() || path;
@@ -93,6 +106,7 @@
 			<p class="empty-recent">Your recently opened files will appear here.</p>
 		{/if}
 	</div>
+	<div class="version-tag">v{version}</div>
 </div>
 
 <style>
@@ -280,5 +294,14 @@
 	.clear-btn:hover {
 		opacity: 1 !important;
 		background: rgba(255, 0, 0, 0.1);
+	}
+
+	.version-tag {
+		margin-top: auto;
+		padding-bottom: 20px;
+		font-size: 10px;
+		opacity: 0.25;
+		font-weight: 500;
+		pointer-events: none;
 	}
 </style>
