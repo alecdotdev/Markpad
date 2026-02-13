@@ -17,7 +17,7 @@
 				{ id: 'italic', icon: 'I', label: 'Italic', shortcut: 'Ctrl+I', style: 'font-style: italic' },
 				{ id: 'underline', icon: 'U', label: 'Underline', shortcut: 'Ctrl+U', style: 'text-decoration: underline' },
 				{ id: 'strikethrough', icon: 'S', label: 'Strikethrough', shortcut: 'Ctrl+Shift+S', style: 'text-decoration: line-through' },
-				{ id: 'inlineCode', icon: '<>', label: 'Inline Code', shortcut: 'Ctrl+`' },
+				{ id: 'inlineCode', icon: '<>', label: 'Inline Code', shortcut: 'Ctrl+`', style: '' },
 			],
 		},
 		{
@@ -98,7 +98,7 @@
 					onmouseenter={(e) => showTooltip(e, btn.label, btn.shortcut)}
 					onmouseleave={hideTooltip}
 					aria-label={btn.label}
-					style={btn.style || ''}>
+					style={'style' in btn ? btn.style : ''}>
 					{#if btn.icon.length <= 2}
 						<span class="btn-text">{btn.icon}</span>
 					{:else}

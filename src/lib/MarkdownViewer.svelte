@@ -39,7 +39,7 @@
 	let isEditing = $derived(activeTab?.isEditing ?? false);
 	let rawContent = $derived(activeTab?.rawContent ?? '');
 	let isSplit = $derived(activeTab?.isSplit ?? false);
-	let editorRef = $state<InstanceType<typeof Editor>>();
+	let editorRef = $state<any>();
 
 	// derived from tab manager
 	let currentFile = $derived(tabManager.activeTab?.path ?? '');
