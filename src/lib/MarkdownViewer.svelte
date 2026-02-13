@@ -9,6 +9,7 @@
 	import Uninstaller from './Uninstaller.svelte';
 	import TitleBar from './components/TitleBar.svelte';
 	import Editor from './components/Editor.svelte';
+	import EditorToolbar from './components/EditorToolbar.svelte';
 	import Modal from './components/Modal.svelte';
 
 	import DOMPurify from 'dompurify';
@@ -38,6 +39,7 @@
 	let isEditing = $derived(activeTab?.isEditing ?? false);
 	let rawContent = $derived(activeTab?.rawContent ?? '');
 	let isSplit = $derived(activeTab?.isSplit ?? false);
+	let editorRef = $state<InstanceType<typeof Editor>>();
 
 	// derived from tab manager
 	let currentFile = $derived(tabManager.activeTab?.path ?? '');
@@ -486,6 +488,10 @@
 		}
 	}
 
+	function handleFormat(action: string) {
+		editorRef?.format(action);
+	}
+
 	function handleScroll(e: Event) {
 		const target = e.target as HTMLElement;
 
@@ -495,10 +501,6 @@
 				tabManager.updateTabScroll(tabManager.activeTabId, target.scrollTop);
 			}
 			return;
-		}
-
-		if (tabManager.activeTab?.isScrollSynced) {
-			tabManager.toggleScrollSync(tabManager.activeTab.id);
 		}
 
 		if (tabManager.activeTabId) {
@@ -1278,29 +1280,36 @@
 					<!-- Editor Pane -->
 					<div class="pane editor-pane" class:active={isEditing || isSplit} style="flex: {isSplit ? tabManager.activeTab.splitRatio : isEditing ? 1 : 0}">
 						{#if isEditing || isSplit}
-							<Editor
-								bind:value={tabManager.activeTab.rawContent}
-								language={editorLanguage}
-								{theme}
-								onsave={saveContent}
-								bind:zoomLevel
-								onnew={handleNewFile}
-								onopen={selectFile}
-								onclose={closeFile}
-								onreveal={openFileLocation}
-								ontoggleEdit={() => toggleEdit()}
-								ontoggleLive={toggleLiveMode}
-								onhome={() => (showHome = true)}
-								onnextTab={() => tabManager.cycleTab('next')}
-								onprevTab={() => tabManager.cycleTab('prev')}
-								onundoClose={handleUndoCloseTab}
-								onscrollsync={handleEditorScrollSync} />
+							<div class="editor-stack">
+								<EditorToolbar onformat={handleFormat} disabled={!isEditing && !isSplit} />
+								<div class="editor-host">
+									<Editor
+										bind:this={editorRef}
+										bind:value={tabManager.activeTab.rawContent}
+										language={editorLanguage}
+										{theme}
+										onsave={saveContent}
+										bind:zoomLevel
+										onnew={handleNewFile}
+										onopen={selectFile}
+										onclose={closeFile}
+										onreveal={openFileLocation}
+										ontoggleEdit={() => toggleEdit()}
+										ontoggleLive={toggleLiveMode}
+										onhome={() => (showHome = true)}
+										onnextTab={() => tabManager.cycleTab('next')}
+										onprevTab={() => tabManager.cycleTab('prev')}
+										onundoClose={handleUndoCloseTab}
+										onscrollsync={handleEditorScrollSync} />
+								</div>
+							</div>
 						{/if}
 					</div>
 
 					<!-- Splitter -->
 					{#if isSplit}
 						<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+						<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 						<div class="split-bar" onmousedown={(e) => startDrag(e, tabManager.activeTabId)} role="separator" aria-orientation="vertical" tabindex="0"></div>
 					{/if}
 
@@ -1392,24 +1401,6 @@
 		max-width: 100%;
 	}
 
-	.caret-indicator {
-		position: absolute;
-		height: 2px;
-		background-color: #0078d4;
-		width: 100%;
-		left: 0;
-		right: 0;
-		pointer-events: none;
-		z-index: 100;
-		opacity: 0.8;
-		transform: translateY(2px); /* visual adjustment */
-	}
-
-	/* Disable animation in split view to prevent jumpiness */
-	.split-view .markdown-body {
-		animation: none;
-	}
-
 	@keyframes slideIn {
 		from {
 			opacity: 0;
@@ -1483,14 +1474,16 @@
 		border-top: 6px solid var(--color-canvas-default);
 	}
 
-	.editor-wrapper {
-		width: 100%;
+	.editor-stack {
+		display: flex;
+		flex-direction: column;
 		height: 100%;
-		position: absolute;
-		top: 0;
-		left: 0;
-		padding-top: 36px;
-		box-sizing: border-box;
+		min-height: 0;
+	}
+
+	.editor-host {
+		flex: 1;
+		min-height: 0;
 	}
 
 	.drag-overlay {
@@ -1657,9 +1650,4 @@
 		background: var(--color-accent-fg);
 	}
 
-	.editor-wrapper {
-		/* Legacy mapping */
-		width: 100%;
-		height: 100%;
-	}
 </style>
