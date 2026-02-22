@@ -340,7 +340,11 @@ pub fn run() {
             }
             let _ = app.get_webview_window("main").expect("no main window").set_focus();
         }))
-        .plugin(tauri_plugin_prevent_default::init())
+        .plugin(
+            tauri_plugin_prevent_default::Builder::new()
+                .with_flags(tauri_plugin_prevent_default::Flags::all().difference(tauri_plugin_prevent_default::Flags::FIND))
+                .build(),
+        )
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .on_menu_event(|app, event| {
              let id = event.id().as_ref();
