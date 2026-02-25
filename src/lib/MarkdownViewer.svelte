@@ -646,6 +646,8 @@
 					if (response === 'save') {
 						const success = await saveContent();
 						if (!success) return;
+					} else if (response === 'discard') {
+						tab.rawContent = tab.originalContent;
 					}
 				}
 			}
@@ -695,6 +697,7 @@
 				saveRecentFile(targetPath);
 			}
 			tab.isDirty = false;
+			tab.originalContent = tab.rawContent;
 			return true;
 		} catch (e) {
 			console.error('Failed to save file', e);
@@ -839,7 +842,7 @@
 		}
 	});
 
-	async function toggleSplitView(tabId: string) {
+	async function toggleSplitView(tabId: string, autoSave = false) {
 		const tab = tabManager.tabs.find((t) => t.id === tabId);
 		if (!tab) return;
 
@@ -856,7 +859,29 @@
 			tab.isSplit = true;
 			if (liveMode) toggleLiveMode();
 		} else {
+			if (tab.isDirty) {
+				if (autoSave) {
+					const success = await saveContent();
+					if (!success) return;
+				} else {
+					const response = await askCustom('You have unsaved changes. Do you want to save them before closing split view?', {
+						title: 'Unsaved Changes',
+						kind: 'warning',
+						showSave: true,
+					});
+
+					if (response === 'cancel') return;
+					if (response === 'save') {
+						const success = await saveContent();
+						if (!success) return;
+					} else if (response === 'discard') {
+						tab.rawContent = tab.originalContent;
+					}
+				}
+			}
 			tab.isSplit = false;
+			tab.isDirty = false;
+			if (tab.path) await loadMarkdown(tab.path);
 		}
 	}
 
