@@ -129,6 +129,7 @@
 		list.push('theme');
 
 		if (currentFile && !showHome) {
+			list.push('zen');
 			list.push('open_loc');
 			const ext = currentFile.split('.').pop()?.toLowerCase() || '';
 			const isMarkdown = ['md', 'markdown', 'mdown', 'mkd'].includes(ext);
@@ -152,6 +153,7 @@
 	});
 
 	let themeMenuOpen = $state(false);
+	let kebabMenuOpen = $state(false);
 
 	function handleSetTheme(t: 'system' | 'dark' | 'light') {
 		if (onSetTheme) onSetTheme(t);
@@ -161,8 +163,9 @@
 	$effect(() => {
 		const handleGlobalClick = () => {
 			themeMenuOpen = false;
+			kebabMenuOpen = false;
 		};
-		if (themeMenuOpen) {
+		if (themeMenuOpen || kebabMenuOpen) {
 			window.addEventListener('click', handleGlobalClick);
 		}
 		return () => {
@@ -213,148 +216,197 @@
 		</div>
 	{/if}
 
-	<div class="title-actions" data-tauri-drag-region>
-		{#each visibleActionIds as id (id)}
-			<div animate:flip={{ duration: 250 }} class="action-btn-wrapper">
-				{#if id === 'zoom'}
-					<button
-						class="zoom-indicator"
-						onclick={onresetZoom}
-						transition:fly={{ y: -10, duration: 150 }}
-						aria-label="Reset Zoom"
-						onmouseenter={(e) => showTooltip(e, 'Reset zoom')}
-						onmouseleave={hideTooltip}>
-						{zoomLevel}%
-					</button>
-				{:else if id === 'open_loc'}
-					<button
-						class="title-action-btn"
-						onclick={ononpenFileLocation}
-						aria-label="Open File Location"
-						onmouseenter={(e) => showTooltip(e, 'Open file location')}
-						onmouseleave={hideTooltip}
-						transition:fly={{ x: 10, duration: 200 }}>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-							><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><polyline points="15 13 18 13 18 10"></polyline><line
-								x1="14"
-								y1="14"
-								x2="18"
-								y2="10"></line
-							></svg>
-					</button>
-				{:else if id === 'split'}
-					<button
-						class="title-action-btn {tabManager.activeTab?.isSplit ? 'active' : ''}"
-						onclick={() => ontoggleSplit?.()}
-						aria-label="Toggle Split View"
-						onmouseenter={(e) => showTooltip(e, 'Split view', 'H')}
-						onmouseleave={hideTooltip}
-						transition:fly={{ x: 10, duration: 200 }}>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-							><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line><rect
-								x="13"
-								y="2"
-								width="9"
-								height="20"
-								rx="2"
-								ry="2"
-								transform="rotate(0 13 2)"></rect
-							></svg>
-					</button>
-				{:else if id === 'sync'}
-					<button
-						class="title-action-btn {isScrollSynced ? 'active' : ''}"
-						onclick={() => ontoggleSync?.()}
-						aria-label="Toggle Scroll Sync"
-						onmouseenter={(e) => showTooltip(e, 'Scroll sync')}
-						onmouseleave={hideTooltip}
-						transition:fly={{ x: 10, duration: 200 }}>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-							><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-					</button>
-				{:else if id === 'fullWidth'}
-					<button
-						class="title-action-btn {isFullWidth ? 'active' : ''}"
-						onclick={() => ontoggleFullWidth?.()}
-						aria-label="Toggle Full Width"
-						onmouseenter={(e) => showTooltip(e, 'Toggle full width')}
-						onmouseleave={hideTooltip}
-						transition:fly={{ x: 10, duration: 200 }}>
-						<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"
-							><path
-								d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm640-560H160v480h640v-480Zm-640 0v480-480Zm200 360v-240L240-480l120 120Zm360-120L600-600v240l120-120Z" /></svg>
-					</button>
-				{:else if id === 'live'}
-					<button
-						class="title-action-btn {liveMode ? 'active' : ''}"
-						onclick={ontoggleLiveMode}
-						aria-label="Toggle Auto-Reload"
-						onmouseenter={(e) => showTooltip(e, 'Auto-Reload')}
-						onmouseleave={hideTooltip}
-						transition:fly={{ x: 10, duration: 200 }}>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-							><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path
-								d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path
-							></svg>
-					</button>
-				{:else if id === 'edit'}
-					<button
-						class="title-action-btn {isEditing ? 'active' : ''}"
-						onclick={ontoggleEdit}
-						aria-label="Edit File (Ctrl+E)"
-						onmouseenter={(e) => showTooltip(e, 'Edit file', 'E')}
-						onmouseleave={hideTooltip}
-						transition:fly={{ x: 10, duration: 200 }}>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-							><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
-					</button>
-				{:else if id === 'theme'}
-					<div class="theme-dropdown-container">
+	<div class="title-actions-container" data-tauri-drag-region>
+		{#if visibleActionIds.length > 0}
+			<button
+				class="kebab-btn {kebabMenuOpen ? 'active' : ''}"
+				onclick={(e) => {
+					e.stopPropagation();
+					kebabMenuOpen = !kebabMenuOpen;
+					if (kebabMenuOpen) themeMenuOpen = false;
+				}}
+				aria-label="More Actions">
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<circle cx="12" cy="12" r="1"></circle>
+					<circle cx="12" cy="5" r="1"></circle>
+					<circle cx="12" cy="19" r="1"></circle>
+				</svg>
+			</button>
+		{/if}
+		<div
+			class="title-actions {kebabMenuOpen ? 'show-dropdown' : 'inline'}"
+			data-tauri-drag-region
+			onclick={(e) => {
+				if (kebabMenuOpen) e.stopPropagation();
+			}}>
+			{#each visibleActionIds as id (id)}
+				<div animate:flip={{ duration: 250 }} class="action-btn-wrapper">
+					{#if id === 'zoom'}
 						<button
-							class="title-action-btn {themeMenuOpen ? 'active' : ''}"
-							onclick={(e) => {
-								e.stopPropagation();
-								themeMenuOpen = !themeMenuOpen;
-								if (themeMenuOpen) hideTooltip();
-							}}
-							aria-label="Change Theme"
-							onmouseenter={(e) => {
-								if (!themeMenuOpen) showTooltip(e, 'Change Theme');
-							}}
+							class="title-action-btn zoom-indicator"
+							onclick={onresetZoom}
+							transition:fly={{ y: -10, duration: 150 }}
+							aria-label="Reset Zoom"
+							onmouseenter={(e) => showTooltip(e, 'Reset zoom')}
+							onmouseleave={hideTooltip}>
+							{zoomLevel}%
+							<span class="action-label">Reset Zoom</span>
+						</button>
+					{:else if id === 'zen'}
+						<button
+							class="title-action-btn {settings.zenMode ? 'active' : ''}"
+							onclick={() => settings.toggleZenMode()}
+							aria-label="Toggle Zen Mode"
+							onmouseenter={(e) => showTooltip(e, 'Zen mode')}
 							onmouseleave={hideTooltip}
 							transition:fly={{ x: 10, duration: 200 }}>
-							{#if theme === 'light'}
-								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-									><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line
-										x1="4.22"
-										y1="4.22"
-										x2="5.64"
-										y2="5.64"></line
-									><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line
-										x1="4.22"
-										y1="19.78"
-										x2="5.64"
-										y2="18.36"></line
-									><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
-							{:else if theme === 'dark'}
-								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-									><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
-							{:else}
-								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-									><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-							{/if}
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								{#if settings.zenMode}
+									<path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path>
+								{:else}
+									<circle cx="12" cy="12" r="10"></circle>
+									<circle cx="12" cy="12" r="3"></circle>
+								{/if}
+							</svg>
+							<span class="action-label">Zen Mode</span>
 						</button>
-						{#if themeMenuOpen}
-							<div class="theme-menu" transition:fly={{ y: 5, duration: 150 }} onclick={(e) => e.stopPropagation()}>
-								<button class="theme-option {theme === 'system' ? 'selected' : ''}" onclick={() => handleSetTheme('system')}> Follow System </button>
-								<button class="theme-option {theme === 'light' ? 'selected' : ''}" onclick={() => handleSetTheme('light')}> Light </button>
-								<button class="theme-option {theme === 'dark' ? 'selected' : ''}" onclick={() => handleSetTheme('dark')}> Dark </button>
-							</div>
-						{/if}
-					</div>
-				{/if}
-			</div>
-		{/each}
+					{:else if id === 'open_loc'}
+						<button
+							class="title-action-btn"
+							onclick={ononpenFileLocation}
+							aria-label="Open File Location"
+							onmouseenter={(e) => showTooltip(e, 'Open file location')}
+							onmouseleave={hideTooltip}
+							transition:fly={{ x: 10, duration: 200 }}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><polyline points="15 13 18 13 18 10"></polyline><line
+									x1="14"
+									y1="14"
+									x2="18"
+									y2="10"></line
+								></svg>
+							<span class="action-label">Open Location</span>
+						</button>
+					{:else if id === 'split'}
+						<button
+							class="title-action-btn {tabManager.activeTab?.isSplit ? 'active' : ''}"
+							onclick={() => ontoggleSplit?.()}
+							aria-label="Toggle Split View"
+							onmouseenter={(e) => showTooltip(e, 'Split view', 'H')}
+							onmouseleave={hideTooltip}
+							transition:fly={{ x: 10, duration: 200 }}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line><rect
+									x="13"
+									y="2"
+									width="9"
+									height="20"
+									rx="2"
+									ry="2"
+									transform="rotate(0 13 2)"></rect
+								></svg>
+							<span class="action-label">Split View</span>
+						</button>
+					{:else if id === 'sync'}
+						<button
+							class="title-action-btn {isScrollSynced ? 'active' : ''}"
+							onclick={() => ontoggleSync?.()}
+							aria-label="Toggle Scroll Sync"
+							onmouseenter={(e) => showTooltip(e, 'Scroll sync')}
+							onmouseleave={hideTooltip}
+							transition:fly={{ x: 10, duration: 200 }}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+							<span class="action-label">Sync Scroll</span>
+						</button>
+					{:else if id === 'fullWidth'}
+						<button
+							class="title-action-btn {isFullWidth ? 'active' : ''}"
+							onclick={() => ontoggleFullWidth?.()}
+							aria-label="Toggle Full Width"
+							onmouseenter={(e) => showTooltip(e, 'Toggle full width')}
+							onmouseleave={hideTooltip}
+							transition:fly={{ x: 10, duration: 200 }}>
+							<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"
+								><path
+									d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm640-560H160v480h640v-480Zm-640 0v480-480Zm200 360v-240L240-480l120 120Zm360-120L600-600v240l120-120Z" /></svg>
+							<span class="action-label">Full Width</span>
+						</button>
+					{:else if id === 'live'}
+						<button
+							class="title-action-btn {liveMode ? 'active' : ''}"
+							onclick={ontoggleLiveMode}
+							aria-label="Toggle Auto-Reload"
+							onmouseenter={(e) => showTooltip(e, 'Auto-Reload')}
+							onmouseleave={hideTooltip}
+							transition:fly={{ x: 10, duration: 200 }}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path
+									d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path
+								></svg>
+							<span class="action-label">Auto-Reload</span>
+						</button>
+					{:else if id === 'edit'}
+						<button
+							class="title-action-btn {isEditing ? 'active' : ''}"
+							onclick={ontoggleEdit}
+							aria-label="Edit File (Ctrl+E)"
+							onmouseenter={(e) => showTooltip(e, 'Edit file', 'E')}
+							onmouseleave={hideTooltip}
+							transition:fly={{ x: 10, duration: 200 }}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+							<span class="action-label">Editor</span>
+						</button>
+					{:else if id === 'theme'}
+						<div class="theme-dropdown-container">
+							<button
+								class="title-action-btn {themeMenuOpen ? 'active' : ''}"
+								onclick={(e) => {
+									e.stopPropagation();
+									themeMenuOpen = !themeMenuOpen;
+									if (themeMenuOpen) hideTooltip();
+								}}
+								aria-label="Change Theme"
+								onmouseenter={(e) => {
+									if (!themeMenuOpen) showTooltip(e, 'Change Theme');
+								}}
+								onmouseleave={hideTooltip}
+								transition:fly={{ x: 10, duration: 200 }}>
+								{#if theme === 'light'}
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+										><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line
+											x1="4.22"
+											y1="4.22"
+											x2="5.64"
+											y2="5.64"></line
+										><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line
+											x1="4.22"
+											y1="19.78"
+											x2="5.64"
+											y2="18.36"></line
+										><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+								{:else if theme === 'dark'}
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+										><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+								{:else}
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+										><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+								{/if}
+								<span class="action-label">Toggle Theme</span>
+							</button>
+							{#if themeMenuOpen}
+								<div class="theme-menu" transition:fly={{ y: 5, duration: 150 }} onclick={(e) => e.stopPropagation()}>
+									<button class="theme-option {theme === 'system' ? 'selected' : ''}" onclick={() => handleSetTheme('system')}> Follow System </button>
+									<button class="theme-option {theme === 'light' ? 'selected' : ''}" onclick={() => handleSetTheme('light')}> Light </button>
+									<button class="theme-option {theme === 'dark' ? 'selected' : ''}" onclick={() => handleSetTheme('dark')}> Dark </button>
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
+			{/each}
+		</div>
 	</div>
 
 	<div class="window-controls-right" data-tauri-drag-region>
@@ -435,12 +487,90 @@
 		z-index: 10000;
 	}
 
-	.title-actions {
+	.title-actions-container {
 		display: flex;
-		gap: 4px;
+		align-items: center;
+		position: relative;
 		margin-right: 8px;
 		margin-left: auto;
 		z-index: 10000;
+	}
+
+	.kebab-btn {
+		display: none;
+	}
+
+	.title-actions {
+		display: flex;
+		gap: 4px;
+	}
+
+	@media (max-width: 800px) {
+		.kebab-btn {
+			display: flex;
+			width: 28px;
+			height: 28px;
+			justify-content: center;
+			align-items: center;
+			background: transparent;
+			border: none;
+			color: var(--color-fg-muted);
+			border-radius: 4px;
+			cursor: pointer;
+			transition: all 0.1s;
+		}
+		.kebab-btn:hover,
+		.kebab-btn.active {
+			background: var(--color-canvas-subtle);
+			color: var(--color-fg-default);
+		}
+		.title-actions.inline {
+			display: none;
+		}
+		.title-actions.show-dropdown {
+			display: flex;
+			flex-direction: column;
+			gap: 4px;
+			position: absolute;
+			top: 100%;
+			right: 0;
+			margin-top: 4px;
+			background-color: var(--color-canvas-default);
+			border: 1px solid var(--color-border-default);
+			border-radius: 6px;
+			padding: 8px;
+			box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+			z-index: 10006;
+			min-width: 140px;
+		}
+
+		.title-actions.show-dropdown .title-action-btn {
+			width: 100%;
+			justify-content: flex-start;
+			align-items: center;
+			padding: 4px 8px;
+			height: auto;
+		}
+
+		.title-actions.show-dropdown .title-action-btn svg {
+			width: 16px;
+			min-width: 16px;
+			flex-shrink: 0;
+			display: block;
+			margin: 0 auto;
+		}
+
+		.title-actions.show-dropdown .action-label {
+			display: inline-block;
+			flex: 1;
+			margin-left: 12px;
+			font-size: 12px;
+			text-align: left;
+		}
+	}
+
+	.action-label {
+		display: none;
 	}
 
 	.actions-wrapper {
@@ -520,8 +650,22 @@
 		transition: opacity 0.2s;
 		white-space: nowrap;
 		overflow: hidden;
-		max-width: 50%;
-		display: flex;
+		text-overflow: ellipsis;
+		display: block;
+		max-width: calc(100vw - 450px);
+	}
+
+	@media (max-width: 800px) {
+		.window-title {
+			max-width: calc(100vw - 260px);
+		}
+	}
+
+	.title-text {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		display: block;
 	}
 
 	.window-title.focused {
