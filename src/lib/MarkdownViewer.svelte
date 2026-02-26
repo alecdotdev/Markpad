@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount, tick, untrack } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import { openUrl } from '@tauri-apps/plugin-opener';
@@ -10,6 +11,8 @@
 	import TitleBar from './components/TitleBar.svelte';
 	import Editor from './components/Editor.svelte';
 	import Modal from './components/Modal.svelte';
+
+	const appWindow = getCurrentWindow();
 
 	import DOMPurify from 'dompurify';
 	import HomePage from './components/HomePage.svelte';
@@ -627,11 +630,11 @@
 
 	async function toggleEdit(autoSave = false) {
 		const tab = tabManager.activeTab;
-		if (!tab || !tab.path) return;
+		if (!tab || tab.path === undefined) return;
 
 		if (isEditing) {
 			// Switch back to view
-			if (tab.isDirty) {
+			if (tab.isDirty && tab.path !== '') {
 				if (autoSave) {
 					const success = await saveContent();
 					if (!success) return; // If save fails, stay in edit mode?
@@ -652,18 +655,31 @@
 				}
 			}
 			tab.isEditing = false;
-			tab.isDirty = false;
-			// Refresh content (re-parse)
-			if (tab.path) await loadMarkdown(tab.path);
+			if (tab.path !== '') {
+				tab.isDirty = false;
+				await loadMarkdown(tab.path);
+			} else {
+				try {
+					const html = (await invoke('render_markdown', { content: tab.rawContent })) as string;
+					const processedInfo = processMarkdownHtml(html, '');
+					tabManager.updateTabContent(tab.id, processedInfo);
+				} catch (e) {
+					console.error('Failed to render markdown for unsaved file', e);
+				}
+			}
 		} else {
 			// Switch to edit
-			try {
-				const content = (await invoke('read_file_content', { path: tab.path })) as string;
-				tab.rawContent = content;
+			if (tab.path !== '') {
+				try {
+					const content = (await invoke('read_file_content', { path: tab.path })) as string;
+					tab.rawContent = content;
+					tab.isEditing = true;
+					tab.isDirty = false;
+				} catch (e) {
+					console.error('Failed to read file for editing', e);
+				}
+			} else {
 				tab.isEditing = true;
-				tab.isDirty = false;
-			} catch (e) {
-				console.error('Failed to read file for editing', e);
 			}
 		}
 	}
@@ -703,6 +719,34 @@
 			console.error('Failed to save file', e);
 			return false;
 		}
+	}
+
+	async function saveContentAs(): Promise<boolean> {
+		const tab = tabManager.activeTab;
+		if (!tab) return false;
+
+		const selected = await save({
+			filters: [
+				{ name: 'Markdown', extensions: ['md'] },
+				{ name: 'All Files', extensions: ['*'] },
+			],
+			defaultPath: tab.path || undefined,
+		});
+
+		if (selected) {
+			try {
+				await invoke('save_file_content', { path: selected, content: tab.rawContent });
+				tabManager.updateTabPath(tab.id, selected);
+				saveRecentFile(selected);
+				tab.isDirty = false;
+				tab.originalContent = tab.rawContent;
+				return true;
+			} catch (e) {
+				console.error('Failed to save file as', e);
+				return false;
+			}
+		}
+		return false;
 	}
 
 	function handleNewFile() {
@@ -859,7 +903,7 @@
 			tab.isSplit = true;
 			if (liveMode) toggleLiveMode();
 		} else {
-			if (tab.isDirty) {
+			if (tab.isDirty && tab.path !== '') {
 				if (autoSave) {
 					const success = await saveContent();
 					if (!success) return;
@@ -880,8 +924,11 @@
 				}
 			}
 			tab.isSplit = false;
-			tab.isDirty = false;
-			if (tab.path) await loadMarkdown(tab.path);
+			if (tab.path !== '') {
+				tab.isDirty = false;
+				await loadMarkdown(tab.path);
+			} else {
+			}
 		}
 	}
 
@@ -901,6 +948,12 @@
 		if (cmdOrCtrl && !e.shiftKey && key === 't') {
 			e.preventDefault();
 			tabManager.addHomeTab();
+		}
+		if (cmdOrCtrl && key === 'q') {
+			e.preventDefault();
+			import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+				getCurrentWindow().close();
+			});
 		}
 		if (cmdOrCtrl && key === 'h') {
 			e.preventDefault();
@@ -1238,6 +1291,13 @@
 		showHome={false}
 		{zoomLevel}
 		onselectFile={selectFile}
+		onnewFile={handleNewFile}
+		onopenFile={selectFile}
+		onsaveFile={saveContent}
+		onsaveFileAs={saveContentAs}
+		onexit={() => {
+			appWindow.close();
+		}}
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
@@ -1275,6 +1335,13 @@
 		{showHome}
 		{zoomLevel}
 		onselectFile={selectFile}
+		onnewFile={handleNewFile}
+		onopenFile={selectFile}
+		onsaveFile={saveContent}
+		onsaveFileAs={saveContentAs}
+		onexit={() => {
+			appWindow.close();
+		}}
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
@@ -1284,17 +1351,17 @@
 		ondetach={handleDetach}
 		ontabclick={() => (showHome = false)}
 		onresetZoom={() => (zoomLevel = 100)}
-		oncloseTab={(id) => {
-			canCloseTab(id).then((can) => {
-				if (can) tabManager.closeTab(id);
-			});
-		}}
 		{isScrollSynced}
 		ontoggleSync={() => tabManager.activeTabId && tabManager.toggleScrollSync(tabManager.activeTabId)}
 		{isFullWidth}
 		ontoggleFullWidth={() => (isFullWidth = !isFullWidth)}
 		{theme}
-		onSetTheme={(t) => (theme = t)} />
+		onSetTheme={(t) => (theme = t)}
+		oncloseTab={(id) => {
+			canCloseTab(id).then((can) => {
+				if (can) tabManager.closeTab(id);
+			});
+		}} />
 
 	{#if tabManager.activeTab && (tabManager.activeTab.path !== '' || tabManager.activeTab.title !== 'Recents') && !showHome}
 		{#key tabManager.activeTabId}
