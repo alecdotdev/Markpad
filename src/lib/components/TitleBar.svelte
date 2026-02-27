@@ -138,6 +138,36 @@
 		tooltip.visible = false;
 	}
 
+	let zoomTimeout: ReturnType<typeof setTimeout>;
+	let isInitialZoomLoad = true;
+
+	$effect(() => {
+		if (zoomLevel !== undefined) {
+			if (isInitialZoomLoad) {
+				isInitialZoomLoad = false;
+				return;
+			}
+
+			const kebabBtn = document.querySelector('.kebab-btn') as HTMLElement;
+			if (kebabBtn && !kebabMenuOpen && !homeMenuOpen && !themeMenuOpen) {
+				const rect = kebabBtn.getBoundingClientRect();
+				tooltip.text = `${zoomLevel}%`;
+				tooltip.shortcut = '';
+				tooltip.align = 'right';
+				tooltip.x = rect.right;
+				tooltip.y = rect.bottom + 8;
+				tooltip.visible = true;
+
+				clearTimeout(zoomTimeout);
+				zoomTimeout = setTimeout(() => {
+					if (tooltip.text === `${zoomLevel}%`) {
+						tooltip.visible = false;
+					}
+				}, 1500);
+			}
+		}
+	});
+
 	const inlineIds = ['edit', 'split'];
 
 	let visibleActionIds = $derived.by(() => {
@@ -391,15 +421,21 @@
 			{#each ids as id (id)}
 				{#if id === 'zoom'}
 					<button
-						class="title-action-btn zoom-indicator"
-						onclick={onresetZoom}
+						class="menu-zoom-item"
+						onclick={() => {
+							hideTooltip();
+							onresetZoom?.();
+						}}
 						transition:fly={{ y: -10, duration: 150 }}
-						aria-label="Reset Zoom"
-						onmouseenter={(e) => showTooltip(e, 'Reset zoom')}
-						onmouseleave={hideTooltip}>
-						{zoomLevel}%
-						<span class="action-label">Reset Zoom</span>
-						<span class="menu-shortcut">{modifier}+0</span>
+						aria-label="Reset Zoom">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<circle cx="11" cy="11" r="8"></circle>
+							<line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+							<line x1="11" y1="8" x2="11" y2="14"></line>
+							<line x1="8" y1="11" x2="14" y2="11"></line>
+						</svg>
+						<span class="zoom-value">{zoomLevel}%</span>
+						<span class="menu-shortcut">Reset</span>
 					</button>
 				{:else if id === 'zen'}
 					<button
@@ -801,6 +837,44 @@
 		transition: all 0.1s;
 	}
 
+	.title-actions.show-dropdown .menu-zoom-item {
+		width: 100%;
+		display: flex;
+		justify-content: flex-start;
+		align-items: center;
+		padding: 6px 12px;
+		height: auto;
+		font-size: 13px;
+		color: var(--color-fg-default);
+		font-family: var(--win-font);
+		gap: 8px;
+		background: transparent;
+		border: none;
+		border-radius: 4px;
+		cursor: pointer;
+	}
+
+	.title-actions.show-dropdown .menu-zoom-item:hover {
+		background: var(--color-canvas-subtle);
+	}
+
+	.title-actions.show-dropdown .menu-zoom-item svg {
+		width: 14px;
+		min-width: 14px;
+		height: 14px;
+		flex-shrink: 0;
+		display: block;
+		margin: 0;
+		color: var(--color-fg-muted);
+	}
+
+	:global(.title-actions.show-dropdown .menu-zoom-item .zoom-value) {
+		width: 32px;
+		text-align: left;
+		color: var(--color-fg-default);
+		display: inline-block;
+	}
+
 	.title-action-btn.active {
 		color: var(--color-accent-fg);
 		background: var(--color-canvas-subtle);
@@ -1173,7 +1247,7 @@
 		padding: 6px 12px;
 		font-size: 11px;
 		color: var(--color-fg-subtle);
-		background-color: var(--color-canvas-subtle);
+		background-color: transparent;
 		text-decoration: none;
 		border-radius: 4px;
 		font-family: var(--win-font);
@@ -1183,7 +1257,6 @@
 	}
 
 	.home-menu-footer:hover {
-		text-decoration: underline;
 		color: var(--color-fg-default);
 	}
 </style>

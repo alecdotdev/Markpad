@@ -877,7 +877,11 @@
 		}
 	}
 
-	let zoomLevel = $state(100);
+	let zoomLevel = $state(parseInt(localStorage.getItem('zoomLevel') || '100', 10));
+
+	$effect(() => {
+		localStorage.setItem('zoomLevel', String(zoomLevel));
+	});
 
 	function handleWheel(e: WheelEvent) {
 		if (e.ctrlKey || e.metaKey) {
