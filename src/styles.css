@@ -13,6 +13,8 @@ body {
 	width: 100%;
 	border-radius: 8px;
 	overflow: hidden;
+	user-select: none;
+	-webkit-user-select: none;
 }
 
 #app {
@@ -102,7 +104,7 @@ body {
 		--color-border-default: #30363d;
 		--color-border-muted: #21262d;
 		--color-neutral-muted: rgba(255, 255, 255, 0.05);
-		--color-accent-fg: #4390fc;
+		--color-accent-fg: #3577d3;
 		--color-accent-emphasis: #3781f0;
 		--color-success-fg: #3fb950;
 		--color-success-emphasis: #238636;
@@ -214,6 +216,8 @@ body {
 	font-size: 16px;
 	line-height: 1.5;
 	word-wrap: break-word;
+	user-select: text;
+	-webkit-user-select: text;
 }
 
 .markdown-body .octicon {

@@ -118,6 +118,8 @@
 			lineNumbers: settings.lineNumbers as 'on' | 'off' | 'relative' | 'interval',
 			renderLineHighlight: settings.renderLineHighlight ? 'line' : 'none',
 			occurrencesHighlight: settings.occurrencesHighlight ? 'singleFile' : 'off',
+			fontSize: settings.editorFontSize,
+			fontFamily: settings.editorFont,
 		});
 
 		if (tabManager.activeTab?.editorViewState) {
@@ -536,7 +538,8 @@
 				lineNumbers: settings.lineNumbers as 'on' | 'off' | 'relative' | 'interval',
 				renderLineHighlight: settings.renderLineHighlight as 'line' | 'none',
 				occurrencesHighlight: settings.occurrencesHighlight ? 'singleFile' : 'off',
-				fontSize: 14 * (zoomLevel / 100),
+				fontSize: settings.editorFontSize * (zoomLevel / 100),
+				fontFamily: settings.editorFont,
 			});
 		}
 	});
