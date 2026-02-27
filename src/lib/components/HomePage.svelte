@@ -106,21 +106,19 @@
 			<p class="empty-recent">Your recently opened files will appear here.</p>
 		{/if}
 	</div>
-	<div class="version-tag">v{version}</div>
 </div>
+<div class="version-tag">v{version}</div>
 
 <style>
 	.message {
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
-		margin-top: 32px;
 		align-items: center;
 		user-select: none;
 		font-family: var(--win-font);
-		height: 90vh;
+		height: 100vh;
 		width: 100%;
-		padding-top: 32px 20px 0px 20px;
 		box-sizing: border-box;
 		color: var(--color-fg-default);
 		opacity: 0.8;
@@ -297,8 +295,13 @@
 	}
 
 	.version-tag {
-		margin-top: auto;
-		padding-bottom: 20px;
+		position: absolute;
+		bottom: 20px;
+		left: 50%;
+		transform: translateX(-50%);
+		width: 100%;
+		text-align: center;
+		font-family: var(--win-font);
 		font-size: 10px;
 		opacity: 0.25;
 		font-weight: 500;

@@ -1394,13 +1394,15 @@
 			});
 		}} />
 
-	{#if showSettings}
-		<Settings show={true} onclose={() => (showSettings = false)} />
-	{/if}
+	<Settings show={showSettings} {theme} onSetTheme={(t) => (theme = t)} onclose={() => (showSettings = false)} />
 
 	{#if tabManager.activeTab && (tabManager.activeTab.path !== '' || tabManager.activeTab.title !== 'Recents') && !showHome}
 		{#key tabManager.activeTabId}
-			<div class="markdown-container" style="zoom: {isEditing && !isSplit ? 1 : zoomLevel / 100}; --code-font: {settings.codeFont}, monospace; --code-font-size: {settings.codeFontSize}px" onwheel={handleWheel} role="presentation">
+			<div
+				class="markdown-container"
+				style="zoom: {isEditing && !isSplit ? 1 : zoomLevel / 100}; --code-font: {settings.codeFont}, monospace; --code-font-size: {settings.codeFontSize}px"
+				onwheel={handleWheel}
+				role="presentation">
 				<div class="layout-container" class:split={isSplit} class:editing={isEditing}>
 					<!-- Editor Pane -->
 					<div class="pane editor-pane" class:active={isEditing || isSplit} style="flex: {isSplit ? tabManager.activeTab.splitRatio : isEditing ? 1 : 0}">
