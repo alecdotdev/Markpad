@@ -17,6 +17,13 @@ export class SettingsStore {
 	} | null>(null);
 	occurrencesHighlight = $state(false);
 
+	editorFont = $state('Consolas');
+	editorFontSize = $state(14);
+	previewFont = $state('Segoe UI');
+	previewFontSize = $state(16);
+	codeFont = $state('Consolas');
+	codeFontSize = $state(14);
+
 	constructor() {
 		if (typeof localStorage !== 'undefined') {
 			const savedMinimap = localStorage.getItem('editor.minimap');
@@ -31,6 +38,19 @@ export class SettingsStore {
 			const savedZenMode = localStorage.getItem('editor.zenMode');
 			const savedPreZenState = localStorage.getItem('editor.preZenState');
 			const savedOccurrencesHighlight = localStorage.getItem('editor.occurrencesHighlight');
+
+			const savedEditorFont = localStorage.getItem('editor.font');
+			const savedEditorFontSize = localStorage.getItem('editor.fontSize');
+			const savedPreviewFont = localStorage.getItem('preview.font');
+			const savedPreviewFontSize = localStorage.getItem('preview.fontSize');
+			const savedCodeFont = localStorage.getItem('preview.codeFont');
+			const savedCodeFontSize = localStorage.getItem('preview.codeFontSize');
+			const parseFontSize = (value: string | null, fallback: number, min: number, max: number) => {
+				if (value === null) return fallback;
+				const parsed = Number.parseInt(value, 10);
+				if (!Number.isFinite(parsed)) return fallback;
+				return Math.min(max, Math.max(min, parsed));
+			};
 
 			if (savedMinimap !== null) this.minimap = savedMinimap === 'true';
 			if (savedWordWrap !== null) this.wordWrap = savedWordWrap;
@@ -51,6 +71,13 @@ export class SettingsStore {
 				}
 			}
 
+			if (savedEditorFont !== null) this.editorFont = savedEditorFont;
+			this.editorFontSize = parseFontSize(savedEditorFontSize, this.editorFontSize, 10, 24);
+			if (savedPreviewFont !== null) this.previewFont = savedPreviewFont;
+			this.previewFontSize = parseFontSize(savedPreviewFontSize, this.previewFontSize, 12, 28);
+			if (savedCodeFont !== null) this.codeFont = savedCodeFont;
+			this.codeFontSize = parseFontSize(savedCodeFontSize, this.codeFontSize, 10, 24);
+
 			$effect.root(() => {
 				$effect(() => {
 					localStorage.setItem('editor.minimap', String(this.minimap));
@@ -64,6 +91,12 @@ export class SettingsStore {
 					localStorage.setItem('editor.showTabs', String(this.showTabs));
 					localStorage.setItem('editor.zenMode', String(this.zenMode));
 					localStorage.setItem('editor.occurrencesHighlight', String(this.occurrencesHighlight));
+					localStorage.setItem('editor.font', this.editorFont);
+					localStorage.setItem('editor.fontSize', String(this.editorFontSize));
+					localStorage.setItem('preview.font', this.previewFont);
+					localStorage.setItem('preview.fontSize', String(this.previewFontSize));
+					localStorage.setItem('preview.codeFont', this.codeFont);
+					localStorage.setItem('preview.codeFontSize', String(this.codeFontSize));
 					if (this.preZenState) {
 						localStorage.setItem('editor.preZenState', JSON.stringify(this.preZenState));
 					} else {

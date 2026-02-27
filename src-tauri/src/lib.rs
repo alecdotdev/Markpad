@@ -221,6 +221,16 @@ fn is_win11() -> bool {
     false
 }
 
+#[tauri::command]
+fn get_system_fonts() -> Vec<String> {
+    use font_kit::source::SystemSource;
+    let source = SystemSource::new();
+    let mut families = source.all_families().unwrap_or_default();
+    families.sort();
+    families.dedup();
+    families
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "linux")]
@@ -373,7 +383,8 @@ pub fn run() {
             watch_file,
             unwatch_file,
             show_window,
-            save_theme
+            save_theme,
+            get_system_fonts
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

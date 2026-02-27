@@ -8,6 +8,7 @@
 	import { open, save, ask } from '@tauri-apps/plugin-dialog';
 	import Installer from './Installer.svelte';
 	import Uninstaller from './Uninstaller.svelte';
+	import Settings from './components/Settings.svelte';
 	import TitleBar from './components/TitleBar.svelte';
 	import Editor from './components/Editor.svelte';
 	import Modal from './components/Modal.svelte';
@@ -18,6 +19,7 @@
 	import DOMPurify from 'dompurify';
 	import HomePage from './components/HomePage.svelte';
 	import { tabManager } from './stores/tabs.svelte.js';
+	import { settings } from './stores/settings.svelte.js';
 
 	// syntax highlighting & latex
 	let hljs: any = $state(null);
@@ -28,6 +30,8 @@
 	import 'katex/dist/katex.min.css';
 
 	let mode = $state<'loading' | 'app' | 'installer' | 'uninstall'>('loading');
+
+	let showSettings = $state(false);
 
 	let recentFiles = $state<string[]>([]);
 	let isFocused = $state(true);
@@ -1336,6 +1340,7 @@
 		ontoggleFullWidth={() => (isFullWidth = !isFullWidth)}
 		{theme}
 		onSetTheme={(t) => (theme = t)}
+		onopenSettings={() => (showSettings = true)}
 		oncloseTab={(id) => {
 			canCloseTab(id).then((can) => {
 				if (can) tabManager.closeTab(id);
@@ -1382,15 +1387,20 @@
 		ontoggleFullWidth={() => (isFullWidth = !isFullWidth)}
 		{theme}
 		onSetTheme={(t) => (theme = t)}
+		onopenSettings={() => (showSettings = true)}
 		oncloseTab={(id) => {
 			canCloseTab(id).then((can) => {
 				if (can) tabManager.closeTab(id);
 			});
 		}} />
 
+	{#if showSettings}
+		<Settings show={true} onclose={() => (showSettings = false)} />
+	{/if}
+
 	{#if tabManager.activeTab && (tabManager.activeTab.path !== '' || tabManager.activeTab.title !== 'Recents') && !showHome}
 		{#key tabManager.activeTabId}
-			<div class="markdown-container" style="zoom: {isEditing && !isSplit ? 1 : zoomLevel / 100}" onwheel={handleWheel} role="presentation">
+			<div class="markdown-container" style="zoom: {isEditing && !isSplit ? 1 : zoomLevel / 100}; --code-font: {settings.codeFont}, monospace; --code-font-size: {settings.codeFontSize}px" onwheel={handleWheel} role="presentation">
 				<div class="layout-container" class:split={isSplit} class:editing={isEditing}>
 					<!-- Editor Pane -->
 					<div class="pane editor-pane" class:active={isEditing || isSplit} style="flex: {isSplit ? tabManager.activeTab.splitRatio : isEditing ? 1 : 0}">
@@ -1430,7 +1440,7 @@
 							bind:innerHTML={htmlContent}
 							onscroll={handleScroll}
 							tabindex="-1"
-							style="outline: none;">
+							style="outline: none; font-family: {settings.previewFont}, sans-serif; font-size: {settings.previewFontSize}px;">
 						</article>
 					</div>
 				</div>
@@ -1504,6 +1514,14 @@
 		height: 100%;
 		overflow-y: auto;
 		transform: translate3d(0, 0, 0);
+	}
+
+	.markdown-container :global(.markdown-body pre),
+	.markdown-container :global(.markdown-body pre code),
+	.markdown-container :global(.markdown-body pre tt),
+	.markdown-container :global(.markdown-body code) {
+		font-family: var(--code-font, Consolas, monospace) !important;
+		font-size: var(--code-font-size, 14px) !important;
 	}
 
 	.markdown-body.full-width {
