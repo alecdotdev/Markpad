@@ -32,6 +32,18 @@ See [CHANGELOG.md](CHANGELOG.md)
 
 Download the latest executable or installer from the [releases page](https://github.com/alecdotdev/Markpad/releases/latest) or from [markpad.sftwr.dev](https://markpad.sftwr.dev)
 
+#### Snap Store (Linux)
+You can install Markpad from the Snap Store:
+```bash
+sudo snap install markpad
+```
+
+#### Chocolatey (Windows)
+You can install Markpad using Chocolatey:
+```powershell
+choco install markpad
+```
+
 #### Windows Installer
 Automatically configures `.md` file association 
 
