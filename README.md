@@ -41,7 +41,7 @@ sudo snap install markpad
 #### Chocolatey (Windows)
 You can install Markpad using Chocolatey:
 ```powershell
-choco install markpad
+choco install markpad-app
 ```
 
 #### Windows Installer
