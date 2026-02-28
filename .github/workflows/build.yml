@@ -85,6 +85,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm
+          sudo snap install snapcraft --classic
 
       - name: Install Frontend Dependencies
         run: npm install
@@ -100,9 +101,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp src-tauri/target/release/Markpad.exe Markpad-x64.exe
-          cp Markpad-x64.exe MarkpadInstaller-x64.exe
-          gh release upload v${{ needs.create-release.outputs.version }} Markpad-x64.exe MarkpadInstaller-x64.exe --clobber
+          VERSION="${{ needs.create-release.outputs.version }}"
+          cp src-tauri/target/release/Markpad.exe "Markpad_${VERSION}_x64.exe"
+          cp "Markpad_${VERSION}_x64.exe" "MarkpadInstaller_${VERSION}_x64.exe"
+          gh release upload v$VERSION "Markpad_${VERSION}_x64.exe" "MarkpadInstaller_${VERSION}_x64.exe" --clobber
+
+      - name: Create Chocolatey Package
+        if: matrix.platform == 'windows-latest' && matrix.arch == 'x64'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p packaging/choco/tools
+          cp src-tauri/target/release/Markpad.exe packaging/choco/tools/Markpad.exe
+          choco pack packaging/choco/markpad.nuspec --version ${{ needs.create-release.outputs.version }} --outdir .
+          gh release upload v${{ needs.create-release.outputs.version }} markpad.${{ needs.create-release.outputs.version }}.nupkg --clobber
+
+      - name: Publish to Chocolatey
+        if: matrix.platform == 'windows-latest' && matrix.arch == 'x64'
+        shell: pwsh
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          choco apikey --key $env:CHOCO_API_KEY --source https://push.chocolatey.org/
+          choco push markpad.${{ needs.create-release.outputs.version }}.nupkg --source https://push.chocolatey.org/
 
       # --- Windows Build (ARM64) ---
       - name: Build Windows ARM64
@@ -115,9 +137,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp src-tauri/target/aarch64-pc-windows-msvc/release/Markpad.exe Markpad-arm64.exe
-          cp Markpad-arm64.exe MarkpadInstaller-arm64.exe
-          gh release upload v${{ needs.create-release.outputs.version }} Markpad-arm64.exe MarkpadInstaller-arm64.exe --clobber
+          VERSION="${{ needs.create-release.outputs.version }}"
+          cp src-tauri/target/aarch64-pc-windows-msvc/release/Markpad.exe "Markpad_${VERSION}_arm64.exe"
+          cp "Markpad_${VERSION}_arm64.exe" "MarkpadInstaller_${VERSION}_arm64.exe"
+          gh release upload v$VERSION "Markpad_${VERSION}_arm64.exe" "MarkpadInstaller_${VERSION}_arm64.exe" --clobber
 
       # --- Linux Build ---
       - name: Build Linux
@@ -133,6 +156,28 @@ jobs:
           find src-tauri/target/release/bundle/deb -name "*.deb" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
           find src-tauri/target/release/bundle/rpm -name "*.rpm" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
           find src-tauri/target/release/bundle/appimage -name "*.AppImage" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
+
+      - name: Build and Publish Snap Package
+        if: matrix.platform == 'ubuntu-22.04'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          # Build snap
+          snapcraft
+          
+          # Find and upload the snap
+          SNAP_FILE=$(ls *.snap | head -n 1)
+          if [ -n "$SNAP_FILE" ]; then
+            gh release upload v${{ needs.create-release.outputs.version }} $SNAP_FILE --clobber
+            
+            # Publish to snap store
+            snapcraft push $SNAP_FILE --release stable
+          else
+            echo "Snap file not found!"
+            exit 1
+          fi
 
       # --- MacOS Build ---
       - name: Build MacOS (Universal)

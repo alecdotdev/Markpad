@@ -1,0 +1,64 @@
+name: markpad
+adopt-info: markpad
+summary: The Notepad equivalent for Markdown
+description: A lightweight, fast, and beautiful markdown viewer and editor.
+
+confinement: strict
+base: core24
+grade: stable
+
+apps:
+  markpad:
+    command: markpad
+    desktop: usr/share/applications/markpad.desktop
+    extensions: [gnome]
+    plugs:
+      - network
+      - network-bind
+      - wayland
+      - home
+
+parts:
+  markpad:
+    plugin: rust
+    source: .
+    build-packages:
+      - libwebkit2gtk-4.1-dev
+      - build-essential
+      - curl
+      - wget
+      - file
+      - libssl-dev
+      - libgtk-3-dev
+      - libappindicator3-dev
+      - librsvg2-dev
+    stage-packages:
+      - libwebkit2gtk-4.1-0
+      - libsoup-3.0-0
+      - libjavascriptcoregtk-4.1-0
+    build-snaps:
+      - node/20/stable
+    override-build: |
+      set -e
+      craftctl set version="$(node -p "require('./package.json').version")"
+      npm install
+      npm run tauri build
+      
+      # The binary is built in src-tauri/target/release/
+      install -D -m755 src-tauri/target/release/Markpad $CRAFT_PART_INSTALL/markpad
+      
+      # Install the icon
+      install -D -m644 src-tauri/icons/128x128.png $CRAFT_PART_INSTALL/usr/share/icons/hicolor/128x128/apps/markpad.png
+      install -D -m644 src-tauri/icons/32x32.png $CRAFT_PART_INSTALL/usr/share/icons/hicolor/32x32/apps/markpad.png
+      
+      # Install the desktop file
+      cat << EOF > markpad.desktop
+      [Desktop Entry]
+      Name=Markpad
+      Exec=markpad
+      Icon=markpad
+      Type=Application
+      Categories=Utility;TextEditor;
+      MimeType=text/markdown;text/plain;
+      EOF
+      install -D -m644 markpad.desktop $CRAFT_PART_INSTALL/usr/share/applications/markpad.desktop

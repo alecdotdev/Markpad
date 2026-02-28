@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>markpad</id>
+    <version>$version$</version>
+    <title>Markpad</title>
+    <authors>alecdotdev</authors>
+    <description>The Notepad equivalent for Markdown</description>
+    <tags>markdown viewer tauri sveltekit editor notepad</tags>
+    <projectUrl>https://github.com/alecdotdev/markpad</projectUrl>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
