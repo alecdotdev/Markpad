@@ -370,41 +370,54 @@
 			}
 
 			// Existing highlight.js logic
-			hljs.highlightElement(codeEl);
+			// Check if language was explicitly specified BEFORE highlight.js runs
+			const hasExplicitLang = Array.from(codeEl.classList).some((c) => c.startsWith('language-'));
+			
+			// Only highlight if explicit language is specified
+			if (hasExplicitLang) {
+				hljs.highlightElement(codeEl);
+			}
+
+			const langClass = Array.from(codeEl.classList).find((c) => c.startsWith('language-'));
 
 			if (preEl && preEl.tagName === 'PRE') {
 				preEl.querySelectorAll('.lang-label').forEach((l) => l.remove());
-				const langClass = Array.from(codeEl.classList).find((c) => c.startsWith('language-'));
 				const codeContent = codeEl.textContent || '';
 				const existingWrapper = preEl.parentElement?.classList.contains('code-block-shell') ? preEl.parentElement as HTMLDivElement : null;
 				existingWrapper?.querySelectorAll(':scope > .lang-label').forEach((l) => l.remove());
-				if (langClass) {
-					const wrapper = existingWrapper ?? document.createElement('div');
-					if (!existingWrapper) {
-						wrapper.className = 'code-block-shell';
-						preEl.replaceWith(wrapper);
-						wrapper.appendChild(preEl);
-					}
 
-					const label = document.createElement('button');
-					label.className = 'lang-label';
+				const wrapper = existingWrapper ?? document.createElement('div');
+				if (!existingWrapper) {
+					wrapper.className = 'code-block-shell';
+					preEl.replaceWith(wrapper);
+					wrapper.appendChild(preEl);
+				}
+
+				const copyCode = () => {
+					const codeToCopy = codeContent.replace(/\n$/, '');
+					navigator.clipboard.writeText(codeToCopy).then(() => {
+						const originalContent = label.innerHTML;
+						label.innerHTML = 'Copied!';
+						label.classList.add('copied');
+						setTimeout(() => {
+							label.innerHTML = originalContent;
+							label.classList.remove('copied');
+						}, 1500);
+					}).catch((err) => {
+						console.error('Failed to copy code:', err);
+					});
+				};
+
+				const label = document.createElement('button');
+				label.className = 'lang-label';
+				label.title = 'Click to copy code';
+				label.onclick = copyCode;
+
+				if (hasExplicitLang && langClass) {
 					label.textContent = langClass.replace('language-', '');
-					label.title = 'Click to copy code';
-					label.onclick = () => {
-						// Remove trailing newline when copying
-						const codeToCopy = codeContent.replace(/\n$/, '');
-						navigator.clipboard.writeText(codeToCopy).then(() => {
-							const originalText = label.textContent;
-							label.textContent = 'Copied!';
-							label.classList.add('copied');
-							setTimeout(() => {
-								label.textContent = originalText;
-								label.classList.remove('copied');
-							}, 1500);
-						}).catch((err) => {
-							console.error('Failed to copy code:', err);
-						});
-					};
+					wrapper.appendChild(label);
+				} else {
+					label.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
 					wrapper.appendChild(label);
 				}
 			}

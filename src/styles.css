@@ -834,6 +834,9 @@ body {
 	padding: 2px 6px;
 	border-radius: 4px;
 	transition: all 0.2s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .lang-label:hover {
@@ -845,6 +848,12 @@ body {
 	opacity: 1;
 	background: var(--color-accent-fg);
 	color: white;
+}
+
+.lang-label svg {
+	display: block;
+	height: 14px;
+	width: 14px;
 }
 
 .hljs-comment,
