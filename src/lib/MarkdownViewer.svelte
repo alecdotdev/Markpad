@@ -376,7 +376,16 @@
 				preEl.querySelectorAll('.lang-label').forEach((l) => l.remove());
 				const langClass = Array.from(codeEl.classList).find((c) => c.startsWith('language-'));
 				const codeContent = codeEl.textContent || '';
+				const existingWrapper = preEl.parentElement?.classList.contains('code-block-shell') ? preEl.parentElement as HTMLDivElement : null;
+				existingWrapper?.querySelectorAll(':scope > .lang-label').forEach((l) => l.remove());
 				if (langClass) {
+					const wrapper = existingWrapper ?? document.createElement('div');
+					if (!existingWrapper) {
+						wrapper.className = 'code-block-shell';
+						preEl.replaceWith(wrapper);
+						wrapper.appendChild(preEl);
+					}
+
 					const label = document.createElement('button');
 					label.className = 'lang-label';
 					label.textContent = langClass.replace('language-', '');
@@ -396,7 +405,7 @@
 							console.error('Failed to copy code:', err);
 						});
 					};
-					preEl.appendChild(label);
+					wrapper.appendChild(label);
 				}
 			}
 		}

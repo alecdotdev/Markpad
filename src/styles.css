@@ -812,6 +812,10 @@ body {
 	overflow-x: auto;
 }
 
+.code-block-shell {
+	position: relative;
+}
+
 .lang-label {
 	position: absolute;
 	top: 6px;
