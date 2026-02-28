@@ -625,7 +625,7 @@ body {
 
 .markdown-body .highlight pre,
 .markdown-body pre {
-	padding: 16px;
+	padding: 22px 16px;
 	overflow: auto;
 	font-size: 85%;
 	line-height: 1.45;
@@ -814,16 +814,33 @@ body {
 
 .lang-label {
 	position: absolute;
-	top: 8px;
-	right: 12px;
-	font-size: 10px;
+	top: 6px;
+	right: 8px;
+	font-size: 9px;
 	font-family: var(--win-font);
 	text-transform: uppercase;
 	letter-spacing: 0.1em;
 	opacity: 0.3;
 	color: var(--color-fg-default);
-	pointer-events: none;
+	pointer-events: auto;
 	user-select: none;
+	cursor: pointer;
+	background: transparent;
+	border: none;
+	padding: 2px 6px;
+	border-radius: 4px;
+	transition: all 0.2s ease;
+}
+
+.lang-label:hover {
+	opacity: 0.8;
+	background: var(--color-neutral-muted);
+}
+
+.lang-label.copied {
+	opacity: 1;
+	background: var(--color-accent-fg);
+	color: white;
 }
 
 .hljs-comment,

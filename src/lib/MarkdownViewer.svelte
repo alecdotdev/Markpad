@@ -375,10 +375,27 @@
 			if (preEl && preEl.tagName === 'PRE') {
 				preEl.querySelectorAll('.lang-label').forEach((l) => l.remove());
 				const langClass = Array.from(codeEl.classList).find((c) => c.startsWith('language-'));
+				const codeContent = codeEl.textContent || '';
 				if (langClass) {
-					const label = document.createElement('span');
+					const label = document.createElement('button');
 					label.className = 'lang-label';
 					label.textContent = langClass.replace('language-', '');
+					label.title = 'Click to copy code';
+					label.onclick = () => {
+						// Remove trailing newline when copying
+						const codeToCopy = codeContent.replace(/\n$/, '');
+						navigator.clipboard.writeText(codeToCopy).then(() => {
+							const originalText = label.textContent;
+							label.textContent = 'Copied!';
+							label.classList.add('copied');
+							setTimeout(() => {
+								label.textContent = originalText;
+								label.classList.remove('copied');
+							}, 1500);
+						}).catch((err) => {
+							console.error('Failed to copy code:', err);
+						});
+					};
 					preEl.appendChild(label);
 				}
 			}
