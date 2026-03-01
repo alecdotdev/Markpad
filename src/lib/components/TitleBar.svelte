@@ -88,6 +88,7 @@
 	const DEBUG_MACOS = false;
 
 	const isMac = typeof navigator !== 'undefined' && (navigator.userAgent.includes('Macintosh') || DEBUG_MACOS);
+	const useNativeMacChrome = isMac && !DEBUG_MACOS;
 	const modifier = isMac ? 'Cmd' : 'Ctrl';
 
 	let isWin11 = $state(false);
@@ -240,12 +241,12 @@
 
 <svelte:window bind:innerWidth />
 
-<div class="custom-title-bar {isScrolled ? 'scrolled' : ''} {!isMac ? 'windows' : ''}">
+<div class="custom-title-bar {isScrolled ? 'scrolled' : ''} {!isMac ? 'windows' : ''} {useNativeMacChrome ? 'native-mac' : ''}">
 	{#if !isMac && !isWin11}
 		<div class="window-top-border"></div>
 	{/if}
 	<div class="window-controls-left" data-tauri-drag-region>
-		{#if isMac}
+		{#if isMac && !useNativeMacChrome}
 			<div class="macos-traffic-lights" class:visible={isMac}>
 				<button class="mac-btn mac-close" onclick={() => appWindow.close()} aria-label="Close">
 					<svg width="6" height="6" viewBox="0 0 6 6" class="mac-icon"
@@ -737,6 +738,10 @@
 		gap: 12px;
 		position: relative;
 		z-index: 10000;
+	}
+
+	.custom-title-bar.native-mac .window-controls-left {
+		padding-left: 78px;
 	}
 
 	.title-actions-container {
