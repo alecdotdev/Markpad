@@ -625,13 +625,20 @@ body {
 
 .markdown-body .highlight pre,
 .markdown-body pre {
-	padding: 22px 16px;
-	overflow: auto;
+	padding: 18px 16px;
+	overflow-x: auto;
+	overflow-y: hidden;
 	font-size: 85%;
 	line-height: 1.45;
 	background-color: var(--color-canvas-subtle);
 	border-radius: 6px;
 	position: relative;
+	scrollbar-width: thin;
+}
+
+.markdown-body .highlight pre::-webkit-scrollbar,
+.markdown-body pre::-webkit-scrollbar {
+	height: 6px;
 }
 
 .markdown-body pre code,
