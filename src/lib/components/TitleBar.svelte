@@ -170,37 +170,38 @@
 		}
 	});
 
-	const inlineIds = ['edit', 'split'];
+	const inlineIds = ['fullWidth', 'edit', 'split', 'sync', 'live'];
 
 	let visibleActionIds = $derived.by(() => {
 		const list: string[] = [];
-		list.push('settings');
-		if (zoomLevel && zoomLevel !== 100) list.push('zoom');
-		list.push('theme');
 
 		if (tabManager.activeTab && !showHome) {
-			list.push('zen');
-			list.push('tabs');
 			if (currentFile) list.push('open_loc');
 
 			const ext = currentFile ? currentFile.split('.').pop()?.toLowerCase() || '' : 'md';
 			const isMarkdown = ['md', 'markdown', 'mdown', 'mkd'].includes(ext);
 
 			if (isMarkdown) {
-				list.push('split');
-				if (tabManager.activeTab?.isSplit) {
-					list.push('sync');
-				} else {
+				if (!tabManager.activeTab?.isSplit) {
 					list.push('fullWidth');
 					if (!isEditing && currentFile) {
 						list.push('live');
 					}
-				}
-				if (!tabManager.activeTab?.isSplit) {
 					list.push('edit');
 				}
+				if (tabManager.activeTab?.isSplit) {
+					list.push('sync');
+				}
+				list.push('split');
 			}
+			list.push('zen');
+			list.push('tabs');
 		}
+
+		if (zoomLevel && zoomLevel !== 100) list.push('zoom');
+		list.push('theme');
+		list.push('settings');
+
 		return list;
 	});
 
@@ -790,7 +791,7 @@
 		padding: 4px;
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 		z-index: 10006;
-		width: 180px;
+		width: 200px;
 	}
 
 	.theme-dropdown-container {
@@ -833,6 +834,10 @@
 		margin-left: 0;
 		font-size: 13px;
 		text-align: left;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		flex: 1;
 	}
 
 	.action-label {
@@ -1201,6 +1206,8 @@
 		margin-left: auto;
 		font-size: 11px;
 		color: var(--color-fg-muted);
+		white-space: nowrap;
+		flex-shrink: 0;
 	}
 
 	.home-menu-item .menu-shortcut,
@@ -1227,7 +1234,7 @@
 		padding: 4px;
 		display: flex;
 		flex-direction: column;
-		width: 180px;
+		width: 200px;
 		z-index: 10006;
 		gap: 1px;
 	}
@@ -1245,6 +1252,7 @@
 		border-radius: 4px;
 		font-family: var(--win-font);
 		gap: 8px;
+		white-space: nowrap;
 	}
 
 	.home-menu-item:hover {
