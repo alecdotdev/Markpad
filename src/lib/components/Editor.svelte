@@ -21,6 +21,7 @@
 		onreveal,
 		ontoggleEdit,
 		ontoggleLive,
+		ontoggleSplit,
 		onhome,
 		onnextTab,
 		onprevTab,
@@ -38,6 +39,7 @@
 		onreveal?: () => void;
 		ontoggleEdit?: () => void;
 		ontoggleLive?: () => void;
+		ontoggleSplit?: () => void;
 		onhome?: () => void;
 		onnextTab?: () => void;
 		onprevTab?: () => void;
@@ -418,11 +420,7 @@
 			id: 'view-toggle-split',
 			label: 'Toggle Split View',
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyH],
-			run: () => {
-				if (currentTabId) {
-					tabManager.toggleSplit(currentTabId);
-				}
-			},
+			run: () => ontoggleSplit?.(),
 		});
 
 		editor.addAction({

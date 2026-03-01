@@ -997,7 +997,7 @@
 					console.error('Failed to load raw content for split view', e);
 				}
 			}
-			tab.isSplit = true;
+			tabManager.setSplitEnabled(tab.id, true);
 			if (liveMode) toggleLiveMode();
 		} else {
 			if (tab.isDirty && tab.path !== '') {
@@ -1020,7 +1020,7 @@
 					}
 				}
 			}
-			tab.isSplit = false;
+			tabManager.setSplitEnabled(tab.id, false);
 			if (tab.path !== '') {
 				tab.isDirty = false;
 				await loadMarkdown(tab.path);
@@ -1488,6 +1488,7 @@
 								onreveal={openFileLocation}
 								ontoggleEdit={() => toggleEdit()}
 								ontoggleLive={toggleLiveMode}
+								ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 								onhome={() => (showHome = true)}
 								onnextTab={() => tabManager.cycleTab('next')}
 								onprevTab={() => tabManager.cycleTab('prev')}

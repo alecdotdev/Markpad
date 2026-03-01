@@ -21,6 +21,22 @@ export interface Tab {
 class TabManager {
 	tabs = $state<Tab[]>([]);
 	activeTabId = $state<string | null>(null);
+	splitScrollSyncPreference = $state(false);
+
+	constructor() {
+		if (typeof localStorage !== 'undefined') {
+			const saved = localStorage.getItem('editor.splitScrollSync');
+			if (saved !== null) {
+				this.splitScrollSyncPreference = saved === 'true';
+			}
+		}
+	}
+
+	private saveSplitScrollSyncPreference() {
+		if (typeof localStorage !== 'undefined') {
+			localStorage.setItem('editor.splitScrollSync', String(this.splitScrollSyncPreference));
+		}
+	}
 
 	get activeTab() {
 		return this.tabs.find((t) => t.id === this.activeTabId);
@@ -193,7 +209,20 @@ class TabManager {
 	toggleSplit(id: string) {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
-			tab.isSplit = !tab.isSplit;
+			this.setSplitEnabled(id, !tab.isSplit);
+		}
+	}
+
+	setSplitEnabled(id: string, enabled: boolean) {
+		const tab = this.tabs.find((t) => t.id === id);
+		if (!tab) return;
+
+		tab.isSplit = enabled;
+		if (enabled) {
+			tab.isScrollSynced = this.splitScrollSyncPreference;
+		} else {
+			this.splitScrollSyncPreference = tab.isScrollSynced;
+			this.saveSplitScrollSyncPreference();
 		}
 	}
 
@@ -208,6 +237,8 @@ class TabManager {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
 			tab.isScrollSynced = !tab.isScrollSynced;
+			this.splitScrollSyncPreference = tab.isScrollSynced;
+			this.saveSplitScrollSyncPreference();
 		}
 	}
 

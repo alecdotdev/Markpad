@@ -82,7 +82,7 @@
 	const appWindow = getCurrentWindow();
 
 	let innerWidth = $state(1000);
-	let isCollapsed = $derived(innerWidth <= 800 || settings.zenMode);
+	let isCollapsed = $derived(innerWidth <= 450 || settings.zenMode);
 
 	// DEBUG: Set this to true to simulate macOS traffic lights on Windows
 	const DEBUG_MACOS = false;
