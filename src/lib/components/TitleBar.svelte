@@ -82,12 +82,13 @@
 	const appWindow = getCurrentWindow();
 
 	let innerWidth = $state(1000);
-	let isCollapsed = $derived(innerWidth <= 800 || settings.zenMode);
+	let isCollapsed = $derived(innerWidth <= 450 || settings.zenMode);
 
 	// DEBUG: Set this to true to simulate macOS traffic lights on Windows
 	const DEBUG_MACOS = false;
 
 	const isMac = typeof navigator !== 'undefined' && (navigator.userAgent.includes('Macintosh') || DEBUG_MACOS);
+	const useNativeMacChrome = isMac && !DEBUG_MACOS;
 	const modifier = isMac ? 'Cmd' : 'Ctrl';
 
 	let isWin11 = $state(false);
@@ -170,37 +171,38 @@
 		}
 	});
 
-	const inlineIds = ['edit', 'split'];
+	const inlineIds = ['fullWidth', 'edit', 'split', 'sync', 'live'];
 
 	let visibleActionIds = $derived.by(() => {
 		const list: string[] = [];
-		list.push('settings');
-		if (zoomLevel && zoomLevel !== 100) list.push('zoom');
-		list.push('theme');
 
 		if (tabManager.activeTab && !showHome) {
-			list.push('zen');
-			list.push('tabs');
 			if (currentFile) list.push('open_loc');
 
 			const ext = currentFile ? currentFile.split('.').pop()?.toLowerCase() || '' : 'md';
 			const isMarkdown = ['md', 'markdown', 'mdown', 'mkd'].includes(ext);
 
 			if (isMarkdown) {
-				list.push('split');
-				if (tabManager.activeTab?.isSplit) {
-					list.push('sync');
-				} else {
+				if (!tabManager.activeTab?.isSplit) {
 					list.push('fullWidth');
 					if (!isEditing && currentFile) {
 						list.push('live');
 					}
-				}
-				if (!tabManager.activeTab?.isSplit) {
 					list.push('edit');
 				}
+				if (tabManager.activeTab?.isSplit) {
+					list.push('sync');
+				}
+				list.push('split');
 			}
+			list.push('zen');
+			list.push('tabs');
 		}
+
+		if (zoomLevel && zoomLevel !== 100) list.push('zoom');
+		list.push('theme');
+		list.push('settings');
+
 		return list;
 	});
 
@@ -239,12 +241,12 @@
 
 <svelte:window bind:innerWidth />
 
-<div class="custom-title-bar {isScrolled ? 'scrolled' : ''} {!isMac ? 'windows' : ''}">
+<div class="custom-title-bar {isScrolled ? 'scrolled' : ''} {!isMac ? 'windows' : ''} {useNativeMacChrome ? 'native-mac' : ''}">
 	{#if !isMac && !isWin11}
 		<div class="window-top-border"></div>
 	{/if}
 	<div class="window-controls-left" data-tauri-drag-region>
-		{#if isMac}
+		{#if isMac && !useNativeMacChrome}
 			<div class="macos-traffic-lights" class:visible={isMac}>
 				<button class="mac-btn mac-close" onclick={() => appWindow.close()} aria-label="Close">
 					<svg width="6" height="6" viewBox="0 0 6 6" class="mac-icon"
@@ -738,6 +740,10 @@
 		z-index: 10000;
 	}
 
+	.custom-title-bar.native-mac .window-controls-left {
+		padding-left: 78px;
+	}
+
 	.title-actions-container {
 		display: flex;
 		align-items: center;
@@ -790,7 +796,7 @@
 		padding: 4px;
 		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 		z-index: 10006;
-		width: 180px;
+		width: 200px;
 	}
 
 	.theme-dropdown-container {
@@ -833,6 +839,10 @@
 		margin-left: 0;
 		font-size: 13px;
 		text-align: left;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		flex: 1;
 	}
 
 	.action-label {
@@ -1201,6 +1211,8 @@
 		margin-left: auto;
 		font-size: 11px;
 		color: var(--color-fg-muted);
+		white-space: nowrap;
+		flex-shrink: 0;
 	}
 
 	.home-menu-item .menu-shortcut,
@@ -1227,7 +1239,7 @@
 		padding: 4px;
 		display: flex;
 		flex-direction: column;
-		width: 180px;
+		width: 200px;
 		z-index: 10006;
 		gap: 1px;
 	}
@@ -1245,6 +1257,7 @@
 		border-radius: 4px;
 		font-family: var(--win-font);
 		gap: 8px;
+		white-space: nowrap;
 	}
 
 	.home-menu-item:hover {

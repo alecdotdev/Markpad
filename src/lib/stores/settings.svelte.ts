@@ -1,3 +1,36 @@
+import { invoke } from '@tauri-apps/api/core';
+
+export type OSType = 'macos' | 'windows' | 'linux' | 'unknown';
+
+export interface DefaultFonts {
+	editorFont: string;
+	previewFont: string;
+	codeFont: string;
+}
+
+export const DEFAULT_FONTS: Record<OSType, DefaultFonts> = {
+	macos: {
+		editorFont: 'Menlo',
+		previewFont: 'Helvetica Neue',
+		codeFont: 'Menlo',
+	},
+	windows: {
+		editorFont: 'Consolas',
+		previewFont: 'Segoe UI',
+		codeFont: 'Consolas',
+	},
+	linux: {
+		editorFont: 'Monospace',
+		previewFont: 'system-ui',
+		codeFont: 'Monospace',
+	},
+	unknown: {
+		editorFont: 'Consolas',
+		previewFont: 'Segoe UI',
+		codeFont: 'Consolas',
+	},
+};
+
 export class SettingsStore {
 	minimap = $state(false);
 	wordWrap = $state('on');
@@ -16,6 +49,7 @@ export class SettingsStore {
 		lineNumbers: string;
 	} | null>(null);
 	occurrencesHighlight = $state(false);
+	osType = $state<OSType>('unknown');
 
 	editorFont = $state('Consolas');
 	editorFontSize = $state(14);
@@ -45,6 +79,7 @@ export class SettingsStore {
 			const savedPreviewFontSize = localStorage.getItem('preview.fontSize');
 			const savedCodeFont = localStorage.getItem('preview.codeFont');
 			const savedCodeFontSize = localStorage.getItem('preview.codeFontSize');
+
 			const parseFontSize = (value: string | null, fallback: number, min: number, max: number) => {
 				if (value === null) return fallback;
 				const parsed = Number.parseInt(value, 10);
@@ -71,12 +106,31 @@ export class SettingsStore {
 				}
 			}
 
-			if (savedEditorFont !== null) this.editorFont = savedEditorFont;
-			this.editorFontSize = parseFontSize(savedEditorFontSize, this.editorFontSize, 10, 24);
-			if (savedPreviewFont !== null) this.previewFont = savedPreviewFont;
-			this.previewFontSize = parseFontSize(savedPreviewFontSize, this.previewFontSize, 12, 28);
-			if (savedCodeFont !== null) this.codeFont = savedCodeFont;
-			this.codeFontSize = parseFontSize(savedCodeFontSize, this.codeFontSize, 10, 24);
+			// Get OS type and set default fonts
+			this.initOSType().then(() => {
+				const defaults = DEFAULT_FONTS[this.osType];
+
+				if (savedEditorFont !== null) {
+					this.editorFont = savedEditorFont;
+				} else {
+					this.editorFont = defaults.editorFont;
+				}
+				this.editorFontSize = parseFontSize(savedEditorFontSize, 14, 10, 24);
+
+				if (savedPreviewFont !== null) {
+					this.previewFont = savedPreviewFont;
+				} else {
+					this.previewFont = defaults.previewFont;
+				}
+				this.previewFontSize = parseFontSize(savedPreviewFontSize, 16, 12, 28);
+
+				if (savedCodeFont !== null) {
+					this.codeFont = savedCodeFont;
+				} else {
+					this.codeFont = defaults.codeFont;
+				}
+				this.codeFontSize = parseFontSize(savedCodeFontSize, 14, 10, 24);
+			});
 
 			$effect.root(() => {
 				$effect(() => {
@@ -168,6 +222,30 @@ export class SettingsStore {
 
 	toggleOccurrencesHighlight() {
 		this.occurrencesHighlight = !this.occurrencesHighlight;
+	}
+
+	async initOSType() {
+		try {
+			const osType = await invoke<string>('get_os_type');
+			this.osType = osType as OSType;
+		} catch (e) {
+			console.error('Failed to get OS type:', e);
+			this.osType = 'unknown';
+		}
+	}
+
+	resetEditorFont() {
+		const defaults = DEFAULT_FONTS[this.osType];
+		this.editorFont = defaults.editorFont;
+		this.editorFontSize = 14;
+	}
+
+	resetPreviewFont() {
+		const defaults = DEFAULT_FONTS[this.osType];
+		this.previewFont = defaults.previewFont;
+		this.previewFontSize = 16;
+		this.codeFont = defaults.codeFont;
+		this.codeFontSize = 14;
 	}
 }
 

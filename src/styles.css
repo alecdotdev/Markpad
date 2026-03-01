@@ -625,13 +625,20 @@ body {
 
 .markdown-body .highlight pre,
 .markdown-body pre {
-	padding: 16px;
-	overflow: auto;
+	padding: 18px 16px;
+	overflow-x: auto;
+	overflow-y: hidden;
 	font-size: 85%;
 	line-height: 1.45;
 	background-color: var(--color-canvas-subtle);
 	border-radius: 6px;
 	position: relative;
+	scrollbar-width: thin;
+}
+
+.markdown-body .highlight pre::-webkit-scrollbar,
+.markdown-body pre::-webkit-scrollbar {
+	height: 6px;
 }
 
 .markdown-body pre code,
@@ -812,18 +819,48 @@ body {
 	overflow-x: auto;
 }
 
+.code-block-shell {
+	position: relative;
+}
+
 .lang-label {
 	position: absolute;
-	top: 8px;
-	right: 12px;
-	font-size: 10px;
+	top: 6px;
+	right: 8px;
+	font-size: 9px;
 	font-family: var(--win-font);
 	text-transform: uppercase;
 	letter-spacing: 0.1em;
 	opacity: 0.3;
 	color: var(--color-fg-default);
-	pointer-events: none;
+	pointer-events: auto;
 	user-select: none;
+	cursor: pointer;
+	background: transparent;
+	border: none;
+	padding: 2px 6px;
+	border-radius: 4px;
+	transition: all 0.2s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.lang-label:hover {
+	opacity: 0.8;
+	background: var(--color-neutral-muted);
+}
+
+.lang-label.copied {
+	opacity: 1;
+	background: var(--color-accent-fg);
+	color: white;
+}
+
+.lang-label svg {
+	display: block;
+	height: 14px;
+	width: 14px;
 }
 
 .hljs-comment,

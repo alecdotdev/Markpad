@@ -36,6 +36,7 @@
 	let recentFiles = $state<string[]>([]);
 	let isFocused = $state(true);
 	let markdownBody = $state<HTMLElement | null>(null);
+	let editorPane = $state<{ syncScrollToLine: (line: number, ratio?: number) => void } | null>(null);
 	let liveMode = $state(false);
 
 	let isDragging = $state(false);
@@ -370,16 +371,55 @@
 			}
 
 			// Existing highlight.js logic
-			hljs.highlightElement(codeEl);
+			// Check if language was explicitly specified BEFORE highlight.js runs
+			const hasExplicitLang = Array.from(codeEl.classList).some((c) => c.startsWith('language-'));
+			
+			// Only highlight if explicit language is specified
+			if (hasExplicitLang) {
+				hljs.highlightElement(codeEl);
+			}
+
+			const langClass = Array.from(codeEl.classList).find((c) => c.startsWith('language-'));
 
 			if (preEl && preEl.tagName === 'PRE') {
 				preEl.querySelectorAll('.lang-label').forEach((l) => l.remove());
-				const langClass = Array.from(codeEl.classList).find((c) => c.startsWith('language-'));
-				if (langClass) {
-					const label = document.createElement('span');
-					label.className = 'lang-label';
+				const codeContent = codeEl.textContent || '';
+				const existingWrapper = preEl.parentElement?.classList.contains('code-block-shell') ? preEl.parentElement as HTMLDivElement : null;
+				existingWrapper?.querySelectorAll(':scope > .lang-label').forEach((l) => l.remove());
+
+				const wrapper = existingWrapper ?? document.createElement('div');
+				if (!existingWrapper) {
+					wrapper.className = 'code-block-shell';
+					preEl.replaceWith(wrapper);
+					wrapper.appendChild(preEl);
+				}
+
+				const copyCode = () => {
+					const codeToCopy = codeContent.replace(/\n$/, '');
+					navigator.clipboard.writeText(codeToCopy).then(() => {
+						const originalContent = label.innerHTML;
+						label.innerHTML = 'Copied!';
+						label.classList.add('copied');
+						setTimeout(() => {
+							label.innerHTML = originalContent;
+							label.classList.remove('copied');
+						}, 1500);
+					}).catch((err) => {
+						console.error('Failed to copy code:', err);
+					});
+				};
+
+				const label = document.createElement('button');
+				label.className = 'lang-label';
+				label.title = 'Click to copy code';
+				label.onclick = copyCode;
+
+				if (hasExplicitLang && langClass) {
 					label.textContent = langClass.replace('language-', '');
-					preEl.appendChild(label);
+					wrapper.appendChild(label);
+				} else {
+					label.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+					wrapper.appendChild(label);
 				}
 			}
 		}
@@ -506,6 +546,36 @@
 		}
 	}
 
+	function syncEditorToPreviewScroll(target: HTMLElement) {
+		if (!tabManager.activeTab?.isScrollSynced || !editorPane) return;
+
+		const anchorOffset = target.scrollTop + 60;
+		const viewportRatio = target.clientHeight > 0 ? Math.min(1, 60 / target.clientHeight) : 0;
+		const children = Array.from(markdownBody?.children || []);
+
+		for (const child of children) {
+			const el = child as HTMLElement;
+			if (el.offsetTop <= anchorOffset && el.offsetTop + el.offsetHeight > anchorOffset) {
+				const sourcepos = el.dataset.sourcepos;
+				if (!sourcepos) break;
+
+				const [start, end] = sourcepos.split('-');
+				const startLine = parseInt(start.split(':')[0]);
+				const endLine = parseInt(end.split(':')[0]);
+
+				if (!isNaN(startLine) && !isNaN(endLine)) {
+					const relativeOffset = anchorOffset - el.offsetTop;
+					const elementRatio = el.offsetHeight > 0 ? relativeOffset / el.offsetHeight : 0;
+					const totalLines = endLine - startLine;
+					const estimatedLine = startLine + Math.round(totalLines * elementRatio);
+
+					editorPane.syncScrollToLine(estimatedLine, viewportRatio);
+				}
+				break;
+			}
+		}
+	}
+
 	function handleScroll(e: Event) {
 		const target = e.target as HTMLElement;
 
@@ -515,10 +585,6 @@
 				tabManager.updateTabScroll(tabManager.activeTabId, target.scrollTop);
 			}
 			return;
-		}
-
-		if (tabManager.activeTab?.isScrollSynced) {
-			tabManager.toggleScrollSync(tabManager.activeTab.id);
 		}
 
 		if (tabManager.activeTabId) {
@@ -560,6 +626,8 @@
 				}
 			}
 		}
+
+		syncEditorToPreviewScroll(target);
 	}
 
 	function saveRecentFile(path: string) {
@@ -929,7 +997,7 @@
 					console.error('Failed to load raw content for split view', e);
 				}
 			}
-			tab.isSplit = true;
+			tabManager.setSplitEnabled(tab.id, true);
 			if (liveMode) toggleLiveMode();
 		} else {
 			if (tab.isDirty && tab.path !== '') {
@@ -952,7 +1020,7 @@
 					}
 				}
 			}
-			tab.isSplit = false;
+			tabManager.setSplitEnabled(tab.id, false);
 			if (tab.path !== '') {
 				tab.isDirty = false;
 				await loadMarkdown(tab.path);
@@ -1408,6 +1476,7 @@
 					<div class="pane editor-pane" class:active={isEditing || isSplit} style="flex: {isSplit ? tabManager.activeTab.splitRatio : isEditing ? 1 : 0}">
 						{#if isEditing || isSplit}
 							<Editor
+								bind:this={editorPane}
 								bind:value={tabManager.activeTab.rawContent}
 								language={editorLanguage}
 								{theme}
@@ -1419,6 +1488,7 @@
 								onreveal={openFileLocation}
 								ontoggleEdit={() => toggleEdit()}
 								ontoggleLive={toggleLiveMode}
+								ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 								onhome={() => (showHome = true)}
 								onnextTab={() => tabManager.cycleTab('next')}
 								onprevTab={() => tabManager.cycleTab('prev')}

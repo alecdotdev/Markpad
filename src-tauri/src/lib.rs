@@ -231,6 +231,26 @@ fn get_system_fonts() -> Vec<String> {
     families
 }
 
+#[tauri::command]
+fn get_os_type() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        "macos".to_string()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "windows".to_string()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "linux".to_string()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        "unknown".to_string()
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "linux")]
@@ -286,7 +306,17 @@ pub fn run() {
                 .set_focus();
         }))
         .plugin(tauri_plugin_prevent_default::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED
+                        | tauri_plugin_window_state::StateFlags::VISIBLE
+                        | tauri_plugin_window_state::StateFlags::FULLSCREEN,
+                )
+                .build(),
+        )
         .setup(|app| {
             let args: Vec<String> = std::env::args().collect();
             println!("Setup Args: {:?}", args);
@@ -306,7 +336,7 @@ pub fn run() {
                 "main"
             };
 
-            let _window = tauri::WebviewWindowBuilder::new(
+            let mut window_builder = tauri::WebviewWindowBuilder::new(
                 app,
                 label,
                 tauri::WebviewUrl::App("index.html".into()),
@@ -316,11 +346,23 @@ pub fn run() {
             .min_inner_size(400.0, 300.0)
             .visible(false)
             .resizable(true)
-            .decorations(false)
             .shadow(false)
-            .center()
-            .visible(false)
-            .build()?;
+            .center();
+
+            #[cfg(target_os = "macos")]
+            {
+                window_builder = window_builder
+                    .decorations(true)
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true);
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                window_builder = window_builder.decorations(false);
+            }
+
+            let _window = window_builder.build()?;
 
             let config_dir = app.path().app_config_dir()?;
             let theme_path = config_dir.join("theme.txt");
@@ -384,7 +426,8 @@ pub fn run() {
             unwatch_file,
             show_window,
             save_theme,
-            get_system_fonts
+            get_system_fonts,
+            get_os_type
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
