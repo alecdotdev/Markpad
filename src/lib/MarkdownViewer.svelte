@@ -36,6 +36,7 @@
 	let recentFiles = $state<string[]>([]);
 	let isFocused = $state(true);
 	let markdownBody = $state<HTMLElement | null>(null);
+	let editorPane = $state<{ syncScrollToLine: (line: number, ratio?: number) => void } | null>(null);
 	let liveMode = $state(false);
 
 	let isDragging = $state(false);
@@ -545,6 +546,36 @@
 		}
 	}
 
+	function syncEditorToPreviewScroll(target: HTMLElement) {
+		if (!tabManager.activeTab?.isScrollSynced || !editorPane) return;
+
+		const anchorOffset = target.scrollTop + 60;
+		const viewportRatio = target.clientHeight > 0 ? Math.min(1, 60 / target.clientHeight) : 0;
+		const children = Array.from(markdownBody?.children || []);
+
+		for (const child of children) {
+			const el = child as HTMLElement;
+			if (el.offsetTop <= anchorOffset && el.offsetTop + el.offsetHeight > anchorOffset) {
+				const sourcepos = el.dataset.sourcepos;
+				if (!sourcepos) break;
+
+				const [start, end] = sourcepos.split('-');
+				const startLine = parseInt(start.split(':')[0]);
+				const endLine = parseInt(end.split(':')[0]);
+
+				if (!isNaN(startLine) && !isNaN(endLine)) {
+					const relativeOffset = anchorOffset - el.offsetTop;
+					const elementRatio = el.offsetHeight > 0 ? relativeOffset / el.offsetHeight : 0;
+					const totalLines = endLine - startLine;
+					const estimatedLine = startLine + Math.round(totalLines * elementRatio);
+
+					editorPane.syncScrollToLine(estimatedLine, viewportRatio);
+				}
+				break;
+			}
+		}
+	}
+
 	function handleScroll(e: Event) {
 		const target = e.target as HTMLElement;
 
@@ -554,10 +585,6 @@
 				tabManager.updateTabScroll(tabManager.activeTabId, target.scrollTop);
 			}
 			return;
-		}
-
-		if (tabManager.activeTab?.isScrollSynced) {
-			tabManager.toggleScrollSync(tabManager.activeTab.id);
 		}
 
 		if (tabManager.activeTabId) {
@@ -599,6 +626,8 @@
 				}
 			}
 		}
+
+		syncEditorToPreviewScroll(target);
 	}
 
 	function saveRecentFile(path: string) {
@@ -1447,6 +1476,7 @@
 					<div class="pane editor-pane" class:active={isEditing || isSplit} style="flex: {isSplit ? tabManager.activeTab.splitRatio : isEditing ? 1 : 0}">
 						{#if isEditing || isSplit}
 							<Editor
+								bind:this={editorPane}
 								bind:value={tabManager.activeTab.rawContent}
 								language={editorLanguage}
 								{theme}

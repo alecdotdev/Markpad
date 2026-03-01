@@ -50,6 +50,7 @@
 	let container: HTMLDivElement;
 	let vimStatusNode = $state<HTMLDivElement>();
 	let editor: monaco.editor.IStandaloneCodeEditor;
+	let isApplyingExternalScroll = false;
 
 	let cursorPosition = $state<monaco.Position | null>(null);
 	let selectionCount = $state(0);
@@ -496,9 +497,31 @@
 		};
 	});
 
+	export function syncScrollToLine(line: number, ratio: number = 0) {
+		if (!editor) return;
+
+		const model = editor.getModel();
+		if (!model) return;
+
+		const safeLine = Math.max(1, Math.min(model.getLineCount(), line));
+		const layout = editor.getLayoutInfo();
+		const targetScroll = Math.max(0, editor.getTopForLineNumber(safeLine) - layout.height * ratio);
+
+		if (Math.abs(editor.getScrollTop() - targetScroll) <= 5) return;
+
+		isApplyingExternalScroll = true;
+		editor.setScrollTop(targetScroll, monaco.editor.ScrollType.Smooth);
+
+		requestAnimationFrame(() => {
+			isApplyingExternalScroll = false;
+		});
+	}
+
 	$effect(() => {
 		if (editor && onscrollsync) {
 			const emitSync = () => {
+				if (isApplyingExternalScroll) return;
+
 				const position = editor.getPosition();
 				if (position) {
 					const top = editor.getTopForLineNumber(position.lineNumber);
