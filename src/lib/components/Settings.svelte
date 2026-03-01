@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
 	import { getVersion } from '@tauri-apps/api/app';
-	import { settings } from '../stores/settings.svelte.js';
+	import { settings, DEFAULT_FONTS, type OSType } from '../stores/settings.svelte.js';
 	import { fade, scale } from 'svelte/transition';
 
 	let {
@@ -17,15 +17,28 @@
 	let settingsModal = $state<HTMLDivElement>();
 	let previousActiveElement = $state<HTMLElement | null>(null);
 	let appVersion = $state<string>('');
+	let osType = $state<OSType>('unknown');
+	let defaultFonts = $derived(DEFAULT_FONTS[osType] || DEFAULT_FONTS.unknown);
 
 	async function loadFonts() {
 		if (loaded) return;
 		try {
-			systemFonts = (await invoke('get_system_fonts')) as string[];
+			const [fonts, os] = await Promise.all([
+				invoke('get_system_fonts') as Promise<string[]>,
+				invoke('get_os_type') as Promise<string>
+			]);
+			systemFonts = fonts;
+			osType = os as OSType;
 			loaded = true;
 		} catch (e) {
 			console.error('Failed to load system fonts:', e);
 			systemFonts = ['Consolas', 'Courier New', 'Monaco', 'Menlo', 'Segoe UI'];
+			try {
+				osType = await invoke('get_os_type') as OSType;
+			} catch (e2) {
+				console.error('Failed to get OS type:', e2);
+				osType = 'unknown';
+			}
 		}
 	}
 
@@ -194,11 +207,8 @@
 								<h2>Editor Settings</h2>
 								<button
 									class="reset-text-btn"
-									class:disabled={settings.editorFont === 'Consolas' && settings.editorFontSize === 14}
-									onclick={() => {
-										settings.editorFont = 'Consolas';
-										settings.editorFontSize = 14;
-									}}>
+									class:disabled={settings.editorFont === defaultFonts.editorFont && settings.editorFontSize === 14}
+									onclick={() => settings.resetEditorFont()}>
 									Reset font settings
 								</button>
 							</div>
@@ -208,7 +218,7 @@
 								<div class="select-wrapper">
 									<select id="editor-font" bind:value={settings.editorFont}>
 										{#each systemFonts as font}
-											<option value={font}>{font === 'Consolas' ? font + ' (Default)' : font}</option>
+											<option value={font}>{font === defaultFonts.editorFont ? font + ' (Default)' : font}</option>
 										{/each}
 									</select>
 									<svg
@@ -296,13 +306,8 @@
 								<h2>Preview Settings</h2>
 								<button
 									class="reset-text-btn"
-									class:disabled={settings.previewFont === 'Segoe UI' && settings.previewFontSize === 16 && settings.codeFont === 'Consolas' && settings.codeFontSize === 14}
-									onclick={() => {
-										settings.previewFont = 'Segoe UI';
-										settings.previewFontSize = 16;
-										settings.codeFont = 'Consolas';
-										settings.codeFontSize = 14;
-									}}>
+									class:disabled={settings.previewFont === defaultFonts.previewFont && settings.previewFontSize === 16 && settings.codeFont === defaultFonts.codeFont && settings.codeFontSize === 14}
+									onclick={() => settings.resetPreviewFont()}>
 									Reset font settings
 								</button>
 							</div>
@@ -312,7 +317,7 @@
 								<div class="select-wrapper">
 									<select id="preview-font" bind:value={settings.previewFont}>
 										{#each systemFonts as font}
-											<option value={font}>{font === 'Segoe UI' ? font + ' (Default)' : font}</option>
+											<option value={font}>{font === defaultFonts.previewFont ? font + ' (Default)' : font}</option>
 										{/each}
 									</select>
 									<svg
@@ -351,7 +356,7 @@
 								<div class="select-wrapper">
 									<select id="code-font" bind:value={settings.codeFont}>
 										{#each systemFonts as font}
-											<option value={font}>{font === 'Consolas' ? font + ' (Default)' : font}</option>
+											<option value={font}>{font === defaultFonts.codeFont ? font + ' (Default)' : font}</option>
 										{/each}
 									</select>
 									<svg

@@ -231,6 +231,26 @@ fn get_system_fonts() -> Vec<String> {
     families
 }
 
+#[tauri::command]
+fn get_os_type() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        "macos".to_string()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "windows".to_string()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "linux".to_string()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        "unknown".to_string()
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "linux")]
@@ -384,7 +404,8 @@ pub fn run() {
             unwatch_file,
             show_window,
             save_theme,
-            get_system_fonts
+            get_system_fonts,
+            get_os_type
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
