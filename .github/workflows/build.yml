@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   create-release:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       release_id: ${{ steps.create_release.outputs.id }}
       upload_url: ${{ steps.create_release.outputs.upload_url }}
@@ -54,7 +54,7 @@ jobs:
             arch: arm64
             target: 'aarch64-pc-windows-msvc'
             rust_target: 'aarch64-pc-windows-msvc'
-          - platform: ubuntu-22.04
+          - platform: ubuntu-24.04
             os: linux
             arch: x64
             target: ''
@@ -81,10 +81,27 @@ jobs:
           targets: ${{ matrix.rust_target }}
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-24.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm
+          sudo apt-get install -y libappindicator3-dev \
+          librsvg2-dev \
+          patchelf \
+          rpm \
+          libwebkit2gtk-4.1-0=2.44.0-2 \
+          libwebkit2gtk-4.1-dev=2.44.0-2 \
+          libjavascriptcoregtk-4.1-0=2.44.0-2 \
+          libjavascriptcoregtk-4.1-dev=2.44.0-2 \
+          gir1.2-javascriptcoregtk-4.1=2.44.0-2 \
+          gir1.2-webkit2-4.1=2.44.0-2
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm xdg-utils
+          sudo snap install lxd
+          sudo lxd waitready
+          sudo lxd init --auto
+          sudo usermod -aG lxd $USER
+          sudo iptables -F FORWARD
+          sudo iptables -P FORWARD ACCEPT
+          sudo snap install snapcraft --classic
 
       - name: Install Frontend Dependencies
         run: npm install
@@ -100,9 +117,32 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp src-tauri/target/release/Markpad.exe Markpad-x64.exe
-          cp Markpad-x64.exe MarkpadInstaller-x64.exe
-          gh release upload v${{ needs.create-release.outputs.version }} Markpad-x64.exe MarkpadInstaller-x64.exe --clobber
+          VERSION="${{ needs.create-release.outputs.version }}"
+          cp src-tauri/target/release/Markpad.exe "Markpad_${VERSION}_x64.exe"
+          cp "Markpad_${VERSION}_x64.exe" "MarkpadInstaller_${VERSION}_x64.exe"
+          gh release upload v$VERSION "Markpad_${VERSION}_x64.exe" "MarkpadInstaller_${VERSION}_x64.exe" --clobber
+
+      - name: Create Chocolatey Package
+        if: matrix.platform == 'windows-latest' && matrix.arch == 'x64'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p packaging/choco/tools
+          cp src-tauri/target/release/Markpad.exe packaging/choco/tools/Markpad.exe
+          cp LICENSE packaging/choco/tools/LICENSE.txt
+          choco pack packaging/choco/markpad-app.nuspec --version ${{ needs.create-release.outputs.version }} --outdir .
+          gh release upload v${{ needs.create-release.outputs.version }} markpad-app.${{ needs.create-release.outputs.version }}.nupkg --clobber
+
+      - name: Publish to Chocolatey
+        if: matrix.platform == 'windows-latest' && matrix.arch == 'x64'
+        shell: pwsh
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          choco apikey --key $env:CHOCO_API_KEY --source https://push.chocolatey.org/
+          choco push markpad-app.${{ needs.create-release.outputs.version }}.nupkg --source https://push.chocolatey.org/
+          choco push markpad-app.${{ needs.create-release.outputs.version }}.nupkg --source https://push.chocolatey.org/
 
       # --- Windows Build (ARM64) ---
       - name: Build Windows ARM64
@@ -115,17 +155,26 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp src-tauri/target/aarch64-pc-windows-msvc/release/Markpad.exe Markpad-arm64.exe
-          cp Markpad-arm64.exe MarkpadInstaller-arm64.exe
-          gh release upload v${{ needs.create-release.outputs.version }} Markpad-arm64.exe MarkpadInstaller-arm64.exe --clobber
+          VERSION="${{ needs.create-release.outputs.version }}"
+          cp src-tauri/target/aarch64-pc-windows-msvc/release/Markpad.exe "Markpad_${VERSION}_arm64.exe"
+          cp "Markpad_${VERSION}_arm64.exe" "MarkpadInstaller_${VERSION}_arm64.exe"
+          gh release upload v$VERSION "Markpad_${VERSION}_arm64.exe" "MarkpadInstaller_${VERSION}_arm64.exe" --clobber
 
       # --- Linux Build ---
+      - name: Pre-download AppImage Dependencies
+        if: matrix.platform == 'ubuntu-24.04'
+        run: |
+          mkdir -p ~/.cache/tauri
+          wget -q https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64 -O ~/.cache/tauri/AppRun-x86_64
+          wget -q https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage -O ~/.cache/tauri/linuxdeploy-x86_64.AppImage
+          chmod +x ~/.cache/tauri/AppRun-x86_64 ~/.cache/tauri/linuxdeploy-x86_64.AppImage
+
       - name: Build Linux
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-24.04'
         run: npm run tauri build
 
       - name: Upload Linux Artifacts
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-24.04'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -133,6 +182,29 @@ jobs:
           find src-tauri/target/release/bundle/deb -name "*.deb" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
           find src-tauri/target/release/bundle/rpm -name "*.rpm" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
           find src-tauri/target/release/bundle/appimage -name "*.AppImage" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
+
+      - name: Build and Publish Snap Package
+        if: matrix.platform == 'ubuntu-24.04'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          # Build snap
+          sg lxd -c 'snapcraft pack'
+          sg lxd -c 'snapcraft pack'
+          
+          # Find and upload the snap
+          SNAP_FILE=$(ls *.snap | head -n 1)
+          if [ -n "$SNAP_FILE" ]; then
+            gh release upload v${{ needs.create-release.outputs.version }} $SNAP_FILE --clobber
+            
+            # Publish to snap store
+            snapcraft push $SNAP_FILE --release stable
+          else
+            echo "Snap file not found!"
+            exit 1
+          fi
 
       # --- MacOS Build ---
       - name: Build MacOS (Universal)
