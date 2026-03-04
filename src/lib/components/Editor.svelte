@@ -123,6 +123,8 @@
 			occurrencesHighlight: settings.occurrencesHighlight ? 'singleFile' : 'off',
 			fontSize: settings.editorFontSize,
 			fontFamily: settings.editorFont,
+			wordBasedSuggestions: 'off',
+			quickSuggestions: false,
 		});
 
 		if (tabManager.activeTab?.editorViewState) {
