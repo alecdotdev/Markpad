@@ -299,6 +299,14 @@
 									<span class="toggle-slider"></span>
 								</label>
 							</div>
+
+							<div class="setting-item">
+								<label for="editor-show-whitespace">Show Whitespace</label>
+								<label class="toggle">
+									<input id="editor-show-whitespace" type="checkbox" checked={settings.showWhitespace} onchange={() => settings.toggleShowWhitespace()} />
+									<span class="toggle-slider"></span>
+								</label>
+							</div>
 						</div>
 					{:else if activeCategory === 'preview'}
 						<div class="settings-group">

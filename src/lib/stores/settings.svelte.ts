@@ -49,6 +49,7 @@ export class SettingsStore {
 		lineNumbers: string;
 	} | null>(null);
 	occurrencesHighlight = $state(false);
+	showWhitespace = $state(false);
 	osType = $state<OSType>('unknown');
 
 	editorFont = $state('Consolas');
@@ -72,6 +73,7 @@ export class SettingsStore {
 			const savedZenMode = localStorage.getItem('editor.zenMode');
 			const savedPreZenState = localStorage.getItem('editor.preZenState');
 			const savedOccurrencesHighlight = localStorage.getItem('editor.occurrencesHighlight');
+			const savedShowWhitespace = localStorage.getItem('editor.showWhitespace');
 
 			const savedEditorFont = localStorage.getItem('editor.font');
 			const savedEditorFontSize = localStorage.getItem('editor.fontSize');
@@ -98,6 +100,7 @@ export class SettingsStore {
 			if (savedShowTabs !== null) this.showTabs = savedShowTabs === 'true';
 			if (savedZenMode !== null) this.zenMode = savedZenMode === 'true';
 			if (savedOccurrencesHighlight !== null) this.occurrencesHighlight = savedOccurrencesHighlight === 'true';
+			if (savedShowWhitespace !== null) this.showWhitespace = savedShowWhitespace === 'true';
 			if (savedPreZenState !== null) {
 				try {
 					this.preZenState = JSON.parse(savedPreZenState);
@@ -145,6 +148,7 @@ export class SettingsStore {
 					localStorage.setItem('editor.showTabs', String(this.showTabs));
 					localStorage.setItem('editor.zenMode', String(this.zenMode));
 					localStorage.setItem('editor.occurrencesHighlight', String(this.occurrencesHighlight));
+					localStorage.setItem('editor.showWhitespace', String(this.showWhitespace));
 					localStorage.setItem('editor.font', this.editorFont);
 					localStorage.setItem('editor.fontSize', String(this.editorFontSize));
 					localStorage.setItem('preview.font', this.previewFont);
@@ -222,6 +226,10 @@ export class SettingsStore {
 
 	toggleOccurrencesHighlight() {
 		this.occurrencesHighlight = !this.occurrencesHighlight;
+	}
+
+	toggleShowWhitespace() {
+		this.showWhitespace = !this.showWhitespace;
 	}
 
 	async initOSType() {

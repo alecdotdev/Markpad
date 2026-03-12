@@ -834,6 +834,81 @@
 		return false;
 	}
 
+	async function exportAsHtml() {
+		if (!htmlContent) return;
+
+		const tab = tabManager.activeTab;
+		const defaultName = tab?.path ? tab.path.replace(/\.[^.]+$/, '.html') : 'export.html';
+
+		const selected = await save({
+			filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
+			defaultPath: defaultName,
+		});
+		if (!selected) return;
+
+		// gather styles from the app
+		let styles = '';
+		for (const sheet of document.styleSheets) {
+			try {
+				for (const rule of sheet.cssRules) {
+					styles += rule.cssText + '\n';
+				}
+			} catch {
+				// cross-origin sheets
+			}
+		}
+
+		const fullHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${tab?.title || 'Export'}</title>
+<style>
+${styles}
+html, body {
+	overflow: auto !important;
+	height: auto !important;
+	min-height: 100vh;
+	background-color: var(--color-canvas-default, #ffffff);
+	margin: 0;
+	padding: 0;
+}
+.markdown-body {
+	padding: 40px !important;
+	max-width: 900px;
+	margin: 0 auto;
+	height: auto !important;
+	overflow: visible !important;
+	min-height: 100%;
+}
+.lang-label {
+	display: none !important;
+}
+.markdown-body pre {
+	white-space: pre-wrap !important;
+	word-break: break-word !important;
+}
+</style>
+</head>
+<body>
+<article class="markdown-body">
+${markdownBody?.innerHTML || htmlContent}
+</article>
+</body>
+</html>`;
+
+		try {
+			await invoke('save_file_content', { path: selected, content: fullHtml });
+		} catch (e) {
+			console.error('Failed to export HTML', e);
+		}
+	}
+
+	function exportAsPdf() {
+		window.print();
+	}
+
 	function handleNewFile() {
 		tabManager.addNewTab();
 		showHome = false;
@@ -1392,6 +1467,8 @@
 		onopenFile={selectFile}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
+		onexportHtml={exportAsHtml}
+		onexportPdf={exportAsPdf}
 		onexit={() => {
 			appWindow.close();
 		}}
@@ -1437,6 +1514,8 @@
 		onopenFile={selectFile}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
+		onexportHtml={exportAsHtml}
+		onexportPdf={exportAsPdf}
 		onexit={() => {
 			appWindow.close();
 		}}
@@ -1586,6 +1665,14 @@
 		height: 100%;
 		overflow-y: auto;
 		transform: translate3d(0, 0, 0);
+	}
+
+	@media print {
+		.markdown-body {
+			height: auto !important;
+			overflow: visible !important;
+			padding: 0 !important;
+		}
 	}
 
 	.markdown-container :global(.markdown-body pre),

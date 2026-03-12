@@ -125,6 +125,7 @@
 			fontFamily: settings.editorFont,
 			wordBasedSuggestions: 'off',
 			quickSuggestions: false,
+			renderWhitespace: settings.showWhitespace ? 'trailing' : 'none',
 		});
 
 		if (tabManager.activeTab?.editorViewState) {
@@ -209,6 +210,14 @@
 			label: 'Toggle Occurrences Highlight',
 			run: () => {
 				settings.toggleOccurrencesHighlight();
+			},
+		});
+
+		editor.addAction({
+			id: 'toggle-whitespace',
+			label: 'Toggle Show Whitespace',
+			run: () => {
+				settings.toggleShowWhitespace();
 			},
 		});
 
@@ -563,6 +572,7 @@
 				occurrencesHighlight: settings.occurrencesHighlight ? 'singleFile' : 'off',
 				fontSize: settings.editorFontSize * (zoomLevel / 100),
 				fontFamily: settings.editorFont,
+				renderWhitespace: settings.showWhitespace ? 'trailing' : 'none',
 			});
 		}
 	});

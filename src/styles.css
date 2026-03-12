@@ -353,6 +353,7 @@ body {
 .markdown-body [type="reset"],
 .markdown-body [type="submit"] {
 	-webkit-appearance: button;
+	appearance: button;
 }
 
 .markdown-body [type="button"]::-moz-focus-inner,
@@ -381,6 +382,7 @@ body {
 
 .markdown-body [type="search"] {
 	-webkit-appearance: textfield;
+	appearance: textfield;
 	outline-offset: -2px;
 }
 
@@ -960,4 +962,70 @@ body {
 .split-bar:hover,
 .split-bar:active {
 	background-color: var(--color-accent-fg);
+}
+
+/* print styles for pdf export */
+@media print {
+	@page {
+		margin: 0.75in;
+		size: auto;
+	}
+
+	.custom-title-bar,
+	.tab-area,
+	.window-controls-left,
+	.window-controls-right,
+	.title-actions-container,
+	.tooltip,
+	.custom-tooltip,
+	.drag-overlay,
+	.pane.editor-pane,
+	.split-bar,
+	.home-menu-container,
+	.kebab-btn,
+	.title-action-btn,
+	.theme-dropdown-container,
+	.control-btn,
+	.lang-label {
+		display: none !important;
+	}
+
+	html,
+	body,
+	#app,
+	.markdown-container,
+	.layout-container,
+	.pane.viewer-pane {
+		background: white !important;
+		overflow: visible !important;
+		height: auto !important;
+		min-height: auto !important;
+		position: static !important;
+		margin: 0 !important;
+		padding: 0 !important;
+		width: 100% !important;
+		border-radius: 0 !important;
+	}
+
+	.markdown-body {
+		padding: 0 !important;
+		margin: 0 !important;
+		overflow: visible !important;
+		height: auto !important;
+		min-height: auto !important;
+		max-width: 100% !important;
+		color: #000 !important;
+		background: white !important;
+		position: static !important;
+	}
+
+	.markdown-body pre {
+		white-space: pre-wrap !important;
+		word-break: break-word !important;
+		overflow-x: visible !important;
+	}
+
+	.markdown-container {
+		zoom: 1 !important;
+	}
 }
