@@ -30,6 +30,7 @@
 - Custom typography and font settings
 - Content zooming
 - Image and YouTube embeds
+- PDF and HTML export
 - Familiar GitHub styled markdown rendering
 - Tiny memory usage (~10MB)
 - No telemetry or bloat
