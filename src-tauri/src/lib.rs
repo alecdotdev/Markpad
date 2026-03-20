@@ -19,10 +19,16 @@ async fn show_window(window: tauri::Window) {
 }
 
 fn process_obsidian_embeds(content: &str) -> Cow<'_, str> {
-    let re = Regex::new(r"!\[\[(.*?)\]\]").unwrap();
+    // Match code blocks, inline code, or obsidian embeds
+    let re = Regex::new(r"(?s)```.*?```|`.*?`|!\[\[(.*?)\]\]").unwrap();
 
     re.replace_all(content, |caps: &Captures| {
-        let inner = &caps[1];
+        let full_match = caps.get(0).unwrap().as_str();
+        if full_match.starts_with('`') {
+            return full_match.to_string();
+        }
+
+        let inner = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let mut parts = inner.split('|');
         let path = parts.next().unwrap_or("");
         let size = parts.next();
@@ -50,9 +56,87 @@ fn process_obsidian_embeds(content: &str) -> Cow<'_, str> {
     })
 }
 
+fn process_obsidian_links<'a>(content: &'a str) -> Cow<'a, str> {
+    let mut processed = Cow::Borrowed(content);
+
+    // 1. Process [[#target]] or [[#target|alias]]
+    let re_links = Regex::new(r"(?s)```.*?```|`.*?`|\[\[#([^\|\]]+)(?:\|([^\]]+))?\]\]").unwrap();
+    if re_links.is_match(&processed) {
+        let replaced = re_links.replace_all(&processed, |caps: &Captures| {
+            let full_match = caps.get(0).unwrap().as_str();
+            if full_match.starts_with('`') {
+                return full_match.to_string();
+            }
+            let target = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let alias = caps.get(2).map(|m| m.as_str()).unwrap_or(target);
+            let target_id = target.to_lowercase().replace(' ', "-");
+            format!("[{}](#{})", alias, target_id)
+        });
+        processed = Cow::Owned(replaced.into_owned());
+    }
+
+    // 2. Process ^block-id at the end of lines
+    // For block IDs, they are trailing. We skip code blocks but also need to be careful with inline code at EOL.
+    let re_ids = Regex::new(r"(?s)```.*?```|`.*?`|(?m)\s+\^([a-zA-Z0-9_-]+)$").unwrap();
+    if re_ids.is_match(&processed) {
+        let replaced = re_ids.replace_all(&processed, |caps: &Captures| {
+            let full_match = caps.get(0).unwrap().as_str();
+            if full_match.starts_with('`') {
+                return full_match.to_string();
+            }
+            let id = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            format!(
+                " <a id=\"{}\" class=\"block-id-anchor\" data-label=\"{}\"></a>",
+                id, id
+            )
+        });
+        processed = Cow::Owned(replaced.into_owned());
+    }
+
+    // 3. Convert ==highlight== to <mark>highlight</mark>
+    let re_highlight = Regex::new(r"(?s)```.*?```|`.*?`|==([^=\n]+)==").unwrap();
+    if re_highlight.is_match(&processed) {
+        let replaced = re_highlight.replace_all(&processed, |caps: &Captures| {
+            let full_match = caps.get(0).unwrap().as_str();
+            if full_match.starts_with('`') {
+                return full_match.to_string();
+            }
+            format!("<mark>{}</mark>", caps.get(1).unwrap().as_str())
+        });
+        processed = Cow::Owned(replaced.into_owned());
+    }
+
+    // 4. Convert ^[inline footnote] to a footnote reference
+    let re_inline_fn = Regex::new(r"(?s)```.*?```|`.*?`|\^\[([^\]]+)\]").unwrap();
+    if re_inline_fn.is_match(&processed) {
+        let mut footnote_defs = String::new();
+        let mut fn_count = 0usize;
+        let replaced = re_inline_fn.replace_all(&processed, |caps: &Captures| {
+            let full_match = caps.get(0).unwrap().as_str();
+            if full_match.starts_with('`') {
+                return full_match.to_string();
+            }
+            fn_count += 1;
+            let label = format!("ifn-{}", fn_count);
+            footnote_defs.push_str(&format!(
+                "\n[^{}]: {}\n",
+                label,
+                caps.get(1).unwrap().as_str()
+            ));
+            format!("[^{}]", label)
+        });
+        let mut out = replaced.into_owned();
+        out.push_str(&footnote_defs);
+        processed = Cow::Owned(out);
+    }
+
+    processed
+}
+
 #[tauri::command]
 fn convert_markdown(content: &str) -> String {
-    let processed = process_obsidian_embeds(content);
+    let processed_embeds = process_obsidian_embeds(content);
+    let processed_links = process_obsidian_links(&processed_embeds);
 
     let mut options = ComrakOptions {
         extension: ComrakExtensionOptions {
@@ -63,6 +147,7 @@ fn convert_markdown(content: &str) -> String {
             superscript: false,
             footnotes: true,
             description_lists: true,
+            header_ids: Some(String::new()),
             ..ComrakExtensionOptions::default()
         },
         ..ComrakOptions::default()
@@ -71,7 +156,7 @@ fn convert_markdown(content: &str) -> String {
     options.render.hardbreaks = true;
     options.render.sourcepos = true;
 
-    markdown_to_html(&processed, &options)
+    markdown_to_html(&processed_links, &options)
 }
 
 #[tauri::command]
@@ -201,6 +286,143 @@ async fn get_app_mode() -> String {
 }
 
 #[tauri::command]
+async fn fetch_vscode_theme(app: AppHandle, url: String) -> Result<String, String> {
+    use std::io::{Cursor, Read};
+    // Parse URL: e.g. https://vscodethemes.com/e/teabyii.ayu/ayu-dark-bordered
+    let parts: Vec<&str> = url.split('/').collect();
+    if parts.len() < 5 || parts[3] != "e" {
+        return Err("Invalid vscodethemes.com URL".to_string());
+    }
+    let pub_ext = parts[4];
+    let theme_name = parts
+        .get(5)
+        .unwrap_or(&"")
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let pe_parts: Vec<&str> = pub_ext.split('.').collect();
+    if pe_parts.len() != 2 {
+        return Err("Invalid extension format in URL".to_string());
+    }
+    let publisher = pe_parts[0];
+    let extension = pe_parts[1];
+
+    let vsix_url = format!("https://{publisher}.gallery.vsassets.io/_apis/public/gallery/publisher/{publisher}/extension/{extension}/latest/assetbyname/Microsoft.VisualStudio.Services.VSIXPackage");
+
+    let response = reqwest::get(&vsix_url).await.map_err(|e| e.to_string())?;
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+
+    let reader = Cursor::new(bytes.as_ref());
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| e.to_string())?;
+
+    let mut package_json_data = String::new();
+    if let Ok(mut file) = archive.by_name("extension/package.json") {
+        file.read_to_string(&mut package_json_data)
+            .map_err(|e| e.to_string())?;
+    } else {
+        return Err("No package.json found in VSIX".to_string());
+    }
+
+    let package_json: serde_json::Value =
+        serde_json::from_str(&package_json_data).map_err(|e| e.to_string())?;
+    let themes = package_json
+        .get("contributes")
+        .and_then(|c| c.get("themes"))
+        .and_then(|t| t.as_array())
+        .ok_or("No themes found in extension")?;
+
+    let mut theme_path = None;
+    let mut matched_name_str = theme_name.clone();
+
+    for t in themes {
+        let label = t
+            .get("label")
+            .or(t.get("id"))
+            .and_then(|l| l.as_str())
+            .unwrap_or("");
+        let path = t.get("path").and_then(|p| p.as_str()).unwrap_or("");
+
+        let label_slug = label
+            .to_lowercase()
+            .replace(|c: char| !c.is_alphanumeric(), "-");
+
+        // If theme_name is empty, just take the first one
+        if theme_name.is_empty()
+            || label_slug == theme_name.to_lowercase()
+            || path.to_lowercase().contains(&theme_name.to_lowercase())
+        {
+            theme_path = Some(path.to_string());
+            if theme_name.is_empty() {
+                matched_name_str = label_slug;
+            }
+            break;
+        }
+    }
+
+    if let Some(mut path) = theme_path {
+        if path.starts_with("./") {
+            path = path[2..].to_string();
+        }
+        let full_path = format!("extension/{}", path).replace("\\", "/");
+        let mut theme_file = archive.by_name(&full_path).map_err(|e| e.to_string())?;
+        let mut theme_json = String::new();
+        theme_file
+            .read_to_string(&mut theme_json)
+            .map_err(|e| e.to_string())?;
+
+        let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+        let themes_dir = config_dir.join("themes");
+        fs::create_dir_all(&themes_dir).map_err(|e| e.to_string())?;
+
+        let dest_name = if matched_name_str.is_empty() {
+            "downloaded_theme".to_string()
+        } else {
+            matched_name_str.clone()
+        };
+        let theme_file_path = themes_dir.join(format!("{}.json", dest_name));
+        fs::write(&theme_file_path, &theme_json).map_err(|e| e.to_string())?;
+
+        return Ok(dest_name);
+    }
+
+    Err("Theme name not found in extension".to_string())
+}
+
+#[tauri::command]
+fn get_saved_vscode_themes(app: AppHandle) -> Result<Vec<String>, String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let themes_dir = config_dir.join("themes");
+    let mut themes = Vec::new();
+    if let Ok(entries) = fs::read_dir(themes_dir) {
+        for entry in entries.flatten() {
+            if let Some(ext) = entry.path().extension() {
+                if ext == "json" {
+                    if let Some(name) = entry.path().file_stem().and_then(|n| n.to_str()) {
+                        themes.push(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    Ok(themes)
+}
+
+#[tauri::command]
+fn read_vscode_theme(app: AppHandle, name: String) -> Result<String, String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let theme_file_path = config_dir.join("themes").join(format!("{}.json", name));
+    fs::read_to_string(theme_file_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_vscode_theme(app: AppHandle, name: String) -> Result<(), String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let theme_file_path = config_dir.join("themes").join(format!("{}.json", name));
+    fs::remove_file(theme_file_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn is_win11() -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -249,6 +471,110 @@ fn get_os_type() -> String {
     {
         "unknown".to_string()
     }
+}
+
+
+#[tauri::command]
+fn save_image(parent_dir: String, filename: String, base64_data: String) -> Result<String, String> {
+    let img_dir = Path::new(&parent_dir).join("img");
+    if !img_dir.exists() {
+        fs::create_dir_all(&img_dir).map_err(|e| e.to_string())?;
+    }
+
+    let file_path = img_dir.join(&filename);
+
+    // remove potential data:image/png;base64, prefix
+    let b64 = if let Some(pos) = base64_data.find("base64,") {
+        &base64_data[pos + 7..]
+    } else {
+        &base64_data
+    };
+
+    use base64::{engine::general_purpose, Engine as _};
+    let bytes = general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e: base64::DecodeError| e.to_string())?;
+
+    fs::write(&file_path, bytes).map_err(|e| e.to_string())?;
+
+    Ok(format!("img/{}", filename))
+}
+
+#[tauri::command]
+fn copy_file_to_img(src_path: String, parent_dir: String) -> Result<String, String> {
+    let img_dir = Path::new(&parent_dir).join("img");
+    if !img_dir.exists() {
+        fs::create_dir_all(&img_dir).map_err(|e| e.to_string())?;
+    }
+
+    let src = Path::new(&src_path);
+    if !src.exists() {
+        return Err("Source file does not exist".to_string());
+    }
+
+    let file_name = src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "Invalid source filename".to_string())?;
+
+    // Handle name conflicts by appending timestamp if exists
+    let mut dest_name = file_name.to_string();
+    let dest_path = img_dir.join(&dest_name);
+    if dest_path.exists() {
+        let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
+        dest_name = format!("{}_{}.{}", stem, chrono::Local::now().timestamp(), ext);
+    }
+
+    let final_dest = img_dir.join(&dest_name);
+    fs::copy(src, &final_dest).map_err(|e| e.to_string())?;
+
+    Ok(format!("img/{}", dest_name))
+}
+
+#[tauri::command]
+fn delete_file(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if p.exists() {
+        fs::remove_file(p).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn cleanup_empty_img_dir(parent_dir: String) -> Result<(), String> {
+    let img_dir = Path::new(&parent_dir).join("img");
+    if img_dir.exists() && img_dir.is_dir() {
+        if fs::read_dir(&img_dir)
+            .map_err(|e| e.to_string())?
+            .next()
+            .is_none()
+        {
+            fs::remove_dir(img_dir).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn list_directory_contents(path: String) -> Result<Vec<String>, String> {
+    let dir = Path::new(&path);
+    if !dir.exists() || !dir.is_dir() {
+        return Err("Not a directory".to_string());
+    }
+
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        if is_dir {
+            entries.push(format!("{}/", name));
+        } else {
+            entries.push(name);
+        }
+    }
+    Ok(entries)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -427,7 +753,16 @@ pub fn run() {
             show_window,
             save_theme,
             get_system_fonts,
-            get_os_type
+            get_os_type,
+            fetch_vscode_theme,
+            get_saved_vscode_themes,
+            read_vscode_theme,
+            delete_vscode_theme,
+            save_image,
+            copy_file_to_img,
+            delete_file,
+            cleanup_empty_img_dir,
+            list_directory_contents
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

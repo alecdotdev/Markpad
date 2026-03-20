@@ -34,12 +34,16 @@ tauri-plugin-prevent-default = "2.0.0-rc.1"
 notify = "6"
 regex = "1"
 
+reqwest = "0.12"
+zip = { version = "2.1", default-features = false, features = ["deflate", "time"] }
 directories = "5"
 opener = { version = "0.7", features = ["reveal"] }
 chrono = "0.4"
 env_logger = "0.11.8"
 log = "0.4.29"
 font-kit = "0.14"
+base64 = "0.22"
+
 
 
 [target.'cfg(windows)'.dependencies]

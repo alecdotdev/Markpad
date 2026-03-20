@@ -11,5 +11,4 @@ vite.config.ts.timestamp-*
 test.md
 test_image.png
 src-tauri/output.txt
-test_obsidian.md
 
