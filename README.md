@@ -7,7 +7,7 @@
 
   <p>A lightweight, minimalist Markdown viewer and text editor built for productivity across Windows, macOS, and Linux.</p>
 
-  <a href="https://markpad.sftwr.dev">Website</a> // <a href="https://github.com/alecdotdev/Markpad/releases/latest">Download Latest Release</a> // <a href="https://github.com/alecdotdev/Markpad/issues">Report a Bug</a>
+  <a href="https://markpad.dev">Website</a> // <a href="https://github.com/alecdotdev/Markpad/releases/latest">Download Latest Release</a> // <a href="https://github.com/alecdotdev/Markpad/issues">Report a Bug</a>
 </div>
 
 <br />
