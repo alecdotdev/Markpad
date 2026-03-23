@@ -495,7 +495,7 @@
 				const existing = tabManager.tabs.find((t) => t.path === filePath);
 				if (existing) {
 					tabManager.setActive(existing.id);
-				} else if (tabManager.activeTab && tabManager.activeTab.path === '') {
+				} else if (tabManager.activeTab && tabManager.activeTab.path === '' && !tabManager.activeTab.isDirty && tabManager.activeTab.rawContent.trim() === '') {
 					tabManager.updateTabPath(tabManager.activeTab.id, filePath);
 				} else {
 					tabManager.addTab(filePath);
