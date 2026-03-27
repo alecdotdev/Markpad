@@ -826,8 +826,9 @@ body {
 }
 
 .markdown-body .markdown-alert {
-	padding: 0.5rem 1rem;
-	margin-bottom: 1rem;
+	padding: 0;
+	margin-bottom: 0.5rem;
+	
 	color: inherit;
 	border-left: 0.25rem solid var(--color-border-default);
 	border-radius: 8px;
@@ -838,22 +839,65 @@ body {
 	display: flex;
 	align-items: center;
 	font-weight: 600;
-	line-height: 1;
-	margin: 0.3rem 0 0.8rem 0;
+	line-height: inherit;
+	margin: 0;
+	padding: 8px 16px 2px 16px;
 }
 
-.markdown-body .markdown-alert-title svg {
+.markdown-body .markdown-alert.callout-title-only {
+	display: flex;
+	align-items: center;
+}
+.markdown-body .markdown-alert.callout-title-only > .markdown-alert-title {
+	padding-bottom: 8px !important;
+}
+
+.markdown-body details.markdown-alert summary.markdown-alert-title {
+	list-style: none;
+	cursor: pointer;
+}
+
+.markdown-body details.markdown-alert summary.markdown-alert-title::-webkit-details-marker {
+	display: none;
+}
+
+.markdown-body .markdown-alert-title svg:not(.callout-fold-icon) {
 	margin-right: 0.5rem;
 	display: inline-block;
 	flex-shrink: 0;
 	vertical-align: middle;
 }
 
+.markdown-body .callout-fold-icon {
+	margin-left: auto;
+	transition: transform 0.2s ease;
+	opacity: 0.5;
+}
+
+.markdown-body details.markdown-alert[open] .callout-fold-icon {
+	transform: rotate(90deg);
+}
+
+.markdown-body .callout-title-inner {
+	flex: 1;
+}
+
+.markdown-body .markdown-alert-content {
+	padding: 0 16px 0 16px;
+}
+.markdown-body .markdown-alert-content > *:first-child,
+.markdown-body .content-inner > *:first-child {
+	margin-top: 0 !important;
+}
+.markdown-body .markdown-alert-content > *:last-child {
+	margin-bottom: 0 !important;
+}
+
 .markdown-body .markdown-alert-note {
 	border-left-color: var(--color-accent-fg);
 }
 
-.markdown-body .markdown-alert-note .markdown-alert-title {
+.markdown-body .markdown-alert-note > .markdown-alert-title {
 	color: var(--color-accent-fg);
 }
 
@@ -863,7 +907,7 @@ body {
 	border-left-color: var(--color-success-fg);
 }
 
-.markdown-body .markdown-alert-tip .markdown-alert-title {
+.markdown-body .markdown-alert-tip > .markdown-alert-title {
 	color: var(--color-success-fg);
 }
 
@@ -873,7 +917,7 @@ body {
 	border-left-color: var(--color-done-fg);
 }
 
-.markdown-body .markdown-alert-important .markdown-alert-title {
+.markdown-body .markdown-alert-important > .markdown-alert-title {
 	color: var(--color-done-fg);
 }
 
@@ -883,7 +927,7 @@ body {
 	border-left-color: var(--color-attention-fg);
 }
 
-.markdown-body .markdown-alert-warning .markdown-alert-title {
+.markdown-body .markdown-alert-warning > .markdown-alert-title {
 	color: var(--color-attention-fg);
 }
 
@@ -893,7 +937,7 @@ body {
 	border-left-color: var(--color-danger-fg);
 }
 
-.markdown-body .markdown-alert-caution .markdown-alert-title {
+.markdown-body .markdown-alert-caution > .markdown-alert-title {
 	color: var(--color-danger-fg);
 }
 
@@ -915,6 +959,7 @@ body {
 	position: relative;
 	margin-bottom: 16px;
 }
+
 
 .lang-label {
 	position: absolute;
@@ -1190,7 +1235,6 @@ body {
 	transition: background-color 0.2s ease;
 }
 
-/* for block anchors, make the active state pop out more */
 .markdown-body a.block-id-anchor.toc-target-active {
 	background-color: var(--color-accent-emphasis);
 	color: var(--color-fg-on-emphasis);
@@ -1202,7 +1246,6 @@ body {
 	opacity: 1;
 }
 
-/* task list: obsidian-style checkboxes with blue accent */
 .markdown-body ul.contains-task-list,
 .markdown-body ul li.task-list-item {
 	list-style: none;
