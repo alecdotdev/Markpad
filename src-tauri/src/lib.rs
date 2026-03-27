@@ -18,8 +18,7 @@ async fn show_window(window: tauri::Window) {
     window.show().unwrap();
 }
 
-fn process_obsidian_embeds(content: &str) -> Cow<'_, str> {
-    // Match code blocks, inline code, or obsidian embeds
+fn process_internal_embeds(content: &str) -> Cow<'_, str> {
     let re = Regex::new(r"(?s)```.*?```|`.*?`|!\[\[(.*?)\]\]").unwrap();
 
     re.replace_all(content, |caps: &Captures| {
@@ -56,7 +55,7 @@ fn process_obsidian_embeds(content: &str) -> Cow<'_, str> {
     })
 }
 
-fn process_obsidian_links<'a>(content: &'a str) -> Cow<'a, str> {
+fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
     let mut processed = Cow::Borrowed(content);
 
     // 1. Process [[#target]] or [[#target|alias]]
@@ -135,8 +134,8 @@ fn process_obsidian_links<'a>(content: &'a str) -> Cow<'a, str> {
 
 #[tauri::command]
 fn convert_markdown(content: &str) -> String {
-    let processed_embeds = process_obsidian_embeds(content);
-    let processed_links = process_obsidian_links(&processed_embeds);
+    let processed_embeds = process_internal_embeds(content);
+    let processed_links = process_wikilinks(&processed_embeds);
 
     let mut options = ComrakOptions {
         extension: ComrakExtensionOptions {
@@ -178,6 +177,11 @@ fn read_file_content(path: String) -> Result<String, String> {
 #[tauri::command]
 fn save_file_content(path: String, content: String) -> Result<(), String> {
     fs::write(path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
+    fs::write(path, data).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -578,6 +582,11 @@ fn delete_file(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn copy_file(src: String, dest: String) -> Result<(), String> {
+    fs::copy(src, dest).map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn cleanup_empty_img_dir(parent_dir: String) -> Result<(), String> {
     let img_dir = Path::new(&parent_dir).join("img");
     if img_dir.exists() && img_dir.is_dir() {
@@ -764,7 +773,7 @@ pub fn run() {
             if is_installer_mode {
                 let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
                     width: 450.0,
-                    height: 550.0,
+                    height: 650.0,
                 }));
                 let _ = window.center();
             }
@@ -780,6 +789,7 @@ pub fn run() {
             send_markdown_path,
             read_file_content,
             save_file_content,
+            save_file_binary,
             get_app_mode,
             setup::install_app,
             setup::uninstall_app,
@@ -800,6 +810,7 @@ pub fn run() {
             save_image,
             copy_file_to_img,
             delete_file,
+            copy_file,
             cleanup_empty_img_dir,
             list_directory_contents
         ])

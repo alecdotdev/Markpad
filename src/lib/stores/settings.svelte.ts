@@ -54,6 +54,8 @@ export class SettingsStore {
 	} | null>(null);
 	occurrencesHighlight = $state(false);
 	showWhitespace = $state(false);
+	startInEditor = $state(false);
+	editorMaxWidth = $state(80);
 	osType = $state<OSType>('unknown');
 
 	editorFont = $state('Consolas');
@@ -81,6 +83,8 @@ export class SettingsStore {
 			const savedShowWhitespace = localStorage.getItem('editor.showWhitespace');
 			const savedShowToc = localStorage.getItem('editor.showToc');
 			const savedHighlightColor = localStorage.getItem('editor.highlightColor');
+			const savedStartInEditor = localStorage.getItem('editor.startInEditor');
+			const savedEditorMaxWidth = localStorage.getItem('editor.maxWidth');
 
 			const savedEditorFont = localStorage.getItem('editor.font');
 			const savedEditorFontSize = localStorage.getItem('editor.fontSize');
@@ -111,6 +115,8 @@ export class SettingsStore {
 			if (savedShowWhitespace !== null) this.showWhitespace = savedShowWhitespace === 'true';
 			if (savedShowToc !== null) this.showToc = savedShowToc === 'true';
 			if (savedHighlightColor !== null) this.highlightColor = savedHighlightColor;
+			if (savedStartInEditor !== null) this.startInEditor = savedStartInEditor === 'true';
+			if (savedEditorMaxWidth !== null) this.editorMaxWidth = parseFontSize(savedEditorMaxWidth, 80, 20, 500);
 			if (savedPreZenState !== null) {
 				try {
 					this.preZenState = JSON.parse(savedPreZenState);
@@ -161,6 +167,8 @@ export class SettingsStore {
 					localStorage.setItem('editor.showWhitespace', String(this.showWhitespace));
 					localStorage.setItem('editor.showToc', String(this.showToc));
 					localStorage.setItem('editor.highlightColor', this.highlightColor);
+					localStorage.setItem('editor.startInEditor', String(this.startInEditor));
+					localStorage.setItem('editor.maxWidth', String(this.editorMaxWidth));
 					localStorage.setItem('editor.font', this.editorFont);
 					localStorage.setItem('editor.fontSize', String(this.editorFontSize));
 					localStorage.setItem('preview.font', this.previewFont);
@@ -182,7 +190,13 @@ export class SettingsStore {
 	}
 
 	toggleWordWrap() {
-		this.wordWrap = this.wordWrap === 'on' ? 'off' : 'on';
+		if (this.wordWrap === 'off') {
+			this.wordWrap = 'on';
+		} else if (this.wordWrap === 'on') {
+			this.wordWrap = 'wordWrapColumn';
+		} else {
+			this.wordWrap = 'off';
+		}
 	}
 
 	toggleLineNumbers() {
@@ -253,6 +267,14 @@ export class SettingsStore {
 
 	toggleShowWhitespace() {
 		this.showWhitespace = !this.showWhitespace;
+	}
+
+	toggleStartInEditor() {
+		this.startInEditor = !this.startInEditor;
+	}
+
+	resetEditorMaxWidth() {
+		this.editorMaxWidth = 80;
 	}
 
 	async initOSType() {

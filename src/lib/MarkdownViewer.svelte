@@ -441,9 +441,9 @@ import { processMarkdownHtml } from './utils/markdown';
 			const tab = tabManager.tabs.find((t) => t.id === activeId);
 
 			if (isMarkdown) {
-				if (tab) tab.isEditing = false;
+				if (tab) tab.isEditing = settings.startInEditor;
 				const html = (await invoke('open_markdown', { path: filePath })) as string;
-				const processedInfo = processMarkdownHtml(html, filePath);
+				const processedInfo = processMarkdownHtml(html, filePath, collapsedHeaders);
 				tabManager.updateTabContent(activeId, processedInfo);
 			} else {
 				if (tab) tab.isEditing = true;
@@ -1082,7 +1082,7 @@ import { processMarkdownHtml } from './utils/markdown';
 			} else {
 				try {
 					const html = (await invoke('render_markdown', { content: tab.rawContent })) as string;
-					const processedInfo = processMarkdownHtml(html, '');
+					const processedInfo = processMarkdownHtml(html, '', collapsedHeaders);
 					tabManager.updateTabContent(tab.id, processedInfo);
 				} catch (e) {
 					console.error('Failed to render markdown for unsaved file', e);
@@ -1477,7 +1477,7 @@ import { processMarkdownHtml } from './utils/markdown';
 			debounceTimer = setTimeout(() => {
 				invoke('render_markdown', { content: tab.rawContent })
 					.then((html) => {
-						const processed = processMarkdownHtml(html as string, tab.path);
+						const processed = processMarkdownHtml(html as string, tab.path, collapsedHeaders);
 						tabManager.updateTabContent(tab.id, processed);
 						tick().then(renderRichContent);
 					})
@@ -2101,7 +2101,7 @@ import { processMarkdownHtml } from './utils/markdown';
 						<div class="viewer-content">
 							{#if settings.showToc}
 								<div transition:slide={{ axis: 'x', duration: 250 }}>
-									<Toc {markdownBody} {htmlContent} onBeforeJump={pushScrollHistory} />
+									<Toc {markdownBody} {htmlContent} onBeforeJump={pushScrollHistory} {collapsedHeaders} ontoggleFold={toggleFold} oncopyref={(text) => { const tab = tabManager.activeTab; const fn = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : ''; invoke('clipboard_write_text', { text: fn ? `[[${fn}#${text}]]` : `#${text}` }); }} />
 								</div>
 							{/if}
 							<!-- svelte-ignore a11y_click_events_have_key_events -->

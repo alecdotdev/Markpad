@@ -257,9 +257,9 @@
 								<h2>Editor Settings</h2>
 								<button
 									class="reset-text-btn"
-									class:disabled={settings.editorFont === defaultFonts.editorFont && settings.editorFontSize === 14}
-									onclick={() => settings.resetEditorFont()}>
-									Reset font settings
+									class:disabled={settings.editorFont === defaultFonts.editorFont && settings.editorFontSize === 14 && settings.editorMaxWidth === 80}
+									onclick={() => { settings.resetEditorFont(); settings.resetEditorMaxWidth(); }}>
+									Reset editor settings
 								</button>
 							</div>
 
@@ -303,11 +303,33 @@
 							</div>
 
 							<div class="setting-item">
+								<label for="editor-max-width">Wrap Column</label>
+								<div class="slider-container">
+									<div class="number-input-wrapper horizontal">
+										<button class="spin-btn minus" onclick={() => (settings.editorMaxWidth = Math.max(20, settings.editorMaxWidth - 10))} aria-label="Decrease">
+											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+										</button>
+										<input type="number" id="editor-max-width" min="20" max="500" step="10" bind:value={settings.editorMaxWidth} class="number-input" style="width: 50px" />
+										<button class="spin-btn plus" onclick={() => (settings.editorMaxWidth = Math.min(500, settings.editorMaxWidth + 10))} aria-label="Increase">
+											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+										</button>
+									</div>
+									<span class="slider-value">chars</span>
+								</div>
+							</div>
+
+							<div class="setting-item">
 								<label for="editor-word-wrap">Word Wrap</label>
-								<label class="toggle">
-									<input id="editor-word-wrap" type="checkbox" checked={settings.wordWrap === 'on'} onchange={() => settings.toggleWordWrap()} />
-									<span class="toggle-slider"></span>
-								</label>
+								<div class="select-wrapper">
+									<select id="editor-word-wrap" bind:value={settings.wordWrap}>
+										<option value="off">Off</option>
+										<option value="on">Window</option>
+										<option value="wordWrapColumn">Column</option>
+									</select>
+									<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+								</div>
 							</div>
 
 							<div class="setting-item">
@@ -540,6 +562,13 @@
 								</label>
 							</div>
 
+							<div class="setting-item">
+								<label for="appearance-start-editor">Start in Editor</label>
+								<label class="toggle">
+									<input id="appearance-start-editor" type="checkbox" checked={settings.startInEditor} onchange={() => settings.toggleStartInEditor()} />
+									<span class="toggle-slider"></span>
+								</label>
+							</div>
 							<div class="setting-item">
 								<label for="appearance-toc">Show Table of Contents</label>
 								<label class="toggle">
@@ -1001,7 +1030,7 @@
 		width: 12px;
 		left: 3px;
 		bottom: 3px;
-		background-color: var(--color-fg-muted);
+		background-color: #abb2bf; 
 		transition:
 			transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
 			height 0.2s,
@@ -1019,7 +1048,7 @@
 
 	.toggle input:checked + .toggle-slider:before {
 		transform: translateX(20px);
-		background-color: var(--color-btn-fg);
+		background-color: #fff;
 	}
 	.custom-dropdown-wrapper {
 		position: relative;

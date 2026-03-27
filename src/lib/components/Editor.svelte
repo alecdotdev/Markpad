@@ -111,6 +111,13 @@
 				rules: [],
 				colors: {
 					"editor.background": "#181818",
+					"menu.background": "#181818",
+					"menu.foreground": "#cccccc",
+					"menu.selectionBackground": "#2a2d2e",
+					"menu.selectionForeground": "#ffffff",
+					"menu.separatorBackground": "#454545",
+					"editorWidget.background": "#181818",
+					"editorWidget.border": "#454545",
 				},
 			});
 
@@ -120,6 +127,13 @@
 				rules: [],
 				colors: {
 					"editor.background": "#FDFDFD",
+					"menu.background": "#FDFDFD",
+					"menu.foreground": "#333333",
+					"menu.selectionBackground": "#eeeeee",
+					"menu.selectionForeground": "#000000",
+					"menu.separatorBackground": "#cccccc",
+					"editorWidget.background": "#FDFDFD",
+					"editorWidget.border": "#cccccc",
 				},
 			});
 		};
@@ -149,6 +163,7 @@
 				| "off"
 				| "wordWrapColumn"
 				| "bounded",
+			wordWrapColumn: settings.editorMaxWidth,
 			lineNumbers: settings.lineNumbers as
 				| "on"
 				| "off"
@@ -163,6 +178,15 @@
 			wordBasedSuggestions: "off",
 			quickSuggestions: false,
 			renderWhitespace: settings.showWhitespace ? "trailing" : "none",
+			scrollbar: {
+				vertical: "visible",
+				horizontal: "visible",
+				useShadows: false,
+				verticalHasArrows: false,
+				horizontalHasArrows: false,
+				verticalScrollbarSize: 10,
+				horizontalScrollbarSize: 10,
+			},
 		});
 
 		if (tabManager.activeTab?.editorViewState) {
@@ -283,6 +307,22 @@
 			run: () => {
 				settings.toggleZenMode();
 			},
+		});
+
+		$effect(() => {
+			if (editor) {
+				editor.updateOptions({
+					minimap: { enabled: settings.minimap },
+					wordWrap: settings.wordWrap as any,
+					wordWrapColumn: settings.editorMaxWidth,
+					lineNumbers: settings.lineNumbers as any,
+					renderLineHighlight: settings.renderLineHighlight as any,
+					occurrencesHighlight: settings.occurrencesHighlight ? "singleFile" : "off",
+					fontSize: settings.editorFontSize,
+					fontFamily: settings.editorFont,
+					renderWhitespace: settings.showWhitespace ? "trailing" : "none",
+				});
+			}
 		});
 
 		const updateTheme = () => {
@@ -703,7 +743,7 @@
 				if (!rawText) return;
 				
 				const text = rawText.trim();
-				const urlRegex = /^(?:(?:https?|obsidian|file|tauri):\/\/|www\.)[^\s]{2,}$/i;
+				const urlRegex = /^(?:(?:https?|file|tauri):\/\/|www\.)[^\s]{2,}$/i;
 				const isUrl = urlRegex.test(text);
 
 				const selections = editor.getSelections();
@@ -742,7 +782,7 @@
 					editor.executeEdits("paste-link", edits);
 				} else {
 					const displayText = text.replace(
-						/^(?:https?|obsidian|file|tauri):\/\/|www\./i,
+						/^(?:https?|file|tauri):\/\/|www\./i,
 						"",
 					);
 					const linkUrl = text.toLowerCase().startsWith("www.")
@@ -867,8 +907,10 @@
 		}
 	});
 
+	let tabSwitchPending = false;
+
 	$effect(() => {
-		if (editor && editor.getValue() !== value) {
+		if (editor && editor.getValue() !== value && !tabSwitchPending) {
 			editor.setValue(value);
 		}
 	});
@@ -905,11 +947,17 @@
 				tabManager.updateTabEditorState(currentTabId, state);
 			}
 			currentTabId = activeTabId;
+
+			tabSwitchPending = true;
+			if (tabManager.activeTab && editor.getValue() !== tabManager.activeTab.rawContent) {
+				editor.setValue(tabManager.activeTab.rawContent);
+			}
 			if (tabManager.activeTab?.editorViewState) {
 				editor.restoreViewState(tabManager.activeTab.editorViewState);
 			} else {
 				editor.setScrollTop(0);
 			}
+			tabSwitchPending = false;
 		}
 	});
 
@@ -1027,7 +1075,12 @@
 	}
 </script>
 
-<div class="editor-container" bind:this={container}></div>
+<div class="editor-outer">
+	<div
+		class="editor-container"
+		bind:this={container}
+	></div>
+</div>
 
 {#if settings.vimMode}
 	<div class="vim-status-bar" bind:this={vimStatusNode}></div>
@@ -1064,10 +1117,19 @@
 {/if}
 
 <style>
-	.editor-container {
-		width: 100%;
+	.editor-outer {
+		flex: 1;
 		height: 100%;
+		width: 100%;
+		display: flex;
+		background-color: var(--color-canvas-default);
 		overflow: hidden;
+	}
+
+	.editor-container {
+		height: 100%;
+		width: 100%;
+		min-width: 0;
 	}
 
 	:global(.ghost-caret) {

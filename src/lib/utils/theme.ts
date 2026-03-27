@@ -62,6 +62,16 @@ export async function parseAndApplyVscodeTheme(themeJsonStr: string, name: strin
     document.documentElement.dataset.theme = 'vscode';
     document.documentElement.dataset.themeType = isDark ? 'dark' : 'light';
 
+    const bgHex = (cssVars['--color-canvas-default'] || '').replace('#', '');
+    if (bgHex.length === 6) {
+        const r = parseInt(bgHex.slice(0, 2), 16) / 255;
+        const g = parseInt(bgHex.slice(2, 4), 16) / 255;
+        const b = parseInt(bgHex.slice(4, 6), 16) / 255;
+        const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        const wsColor = luminance > 0.5 ? 'rgba(0, 0, 0, 0.15)' : 'rgba(255, 255, 255, 0.15)';
+        document.documentElement.style.setProperty('--color-whitespace', wsColor);
+    }
+
     try {
         if (monaco) {
             const rules: any[] = [];
@@ -98,4 +108,5 @@ export async function parseAndApplyVscodeTheme(themeJsonStr: string, name: strin
 export function clearVscodeTheme() {
     const styleTag = document.getElementById('vscode-theme-style');
     if (styleTag) styleTag.remove();
+    document.documentElement.style.removeProperty('--color-whitespace');
 }
