@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from "svelte";
 	import { tabManager } from "../stores/tabs.svelte.js";
 	import { settings } from "../stores/settings.svelte.js";
+	import { t } from '../utils/i18n.js';
 
 	import * as monaco from "monaco-editor";
 	import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
@@ -68,6 +69,11 @@
 	let wordCount = $state(0);
 	let currentLanguage = $state("markdown");
 	let currentTabId = $state(tabManager.activeTabId);
+	let uiLanguage = $state(settings.language);
+
+	$effect(() => {
+		uiLanguage = settings.language;
+	});
 
 	self.MonacoEnvironment = {
 		getWorker: function (_moduleId: any, label: string) {
@@ -218,7 +224,7 @@
 
 		editor.addAction({
 			id: "toggle-minimap",
-			label: "Toggle Minimap",
+			label: t('settings.minimap', uiLanguage),
 			run: () => {
 				settings.toggleMinimap();
 			},
@@ -226,7 +232,7 @@
 
 		editor.addAction({
 			id: "toggle-word-wrap",
-			label: "Toggle Word Wrap",
+			label: t('settings.wordWrap', uiLanguage),
 			run: () => {
 				settings.toggleWordWrap();
 			},
@@ -234,7 +240,7 @@
 
 		editor.addAction({
 			id: "toggle-line-numbers",
-			label: "Toggle Line Numbers",
+			label: t('settings.lineNumbers', uiLanguage),
 			run: () => {
 				settings.toggleLineNumbers();
 			},
@@ -242,7 +248,7 @@
 
 		editor.addAction({
 			id: "toggle-vim-mode",
-			label: "Toggle Vim Mode",
+			label: t('settings.vimMode', uiLanguage),
 			run: () => {
 				settings.toggleVimMode();
 			},
@@ -250,7 +256,7 @@
 
 		editor.addAction({
 			id: "toggle-status-bar",
-			label: "Toggle Status Bar",
+			label: t('settings.statusBar', uiLanguage),
 			run: () => {
 				settings.toggleStatusBar();
 			},
@@ -258,7 +264,7 @@
 
 		editor.addAction({
 			id: "toggle-word-count",
-			label: "Toggle Word Count",
+			label: t('settings.wordCount', uiLanguage),
 			run: () => {
 				settings.toggleWordCount();
 			},
@@ -266,7 +272,7 @@
 
 		editor.addAction({
 			id: "toggle-line-highlight",
-			label: "Toggle Line Highlight",
+			label: t('settings.lineHighlight', uiLanguage),
 			run: () => {
 				settings.toggleLineHighlight();
 			},
@@ -274,7 +280,7 @@
 
 		editor.addAction({
 			id: "toggle-occurrences-highlight",
-			label: "Toggle Occurrences Highlight",
+			label: t('settings.showWhitespace', uiLanguage),
 			run: () => {
 				settings.toggleOccurrencesHighlight();
 			},
@@ -282,7 +288,7 @@
 
 		editor.addAction({
 			id: "toggle-whitespace",
-			label: "Toggle Show Whitespace",
+			label: t('settings.showWhitespace', uiLanguage),
 			run: () => {
 				settings.toggleShowWhitespace();
 			},
@@ -290,7 +296,7 @@
 
 		editor.addAction({
 			id: "toggle-tabs",
-			label: "Toggle Tabs",
+			label: t('settings.showTabs', uiLanguage),
 			keybindings: [
 				monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyB,
 			],
@@ -301,7 +307,7 @@
 
 		editor.addAction({
 			id: "toggle-zen-mode",
-			label: "Toggle Zen Mode",
+			label: t('settings.zenMode', uiLanguage),
 			keybindings: [
 				monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ,
 			],
@@ -431,28 +437,28 @@
 
 		editor.addAction({
 			id: "fmt-bold",
-			label: "Format: Bold",
+			label: t('menu.bold', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB],
 			run: () => toggleFormat("**"),
 		});
 
 		editor.addAction({
 			id: "fmt-italic",
-			label: "Format: Italic",
+			label: t('menu.italic', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI],
 			run: () => toggleFormat("*"),
 		});
 
 		editor.addAction({
 			id: "fmt-underline",
-			label: "Format: Underline",
+			label: t('menu.underline', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyU],
 			run: () => toggleFormat("<u>|</u>", "tag"),
 		});
 
 		editor.addAction({
 			id: "insert-table-simple",
-			label: "Insert Table",
+			label: t('menu.insertTable', uiLanguage),
 			keybindings: [
 				monaco.KeyMod.chord(
 					monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK,
@@ -485,7 +491,7 @@
 
 		editor.addAction({
 			id: "file-new",
-			label: "New File",
+			label: t('menu.newFile', uiLanguage),
 			keybindings: [
 				monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyN,
 				monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyT,
@@ -495,28 +501,28 @@
 
 		editor.addAction({
 			id: "file-open",
-			label: "Open File",
+			label: t('menu.openFile', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyO],
 			run: () => onopen?.(),
 		});
 
 		editor.addAction({
 			id: "file-save",
-			label: "Save File",
+			label: t('menu.save', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
 			run: () => onsave?.(),
 		});
 
 		editor.addAction({
 			id: "file-close",
-			label: "Close File",
+			label: t('menu.closeFile', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyW],
 			run: () => onclose?.(),
 		});
 
 		editor.addAction({
 			id: "file-reveal",
-			label: "Open File Location",
+			label: t('menu.openLocation', uiLanguage),
 			keybindings: [
 				monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyR,
 			],
@@ -525,35 +531,35 @@
 
 		editor.addAction({
 			id: "view-toggle-edit",
-			label: "Toggle Edit Mode",
+			label: t('menu.toggleEditMode', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyE],
 			run: () => ontoggleEdit?.(),
 		});
 
 		editor.addAction({
 			id: "view-toggle-live",
-			label: "Toggle Live Mode",
+			label: t('menu.toggleLiveMode', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyL],
 			run: () => ontoggleLive?.(),
 		});
 
 		editor.addAction({
 			id: "view-toggle-split",
-			label: "Toggle Split View",
+			label: t('menu.toggleSplitView', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyH],
 			run: () => ontoggleSplit?.(),
 		});
 
 		editor.addAction({
 			id: "tab-next",
-			label: "Next Tab",
+			label: t('menu.nextTab', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Tab],
 			run: () => onnextTab?.(),
 		});
 
 		editor.addAction({
 			id: "tab-prev",
-			label: "Previous Tab",
+			label: t('menu.previousTab', uiLanguage),
 			keybindings: [
 				monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Tab,
 			],
@@ -562,7 +568,7 @@
 
 		editor.addAction({
 			id: "tab-undo-close",
-			label: "Undo Close Tab",
+			label: t('menu.undoCloseTab', uiLanguage),
 			keybindings: [
 				monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyT,
 			],
@@ -571,7 +577,7 @@
 
 		editor.addAction({
 			id: "app-command-palette",
-			label: "Command Palette",
+			label: t('menu.commandPalette', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP],
 			run: (ed) => {
 				ed.trigger("keyboard", "editor.action.quickCommand", {});
@@ -678,7 +684,7 @@
 		// clipboard handling: override Ctrl+C and Ctrl+V to use Rust backend
 		editor.addAction({
 			id: "custom-copy",
-			label: "Copy",
+			label: t('menu.copy', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC],
 			run: async (ed) => {
 				const selection = ed.getSelection();
@@ -1124,20 +1130,20 @@
 {#if settings.statusBar}
 	<div class="status-bar">
 		<div class="status-item">
-			Ln {cursorPosition?.lineNumber ?? 1}, Col {cursorPosition?.column ?? 1}
-		</div>
+								{t('editor.status.lineCol', settings.language).replace('{{line}}', (cursorPosition?.lineNumber ?? 1).toString()).replace('{{col}}', (cursorPosition?.column ?? 1).toString())}
+							</div>
 		{#if selectionCount > 0}
 			<div class="status-item">
-				{selectionCount} selected
+				{t('editor.status.selected', settings.language).replace('{{count}}', selectionCount.toString())}
 			</div>
 		{:else if cursorCount > 1}
 			<div class="status-item">
-				{cursorCount} selections
+				{t('editor.status.selections', settings.language).replace('{{count}}', cursorCount.toString())}
 			</div>
 		{/if}
 		{#if settings.wordCount}
 			<div class="status-item">
-				{wordCount} words
+				{t('editor.status.words', settings.language).replace('{{count}}', wordCount.toString())}
 			</div>
 		{/if}
 		<div class="status-item">
@@ -1146,8 +1152,8 @@
 		<div class="status-item">
 			{currentLanguage}
 		</div>
-		<div class="status-item">CRLF</div>
-		<div class="status-item">UTF-8</div>
+		<div class="status-item">{t('editor.status.crlf')}</div>
+		<div class="status-item">{t('editor.status.utf8')}</div>
 	</div>
 {/if}
 

@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { Tab } from '../stores/tabs.svelte.js';
-	import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
-	import { emit } from '@tauri-apps/api/event';
+import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
+import { emit } from '@tauri-apps/api/event';
+import { t } from '../utils/i18n.js';
+import { settings } from '../stores/settings.svelte.js';
 
 	let { tab, isActive, isLast, onclick, onclose } = $props<{
 		tab: Tab;
@@ -36,22 +38,23 @@
 		}
 	}
 
-	async function handleContextMenu(e: MouseEvent) {
+	function handleContextMenu(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
 
+		const currentLang = settings.language;
 		tabContextMenu = {
 			show: true,
 			x: e.clientX,
 			y: e.clientY,
 			items: [
-				{ label: 'New Tab', shortcut: 'Ctrl+T', onClick: () => emit('menu-tab-new') },
-				{ label: 'Undo Close Tab', shortcut: 'Ctrl+Shift+T', onClick: () => emit('menu-tab-undo') },
-				{ label: 'Rename', onClick: () => emit('menu-tab-rename', tab.id) },
+				{ label: t('menu.newFile', currentLang), shortcut: 'Ctrl+T', onClick: () => emit('menu-tab-new') },
+				{ label: t('menu.undoCloseTab', currentLang), shortcut: 'Ctrl+Shift+T', onClick: () => emit('menu-tab-undo') },
+				{ label: t('menu.rename', currentLang), onClick: () => emit('menu-tab-rename', tab.id) },
 				{ separator: true },
-				{ label: 'Close Tab', shortcut: 'Ctrl+W', onClick: () => emit('menu-tab-close', tab.id) },
-				{ label: 'Close Other Tabs', onClick: () => emit('menu-tab-close-others', tab.id) },
-				{ label: 'Close Tabs to Right', onClick: () => emit('menu-tab-close-right', tab.id) },
+				{ label: t('menu.closeFile', currentLang), shortcut: 'Ctrl+W', onClick: () => emit('menu-tab-close', tab.id) },
+				{ label: t('menu.closeOtherTabs', currentLang), onClick: () => emit('menu-tab-close-others', tab.id) },
+				{ label: t('menu.closeTabsToRight', currentLang), onClick: () => emit('menu-tab-close-right', tab.id) },
 			],
 		};
 	}

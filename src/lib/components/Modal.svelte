@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { fade, scale } from 'svelte/transition';
+	import { t } from '../utils/i18n.js';
+	import { settings } from '../stores/settings.svelte.js';
 
 	let {
 		show,
@@ -112,15 +114,15 @@
 				<p>{message}</p>
 			</div>
 			<div class="modal-footer">
-				<button class="modal-btn secondary" onclick={oncancel}>Cancel</button>
-				<div class="footer-spacer"></div>
-				<button class="modal-btn secondary" onclick={onconfirm}>
-					{kind === 'warning' ? "Don't Save" : 'Confirm'}
-				</button>
-				{#if showSave}
-					<button class="modal-btn primary" onclick={onsave}>Save</button>
-				{/if}
-			</div>
+					<button class="modal-btn secondary" onclick={oncancel}>{t('settings.cancel', settings.language)}</button>
+					<div class="footer-spacer"></div>
+					<button class="modal-btn secondary" onclick={onconfirm}>
+						{kind === 'warning' ? t('settings.discard', settings.language) : t('settings.save', settings.language)}
+					</button>
+					{#if showSave}
+						<button class="modal-btn primary" onclick={onsave}>{t('settings.save', settings.language)}</button>
+					{/if}
+				</div>
 		</div>
 	</div>
 {/if}

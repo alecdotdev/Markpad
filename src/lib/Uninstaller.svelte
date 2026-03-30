@@ -2,6 +2,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import iconUrl from '../assets/icon.png';
+	import { t } from './utils/i18n.js';
 
 	let uninstalling = $state(false);
 	let error = $state('');
@@ -27,7 +28,7 @@
 
 <div class="installer-container" data-tauri-drag-region>
 	<div class="window-controls">
-		<button class="control-btn close-btn" onclick={closeApp} aria-label="Close">
+		<button class="control-btn close-btn" onclick={closeApp} aria-label={t('common.close')}>
 			<svg width="12" height="12" viewBox="0 0 12 12"><path fill="currentColor" d="M11 1.7L10.3 1 6 5.3 1.7 1 1 1.7 5.3 6 1 10.3 1.7 11 6 6.7 10.3 11 11 10.3 6.7 6z" /></svg>
 		</button>
 	</div>
@@ -35,8 +36,8 @@
 	<div class="content">
 		<div class="header">
 			<img src={iconUrl} alt="App Icon" class="app-icon" />
-			<h1>Uninstall Markpad?</h1>
-			<p class="subtitle">This will remove the application and all its shortcuts.</p>
+			<h1>{t('uninstaller.uninstallMarkpad')}</h1>
+			<p class="subtitle">{t('uninstaller.removeApplication')}</p>
 		</div>
 
 		{#if !uninstalling}
@@ -46,14 +47,14 @@
 				{/if}
 
 				<div class="actions">
-					<button class="cancel-btn" onclick={closeApp}>Cancel</button>
-					<button class="uninstall-btn" onclick={handleUninstall}> Uninstall </button>
+					<button class="cancel-btn" onclick={closeApp}>{t('uninstaller.cancel')}</button>
+					<button class="uninstall-btn" onclick={handleUninstall}>{t('uninstaller.uninstall')}</button>
 				</div>
 			</div>
 		{:else}
 			<div class="installing-state">
 				<div class="spinner"></div>
-				<p>Removing Markpad...</p>
+				<p>{t('uninstaller.removingMarkpad')}</p>
 			</div>
 		{/if}
 	</div>

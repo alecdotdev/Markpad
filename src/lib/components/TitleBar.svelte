@@ -7,7 +7,14 @@
 	import TabList from './TabList.svelte';
 	import { tabManager } from '../stores/tabs.svelte.js';
 	import { settings } from '../stores/settings.svelte.js';
+	import { t } from '../utils/i18n.js';
 	import { getVersion } from '@tauri-apps/api/app';
+
+	let currentLanguage = $state(settings.language);
+
+	$effect(() => {
+		currentLanguage = settings.language;
+	});
 
 	let {
 		isFocused,
@@ -263,16 +270,16 @@
 	<div class="window-controls-left" data-tauri-drag-region>
 		{#if isMac && !useNativeMacChrome}
 			<div class="macos-traffic-lights" class:visible={isMac}>
-				<button class="mac-btn mac-close" onclick={() => appWindow.close()} aria-label="Close">
-					<svg width="6" height="6" viewBox="0 0 6 6" class="mac-icon"
-						><path d="M0.5 0.5L5.5 5.5M5.5 0.5L0.5 5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
-				</button>
-				<button class="mac-btn mac-minimize" onclick={() => appWindow.minimize()} aria-label="Minimize">
-					<svg width="6" height="6" viewBox="0 0 6 6" class="mac-icon"><path d="M0.5 3H5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
-				</button>
-				<button class="mac-btn mac-maximize" onclick={() => appWindow.toggleMaximize()} aria-label="Maximize">
-					<svg width="6" height="6" viewBox="0 0 6 6" class="mac-icon"><path d="M0.5 3H5.5M3 0.5V5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
-				</button>
+				<button class="mac-btn mac-close" onclick={() => appWindow.close()} aria-label={t('common.close')}>
+						<svg width="6" height="6" viewBox="0 0 6 6" class="mac-icon"
+								><path d="M0.5 0.5L5.5 5.5M5.5 0.5L0.5 5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
+					</button>
+					<button class="mac-btn mac-minimize" onclick={() => appWindow.minimize()} aria-label={t('common.minimize')}>
+						<svg width="6" height="6" viewBox="0 0 6 6" class="mac-icon"><path d="M0.5 3H5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
+					</button>
+					<button class="mac-btn mac-maximize" onclick={() => appWindow.toggleMaximize()} aria-label={t('common.maximize')}>
+						<svg width="6" height="6" viewBox="0 0 6 6" class="mac-icon"><path d="M0.5 3H5.5M3 0.5V5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
+					</button>
 			</div>
 		{/if}
 		<div class="home-menu-container" role="presentation">
@@ -287,10 +294,10 @@
 						hideTooltip();
 					}
 				}}
-				aria-label="Menu"
-				onmouseenter={(e) => {
-					if (!homeMenuOpen) showTooltip(e, 'Menu');
-				}}
+				aria-label={t('tooltip.menu', currentLanguage)}
+			onmouseenter={(e) => {
+							if (!homeMenuOpen) showTooltip(e, t('tooltip.menu', currentLanguage));
+						}}
 				onmousedown={(e) => e.preventDefault()}
 				onmouseleave={hideTooltip}>
 				<img
@@ -302,110 +309,110 @@
 			{#if homeMenuOpen}
 				<div class="home-dropdown-menu" transition:fly={{ y: 5, duration: 150 }} onclick={(e) => e.stopPropagation()}>
 					<button
-						class="home-menu-item"
-						onclick={() => {
-							homeMenuOpen = false;
-							ontoggleHome();
-						}}>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-							><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
-						Home
-					</button>
+				class="home-menu-item"
+				onclick={() => {
+					homeMenuOpen = false;
+					ontoggleHome();
+				}}>
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+				{t('menu.home', currentLanguage)}
+			</button>
 					<button
-						class="home-menu-item"
-						onclick={() => {
-							homeMenuOpen = false;
-							onnewFile?.();
-						}}>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-							><path d="M14 2H6a2 2 0 0 0-2 2v16h16V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line
-								x1="9"
-								y1="15"
-								x2="15"
-								y2="15"></line
-							></svg>
-						New File
-						<span class="menu-shortcut">{modifier}+T</span>
-					</button>
+				class="home-menu-item"
+				onclick={() => {
+					homeMenuOpen = false;
+					onnewFile?.();
+				}}>
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					><path d="M14 2H6a2 2 0 0 0-2 2v16h16V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line
+						x1="9"
+						y1="15"
+						x2="15"
+						y2="15"></line
+					></svg>
+				{t('menu.newFile', currentLanguage)}
+				<span class="menu-shortcut">{modifier}+T</span>
+			</button>
 					<button
-						class="home-menu-item"
-						onclick={() => {
-							homeMenuOpen = false;
-							onopenFile?.();
-						}}>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-							><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><polyline points="15 13 18 13 18 10"></polyline><line
-								x1="14"
-								y1="14"
-								x2="18"
-								y2="10"></line
-							></svg>
-						Open File...
-						<span class="menu-shortcut">{modifier}+O</span>
-					</button>
+				class="home-menu-item"
+				onclick={() => {
+					homeMenuOpen = false;
+					onopenFile?.();
+				}}>
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><polyline points="15 13 18 13 18 10"></polyline><line
+						x1="14"
+						y1="14"
+						x2="18"
+						y2="10"></line
+					></svg>
+				{t('menu.openFile', currentLanguage)}
+				<span class="menu-shortcut">{modifier}+O</span>
+			</button>
 					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.isEditing)}
 						<button
-							class="home-menu-item"
-							onclick={() => {
-								homeMenuOpen = false;
-								onsaveFile?.();
-							}}>
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-								><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline
-									points="7 3 7 8 15 8"></polyline
-								></svg>
-							Save
-							<span class="menu-shortcut">{modifier}+S</span>
-						</button>
-						<button
-							class="home-menu-item"
-							onclick={() => {
-								homeMenuOpen = false;
-								onsaveFileAs?.();
-							}}>
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-								><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline
-									points="7 3 7 8 15 8"></polyline
-								></svg>
-							Save As...
-							<span class="menu-shortcut">{modifier}+Shift+S</span>
-						</button>
+						class="home-menu-item"
+						onclick={() => {
+							homeMenuOpen = false;
+							onsaveFile?.();
+						}}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline
+								points="7 3 7 8 15 8"></polyline
+							></svg>
+						{t('menu.save', currentLanguage)}
+						<span class="menu-shortcut">{modifier}+S</span>
+					</button>
+					<button
+						class="home-menu-item"
+						onclick={() => {
+							homeMenuOpen = false;
+							onsaveFileAs?.();
+						}}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline
+								points="7 3 7 8 15 8"></polyline
+							></svg>
+						{t('menu.saveAs', currentLanguage)}
+						<span class="menu-shortcut">{modifier}+Shift+S</span>
+					</button>
 					{/if}
 					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.content)}
 						<div class="home-menu-divider"></div>
 						<button
-							class="home-menu-item"
-							onclick={() => {
-								homeMenuOpen = false;
-								onexportHtml?.();
-							}}>
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-								><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-							Export as HTML
-						</button>
-						<button
-							class="home-menu-item"
-							onclick={() => {
-								homeMenuOpen = false;
-								onexportPdf?.();
-							}}>
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-								><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line></svg>
-							Export as PDF
-						</button>
-					{/if}
-					<div class="home-menu-divider"></div>
+						class="home-menu-item"
+						onclick={() => {
+							homeMenuOpen = false;
+							onexportHtml?.();
+						}}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+						{t('menu.exportHtml', currentLanguage)}
+					</button>
 					<button
 						class="home-menu-item"
 						onclick={() => {
 							homeMenuOpen = false;
-							onexit?.();
+							onexportPdf?.();
 						}}>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-							><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-						Exit
-						<span class="menu-shortcut">{modifier}+Q</span>
+							><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+						{t('menu.exportPdf', currentLanguage)}
 					</button>
+					{/if}
+					<div class="home-menu-divider"></div>
+					<button
+					class="home-menu-item"
+					onclick={() => {
+						homeMenuOpen = false;
+						onexit?.();
+					}}>
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+						><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+					{t('menu.exit', currentLanguage)}
+					<span class="menu-shortcut">{modifier}+Q</span>
+				</button>
 					<div class="home-menu-divider"></div>
 					<button
 						class="home-menu-footer"
@@ -449,11 +456,11 @@
 					}
 				}}
 				onmouseenter={(e) => {
-					if (!kebabMenuOpen) showTooltip(e, 'More');
-				}}
+							if (!kebabMenuOpen) showTooltip(e, t('tooltip.more', currentLanguage));
+						}}
 				onmousedown={(e) => e.preventDefault()}
 				onmouseleave={hideTooltip}
-				aria-label="More Actions">
+				aria-label={t('tooltip.moreActions', currentLanguage)}>
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 					<circle cx="12" cy="12" r="1"></circle>
 					<circle cx="12" cy="5" r="1"></circle>
@@ -472,8 +479,8 @@
 							kebabMenuOpen = false;
 							onopenSettings?.();
 						}}
-						aria-label="Settings"
-						onmouseenter={(e) => showTooltip(e, 'Settings')}
+						aria-label={t('tooltip.settings', currentLanguage)}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.settings', currentLanguage))}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}
 						transition:fly={{ x: 10, duration: 200 }}>
@@ -481,7 +488,7 @@
 							<circle cx="12" cy="12" r="3"></circle>
 							<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
 						</svg>
-						<span class="action-label">Settings</span>
+						<span class="action-label">{t('menu.settings', currentLanguage)}</span>
 					</button>
 				{:else if id === 'zoom'}
 					<button
@@ -492,7 +499,7 @@
 						}}
 						onmousedown={(e) => e.preventDefault()}
 						transition:fly={{ y: -10, duration: 150 }}
-						aria-label="Reset Zoom">
+						aria-label={t('tooltip.resetZoom', currentLanguage)}>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 							<circle cx="11" cy="11" r="8"></circle>
 							<line x1="21" y1="21" x2="16.65" y2="16.65"></line>
@@ -500,14 +507,14 @@
 							<line x1="8" y1="11" x2="14" y2="11"></line>
 						</svg>
 						<span class="zoom-value">{zoomLevel}%</span>
-						<span class="menu-shortcut">Reset</span>
+						<span class="menu-shortcut">{t('tooltip.reset', currentLanguage)}</span>
 					</button>
 				{:else if id === 'zen'}
 					<button
 						class="title-action-btn {settings.zenMode ? 'active' : ''}"
 						onclick={() => settings.toggleZenMode()}
-						aria-label="Toggle Zen Mode"
-						onmouseenter={(e) => showTooltip(e, 'Zen mode')}
+						aria-label={t('tooltip.toggleZenMode', currentLanguage)}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.zenMode', currentLanguage))}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}
 						transition:fly={{ x: 10, duration: 200 }}>
@@ -519,7 +526,7 @@
 								<circle cx="12" cy="12" r="3"></circle>
 							{/if}
 						</svg>
-						<span class="action-label">Zen Mode</span>
+						<span class="action-label">{t('menu.zenMode', currentLanguage)}</span>
 						<span class="menu-shortcut">{modifier}+Shift+Z</span>
 					</button>
 				{:else if id === 'tabs'}
@@ -528,8 +535,8 @@
 						style:opacity={settings.zenMode ? 0.3 : 1}
 						style:pointer-events={settings.zenMode ? 'none' : 'auto'}
 						onclick={() => settings.toggleTabs()}
-						aria-label="{settings.showTabs ? 'Hide' : 'Show'} Tabs"
-						onmouseenter={(e) => showTooltip(e, (settings.showTabs ? 'Hide' : 'Show') + ' tabs', 'Shift+B')}
+						aria-label={t('tooltip.tabs', currentLanguage).replace('{{action}}', settings.showTabs ? t('tooltip.hide', currentLanguage) : t('tooltip.show', currentLanguage))}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.tabs', currentLanguage).replace('{{action}}', settings.showTabs ? t('tooltip.hide', currentLanguage) : t('tooltip.show', currentLanguage)), 'Shift+B')}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}
 						transition:fly={{ x: 10, duration: 200 }}>
@@ -538,15 +545,15 @@
 							<line x1="3" y1="9" x2="21" y2="9"></line>
 							<line x1="9" y1="21" x2="9" y2="9"></line>
 						</svg>
-						<span class="action-label">{settings.showTabs ? 'Hide' : 'Show'} Tabs</span>
+						<span class="action-label">{t('menu.tabs', currentLanguage).replace('{{action}}', settings.showTabs ? t('menu.hide', currentLanguage) : t('menu.show', currentLanguage) )}</span>
 						<span class="menu-shortcut">{modifier}+Shift+B</span>
 					</button>
 				{:else if id === 'open_loc'}
 					<button
 						class="title-action-btn"
 						onclick={ononpenFileLocation}
-						aria-label="Open File Location"
-						onmouseenter={(e) => showTooltip(e, 'Open file location')}
+						aria-label={t('tooltip.openFileLocation', currentLanguage)}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.openFileLocation', currentLanguage))}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}
 						transition:fly={{ x: 10, duration: 200 }}>
@@ -557,14 +564,14 @@
 								x2="18"
 								y2="10"></line
 							></svg>
-						<span class="action-label">Open Location</span>
+						<span class="action-label">{t('menu.openLocation', currentLanguage)}</span>
 					</button>
 				{:else if id === 'split'}
 					<button
 						class="title-action-btn {tabManager.activeTab?.isSplit ? 'active' : ''}"
 						onclick={() => ontoggleSplit?.()}
-						aria-label="Toggle Split View"
-						onmouseenter={(e) => showTooltip(e, 'Split view', 'H')}
+						aria-label={t('tooltip.toggleSplitView', currentLanguage)}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.splitView', currentLanguage), 'H')}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}
 						transition:fly={{ x: 10, duration: 200 }}>
@@ -578,61 +585,61 @@
 								ry="2"
 								transform="rotate(0 13 2)"></rect
 							></svg>
-						<span class="action-label">Split View</span>
+						<span class="action-label">{t('menu.splitView', currentLanguage)}</span>
 						<span class="menu-shortcut">{modifier}+H</span>
 					</button>
 				{:else if id === 'sync'}
 					<button
 						class="title-action-btn {isScrollSynced ? 'active' : ''}"
 						onclick={() => ontoggleSync?.()}
-						aria-label="Toggle Scroll Sync"
-						onmouseenter={(e) => showTooltip(e, 'Scroll sync')}
+						aria-label={t('tooltip.toggleScrollSync', currentLanguage)}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.scrollSync', currentLanguage))}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}
 						transition:fly={{ x: 10, duration: 200 }}>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 							><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-						<span class="action-label">Sync Scroll</span>
+						<span class="action-label">{t('menu.syncScroll', currentLanguage)}</span>
 					</button>
 				{:else if id === 'fullWidth'}
 					<button
 						class="title-action-btn {isFullWidth ? 'active' : ''}"
 						onclick={() => ontoggleFullWidth?.()}
-						aria-label="Toggle Full Width"
-						onmouseenter={(e) => showTooltip(e, 'Toggle full width')}
+						aria-label={t('tooltip.toggleFullWidth', currentLanguage)}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.fullWidth', currentLanguage))}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}
 						transition:fly={{ x: 10, duration: 200 }}>
 						<svg xmlns="http://www.w3.org/2000/svg" height="14" viewBox="0 -960 960 960" width="14" fill="currentColor"
 							><path
 								d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm640-560H160v480h640v-480Zm-640 0v480-480Zm200 360v-240L240-480l120 120Zm360-120L600-600v240l120-120Z" /></svg>
-						<span class="action-label">Full Width</span>
+						<span class="action-label">{t('menu.fullWidth', currentLanguage)}</span>
 					</button>
 				{:else if id === 'live'}
 					<button
 						class="title-action-btn {liveMode ? 'active' : ''}"
 						onclick={ontoggleLiveMode}
-						aria-label="Toggle Auto-Reload"
-						onmouseenter={(e) => showTooltip(e, 'Auto-Reload')}
+						aria-label={t('tooltip.toggleAutoReload', currentLanguage)}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.autoReload', currentLanguage))}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 							><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path
 								d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path
 							></svg>
-						<span class="action-label">Auto-Reload</span>
+						<span class="action-label">{t('menu.autoReload', currentLanguage)}</span>
 					</button>
 				{:else if id === 'edit'}
 					<button
 						class="title-action-btn {isEditing ? 'active' : ''}"
 						onclick={ontoggleEdit}
-						aria-label="Edit File (Ctrl+E)"
-						onmouseenter={(e) => showTooltip(e, 'Edit file', 'E')}
+						aria-label={t('tooltip.editFile', currentLanguage)}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.editFile', currentLanguage), 'E')}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 							><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
-						<span class="action-label">Editor</span>
+						<span class="action-label">{t('menu.editor', currentLanguage)}</span>
 						<span class="menu-shortcut">{modifier}+E</span>
 					</button>
 				{:else if id === 'theme'}
@@ -644,10 +651,10 @@
 								themeMenuOpen = !themeMenuOpen;
 								if (themeMenuOpen) hideTooltip();
 							}}
-							aria-label="Change Theme"
-							onmouseenter={(e) => {
-								if (!themeMenuOpen) showTooltip(e, 'Change Theme');
-							}}
+							aria-label={t('tooltip.changeTheme', currentLanguage)}
+														onmouseenter={(e) => {
+														if (!themeMenuOpen) showTooltip(e, t('tooltip.changeTheme', currentLanguage));
+												}}
 							onmousedown={(e) => e.preventDefault()}
 							onmouseleave={hideTooltip}
 							transition:fly={{ x: 10, duration: 200 }}>
@@ -671,13 +678,13 @@
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 									><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
 							{/if}
-							<span class="action-label">Change Theme</span>
+							<span class="action-label">{t('menu.changeTheme', currentLanguage)}</span>
 						</button>
 						{#if themeMenuOpen}
 							<div class="theme-menu" transition:fly={{ y: 5, duration: 150 }} onclick={(e) => e.stopPropagation()}>
-								<button class="theme-option {theme === 'system' ? 'selected' : ''}" onclick={() => handleSetTheme('system')}> Follow System </button>
-								<button class="theme-option {theme === 'light' ? 'selected' : ''}" onclick={() => handleSetTheme('light')}> Default Light </button>
-								<button class="theme-option {theme === 'dark' ? 'selected' : ''}" onclick={() => handleSetTheme('dark')}> Default Dark </button>
+								<button class="theme-option {theme === 'system' ? 'selected' : ''}" onclick={() => handleSetTheme('system')}> {t('theme.followSystem', currentLanguage)} </button>
+								<button class="theme-option {theme === 'light' ? 'selected' : ''}" onclick={() => handleSetTheme('light')}> {t('theme.defaultLight', currentLanguage)} </button>
+								<button class="theme-option {theme === 'dark' ? 'selected' : ''}" onclick={() => handleSetTheme('dark')}> {t('theme.defaultDark', currentLanguage)} </button>
 								{#if savedVscodeThemes.length > 0}
 									<div class="theme-menu-divider"></div>
 									{#each savedVscodeThemes as t}
@@ -723,16 +730,16 @@
 
 	<div class="window-controls-right" data-tauri-drag-region>
 		{#if !isMac}
-			<button class="control-btn" onclick={() => appWindow.minimize()} aria-label="Minimize">
+			<button class="control-btn" onclick={() => appWindow.minimize()} aria-label={t('common.minimize')}>
 				<svg width="12" height="12" viewBox="0 0 12 12"><rect fill="currentColor" width="10" height="1" x="1" y="6" /></svg>
 			</button>
-			<button class="control-btn" onclick={() => appWindow.toggleMaximize()} aria-label="Maximize">
+			<button class="control-btn" onclick={() => appWindow.toggleMaximize()} aria-label={t('common.maximize')}>
 				<svg width="12" height="12" viewBox="0 0 12 12"><rect fill="none" stroke="currentColor" stroke-width="1" width="9" height="9" x="1.5" y="1.5" /></svg>
 			</button>
 			<button
 				class="control-btn close-btn"
 				onclick={() => appWindow.close()}
-				aria-label="Close">
+				aria-label={t('common.close')}>
 				<svg width="12" height="12" viewBox="0 0 12 12"><path fill="currentColor" d="M11 1.7L10.3 1 6 5.3 1.7 1 1 1.7 5.3 6 1 10.3 1.7 11 6 6.7 10.3 11 11 10.3 6.7 6z" /></svg>
 			</button>
 		{/if}

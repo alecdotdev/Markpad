@@ -1,6 +1,38 @@
 import { invoke } from '@tauri-apps/api/core';
 
 export type OSType = 'macos' | 'windows' | 'linux' | 'unknown';
+export type LanguageCode = 'en' | 'ja' | 'zh-CN' | 'zh-TW' | 'ko' | 'ru' | 'es' | 'fr' | 'de' | 'pt-BR';
+
+export const SUPPORTED_LANGUAGES: { code: LanguageCode; name: string; nativeName: string }[] = [
+	{ code: 'en', name: 'English', nativeName: 'English' },
+	{ code: 'ja', name: 'Japanese', nativeName: '日本語' },
+	{ code: 'zh-CN', name: 'Chinese (Simplified)', nativeName: '简体中文' },
+	{ code: 'zh-TW', name: 'Chinese (Traditional)', nativeName: '繁體中文' },
+	{ code: 'ko', name: 'Korean', nativeName: '한국어' },
+	{ code: 'ru', name: 'Russian', nativeName: 'Русский' },
+	{ code: 'es', name: 'Spanish', nativeName: 'Español' },
+	{ code: 'fr', name: 'French', nativeName: 'Français' },
+	{ code: 'de', name: 'German', nativeName: 'Deutsch' },
+	{ code: 'pt-BR', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)' },
+];
+
+function detectSystemLanguage(): LanguageCode {
+	if (typeof navigator !== 'undefined') {
+		const browserLang = navigator.language.toLowerCase();
+		if (browserLang.startsWith('zh')) {
+			if (browserLang === 'zh-tw' || browserLang === 'zh-hk') return 'zh-TW';
+			return 'zh-CN';
+		}
+		if (browserLang.startsWith('ja')) return 'ja';
+		if (browserLang.startsWith('ko')) return 'ko';
+		if (browserLang.startsWith('ru')) return 'ru';
+		if (browserLang.startsWith('es')) return 'es';
+		if (browserLang.startsWith('fr')) return 'fr';
+		if (browserLang.startsWith('de')) return 'de';
+		if (browserLang.startsWith('pt')) return 'pt-BR';
+	}
+	return 'en';
+}
 
 export interface DefaultFonts {
 	editorFont: string;
@@ -59,6 +91,9 @@ export class SettingsStore {
 	pinnedToc = $state(false);
 	tocSide = $state<'left' | 'right'>('left');
 	osType = $state<OSType>('unknown');
+	imageDirectory = $state('img');
+	macosImageScaling = $state(true);
+	language = $state<LanguageCode>('en');
 
 	editorFont = $state('Consolas');
 	editorFontSize = $state(14);
@@ -89,6 +124,9 @@ export class SettingsStore {
 			const savedEditorMaxWidth = localStorage.getItem('editor.maxWidth');
 			const savedPinnedToc = localStorage.getItem('editor.pinnedToc');
 			const savedTocSide = localStorage.getItem('editor.tocSide');
+			const savedImageDirectory = localStorage.getItem('editor.imageDirectory');
+			const savedMacosImageScaling = localStorage.getItem('editor.macosImageScaling');
+			const savedLanguage = localStorage.getItem('editor.language');
 
 			const savedEditorFont = localStorage.getItem('editor.font');
 			const savedEditorFontSize = localStorage.getItem('editor.fontSize');
@@ -123,6 +161,17 @@ export class SettingsStore {
 			if (savedEditorMaxWidth !== null) this.editorMaxWidth = parseFontSize(savedEditorMaxWidth, 80, 20, 500);
 			if (savedPinnedToc !== null) this.pinnedToc = savedPinnedToc === 'true';
 			if (savedTocSide !== null) this.tocSide = savedTocSide as 'left' | 'right';
+			if (savedImageDirectory !== null) this.imageDirectory = savedImageDirectory;
+			if (savedMacosImageScaling !== null) this.macosImageScaling = savedMacosImageScaling === 'true';
+			if (savedLanguage !== null) {
+				const lang = savedLanguage as LanguageCode;
+				const supportedCodes: LanguageCode[] = ['en', 'ja', 'zh-CN', 'zh-TW', 'ko', 'ru', 'es', 'fr', 'de', 'pt-BR'];
+				if (supportedCodes.includes(lang)) {
+					this.language = lang;
+				}
+			} else {
+				this.language = detectSystemLanguage();
+			}
 			if (savedPreZenState !== null) {
 				try {
 					this.preZenState = JSON.parse(savedPreZenState);
@@ -176,7 +225,10 @@ export class SettingsStore {
 					localStorage.setItem('editor.startInEditor', String(this.startInEditor));
 					localStorage.setItem('editor.maxWidth', String(this.editorMaxWidth));
 					localStorage.setItem('editor.pinnedToc', String(this.pinnedToc));
-					localStorage.setItem('editor.tocSide', this.tocSide);
+				localStorage.setItem('editor.tocSide', this.tocSide);
+				localStorage.setItem('editor.imageDirectory', this.imageDirectory);
+				localStorage.setItem('editor.macosImageScaling', String(this.macosImageScaling));
+				localStorage.setItem('editor.language', this.language);
 					localStorage.setItem('editor.font', this.editorFont);
 					localStorage.setItem('editor.fontSize', String(this.editorFontSize));
 					localStorage.setItem('preview.font', this.previewFont);
@@ -287,6 +339,14 @@ export class SettingsStore {
 
 	toggleTocSide() {
 		this.tocSide = this.tocSide === 'left' ? 'right' : 'left';
+	}
+
+	toggleMacosImageScaling() {
+		this.macosImageScaling = !this.macosImageScaling;
+	}
+
+	setLanguage(lang: LanguageCode) {
+		this.language = lang;
 	}
 
 	resetEditorMaxWidth() {

@@ -1,3 +1,6 @@
+import { t } from '../utils/i18n.js';
+import { settings } from './settings.svelte.js';
+
 export interface Tab {
 	id: string;
 	path: string;
@@ -64,7 +67,7 @@ class TabManager {
 
 	addTab(path: string, content: string = '') {
 		const id = crypto.randomUUID();
-		const filename = path.split('\\').pop()?.split('/').pop() || 'Untitled';
+		const filename = path.split('\\').pop()?.split('/').pop() || t('tabs.untitled', settings.language);
 
 		this.tabs.push({
 			id,
@@ -96,7 +99,7 @@ class TabManager {
 		this.tabs.push({
 			id,
 			path: '',
-			title: 'Untitled',
+			title: t('tabs.untitled', settings.language),
 			content,
 			rawContent: content,
 			originalContent: content,
@@ -127,7 +130,7 @@ class TabManager {
 		this.tabs.push({
 			id,
 			path: 'HOME',
-			title: 'Home',
+			title: t('tabs.home', settings.language),
 			content: '',
 			rawContent: '',
 			originalContent: '',

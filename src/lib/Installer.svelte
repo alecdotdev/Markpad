@@ -4,6 +4,7 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount } from 'svelte';
 	import iconUrl from '../assets/icon.png';
+	import { t } from './utils/i18n.js';
 
 	let installing = $state(false);
 	let error = $state('');
@@ -65,7 +66,7 @@
 			error = e.toString();
 			installing = false;
 			if (error.includes('Access is denied') && (isInstalled ? installedAllUsers : allUsers)) {
-				error = 'Access denied. Please run as Administrator.';
+				error = t('installer.accessDenied');
 			}
 		}
 	}
@@ -97,7 +98,7 @@
 
 <div class="installer-container" data-tauri-drag-region>
 	<div class="window-controls">
-		<button class="control-btn close-btn" onclick={closeApp} aria-label="Close">
+		<button class="control-btn close-btn" onclick={closeApp} aria-label={t('common.close')}>
 			<svg width="12" height="12" viewBox="0 0 12 12"><path fill="currentColor" d="M11 1.7L10.3 1 6 5.3 1.7 1 1 1.7 5.3 6 1 10.3 1.7 11 6 6.7 10.3 11 11 10.3 6.7 6z" /></svg>
 		</button>
 	</div>
@@ -105,15 +106,15 @@
 	<div class="content">
 		<div class="header">
 			<img src={iconUrl} alt="App Icon" class="app-icon" />
-			<h1>Markdown Viewer</h1>
+			<h1>{t('installer.markdownViewer')}</h1>
 			{#if isInstalled}
 				<div class="version-comparison">
-					<span class="v-label">Current:</span> v{installedVersion}
+					<span class="v-label">{t('installer.current')}</span> v{installedVersion}
 					<span class="v-arrow">→</span>
-					<span class="v-label">Target:</span> v{installerVersion}
+					<span class="v-label">{t('installer.target')}</span> v{installerVersion}
 				</div>
 			{:else}
-				<p class="subtitle">A simple markdown viewer <span class="v-lite">v{installerVersion}</span></p>
+				<p class="subtitle">{t('installer.simpleMarkdownViewer')} <span class="v-lite">v{installerVersion}</span></p>
 			{/if}
 		</div>
 
@@ -123,8 +124,8 @@
 			<div class="setup-box">
 				{#if !isInstalled}
 					<div class="scope-toggle">
-						<button class:active={!allUsers} onclick={() => (allUsers = false)}>Just Me</button>
-						<button class:active={allUsers} onclick={() => (allUsers = true)}>All Users</button>
+						<button class:active={!allUsers} onclick={() => (allUsers = false)}>{t('installer.justMe')}</button>
+						<button class:active={allUsers} onclick={() => (allUsers = true)}>{t('installer.allUsers')}</button>
 					</div>
 				{/if}
 
@@ -134,39 +135,39 @@
 							<label class="checkbox-container">
 								<input type="checkbox" bind:checked={registerMd} />
 								<span class="checkmark"></span>
-								Register as default for .md files
+								{t('installer.registerMd')}
 							</label>
 							<label class="checkbox-container">
 								<input type="checkbox" bind:checked={desktopShortcut} />
 								<span class="checkmark"></span>
-								Create desktop shortcut
+								{t('installer.createDesktopShortcut')}
 							</label>
 							<label class="checkbox-container">
 								<input type="checkbox" bind:checked={startMenu} />
 								<span class="checkmark"></span>
-								Add to Start Menu
+								{t('installer.addToStartMenu')}
 							</label>
 							<label class="checkbox-container">
 								<input type="checkbox" bind:checked={launchAfter} />
 								<span class="checkmark"></span>
-								Launch after installation
+								{t('installer.launchAfterInstallation')}
 							</label>
 						</div>
 					{:else}
 						<div class="maintenance-options">
 							<p class="status-msg">
-								Installed for: <strong>{installedAllUsers ? 'All Users' : 'Current User'}</strong>
+								{t('installer.installedFor')} <strong>{installedAllUsers ? t('installer.allUsers') : 'Current User'}</strong>
 							</p>
 							<div class="options">
 								<label class="checkbox-container">
 									<input type="checkbox" bind:checked={registerMd} />
 									<span class="checkmark"></span>
-									Repair file associations
+									{t('installer.repairFileAssociations')}
 								</label>
 								<label class="checkbox-container">
 									<input type="checkbox" bind:checked={launchAfter} />
 									<span class="checkmark"></span>
-									Launch after update
+									{t('installer.launchAfterUpdate')}
 								</label>
 							</div>
 						</div>
@@ -181,25 +182,25 @@
 
 				<div class="actions">
 					{#if isInstalled}
-						<button class="uninstall-btn" onclick={handleUninstall}>Uninstall</button>
-						<button class="install-btn" onclick={handleInstall}>Update / Repair</button>
+						<button class="uninstall-btn" onclick={handleUninstall}>{t('installer.uninstall')}</button>
+						<button class="install-btn" onclick={handleInstall}>{t('installer.updateRepair')}</button>
 					{:else}
 						<button class="install-btn" onclick={handleInstall}>
-							Install {allUsers ? 'for All Users' : 'Now'}
+							{t(allUsers ? 'installer.installForAllUsers' : 'installer.installNow')}
 						</button>
 					{/if}
 				</div>
 
 				<div class="notice-container">
 					{#if allUsers || (isInstalled && installedAllUsers)}
-						<p class="admin-notice">Requires Administrator privileges</p>
+						<p class="admin-notice">{t('installer.requiresAdmin')}</p>
 					{/if}
 				</div>
 			</div>
 		{:else}
 			<div class="installing-state">
 				<div class="spinner"></div>
-				<p>{isInstalled ? 'Updating' : 'Installing'} Markpad...</p>
+				<p>{t(isInstalled ? 'installer.updating' : 'installer.installing')} {t('installer.markpad')}</p>
 			</div>
 		{/if}
 	</div>

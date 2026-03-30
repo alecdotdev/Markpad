@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { settings } from '../stores/settings.svelte.js';
+	import { t } from '../utils/i18n.js';
 
 	let { markdownBody, htmlContent, onBeforeJump, collapsedHeaders, ontoggleFold, oncopyref, oncontext, onjump, onshowTooltip, onhideTooltip } = $props<{
 		markdownBody: HTMLElement | null;
@@ -211,9 +212,9 @@
 		<button 
 			class="toc-header-btn {settings.pinnedToc ? 'active' : ''}" 
 			onclick={() => { settings.togglePinnedToc(); onhideTooltip?.(); }}
-			onmouseenter={(e) => onshowTooltip?.(e, settings.pinnedToc ? "Undock" : "Dock", undefined, 'below')}
+			onmouseenter={(e) => onshowTooltip?.(e, settings.pinnedToc ? t('tooltip.undock', settings.language) : t('tooltip.dock', settings.language), undefined, 'below')}
 			onmouseleave={() => onhideTooltip?.()}
-			aria-label={settings.pinnedToc ? "Undock Table of Contents" : "Dock Table of Contents"}>
+			aria-label={settings.pinnedToc ? t('tooltip.undockToc', settings.language) : t('tooltip.dockToc', settings.language)}>
 			{#if settings.tocSide === 'left'}
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
 					<rect width="18" height="18" x="3" y="3" rx="2" />
@@ -235,9 +236,9 @@
 		<button 
 			class="toc-header-btn" 
 			onclick={() => { settings.toggleTocSide(); onhideTooltip?.(); }}
-			onmouseenter={(e) => onshowTooltip?.(e, "Switch side", undefined, 'below')}
+			onmouseenter={(e) => onshowTooltip?.(e, t('tooltip.switchSide', settings.language), undefined, 'below')}
 			onmouseleave={() => onhideTooltip?.()}
-			aria-label="Switch side">
+			aria-label={t('tooltip.switchSide', settings.language)}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
 				<path d="m18 8 4 4-4 4"></path>
 				<path d="M2 12h20"></path>
@@ -265,7 +266,7 @@
 					</button>
 					{:else}
 						<div class="toc-link-wrapper level-{item.level}">
-							<button aria-label="Toggle fold" class="toc-fold-btn {collapsedHeaders?.has(item.id || item.text || '') ? 'collapsed' : ''}" style={item.hasChildren ? '' : 'visibility: hidden'} onclick={(e) => { e.stopPropagation(); ontoggleFold?.(item.id || item.text || ''); }}>
+							<button aria-label={t('tooltip.toggleFold', settings.language)} class="toc-fold-btn {collapsedHeaders?.has(item.id || item.text || '') ? 'collapsed' : ''}" style={item.hasChildren ? '' : 'visibility: hidden'} onclick={(e) => { e.stopPropagation(); ontoggleFold?.(item.id || item.text || ''); }}>
 								<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
 							</button>
 							<button
@@ -282,7 +283,7 @@
 			{/each}
 		</ul>
 	{:else}
-		<div class="toc-empty">No headings found</div>
+		<div class="toc-empty">{t('toc.noHeadingsFound', settings.language)}</div>
 	{/if}
 </div>
 

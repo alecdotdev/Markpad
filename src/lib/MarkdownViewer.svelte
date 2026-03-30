@@ -24,8 +24,9 @@ import { processMarkdownHtml } from './utils/markdown';
 
 	import DOMPurify from 'dompurify';
 	import HomePage from './components/HomePage.svelte';
-	import { tabManager } from './stores/tabs.svelte.js';
-	import { settings } from './stores/settings.svelte.js';
+import { tabManager } from './stores/tabs.svelte.js';
+import { settings } from './stores/settings.svelte.js';
+import { t } from './utils/i18n.js';
 
 	// syntax highlighting & latex
 	let hljs: any = $state(null);
@@ -39,6 +40,12 @@ import { processMarkdownHtml } from './utils/markdown';
 	let mode = $state<'loading' | 'app' | 'installer' | 'uninstall'>('loading');
 
 	let showSettings = $state(false);
+
+	let uiLanguage = $state(settings.language);
+
+	$effect(() => {
+		uiLanguage = settings.language;
+	});
 
 	let recentFiles = $state<string[]>([]);
 	let isFocused = $state(true);
@@ -238,8 +245,8 @@ import { processMarkdownHtml } from './utils/markdown';
 		if (settings.restoreStateOnReopen) {
 			const hasUnsaved = tabManager.tabs.some((t) => t.isDirty || (t.path === '' && t.rawContent.trim() !== ''));
 			if (hasUnsaved) {
-				const response = await askCustom(`Are you sure you want to exit? All unsaved tabs and local history will be lost.`, {
-					title: 'Confirm Exit',
+				const response = await askCustom(t('modal.exit.unsaved.message'), {
+					title: t('modal.exit.unsaved.title'),
 					kind: 'warning',
 					showSave: false,
 				});
@@ -1048,8 +1055,8 @@ import { processMarkdownHtml } from './utils/markdown';
 
 		if (!tab.isDirty) return true;
 
-		const response = await askCustom(`You have unsaved changes in "${tab.title}". Do you want to save them before closing?`, {
-			title: 'Unsaved Changes',
+		const response = await askCustom(t('modal.youHaveUnsavedChanges', settings.language).replace('{title}', tab.title), {
+			title: t('modal.unsavedChanges.title'),
 			kind: 'warning',
 			showSave: true,
 		});
@@ -1070,14 +1077,14 @@ import { processMarkdownHtml } from './utils/markdown';
 			// Switch back to view
 			if (tab.isDirty && tab.path !== '') {
 				if (autoSave) {
-					const success = await saveContent();
-					if (!success) return; // If save fails, stay in edit mode?
-				} else {
-					const response = await askCustom('You have unsaved changes. Do you want to save them before returning to view mode?', {
-						title: 'Unsaved Changes',
-						kind: 'warning',
-						showSave: true,
-					});
+				const success = await saveContent();
+				if (!success) return; // If save fails, stay in edit mode?
+			} else {
+				const response = await askCustom(t('modal.unsavedChanges.viewMode.message'), {
+					title: t('modal.unsavedChanges.title'),
+					kind: 'warning',
+					showSave: true,
+				});
 
 					if (response === 'cancel') return;
 					if (response === 'save') {
@@ -1319,7 +1326,7 @@ import { processMarkdownHtml } from './utils/markdown';
 			const filename = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : '';
 			const ref = filename ? `[[${filename}#${text}]]` : `#${text}`;
 			copyRefItem = [
-				{ label: 'Copy Reference', onClick: () => invoke('clipboard_write_text', { text: ref }) },
+				{ label: t('menu.copyReference', uiLanguage), onClick: () => invoke('clipboard_write_text', { text: ref }) },
 				{ separator: true },
 			];
 		}
@@ -1328,7 +1335,7 @@ import { processMarkdownHtml } from './utils/markdown';
 		let mediaItems: any[] = [];
 		if (img) {
 			mediaItems = [
-				{ label: 'Save Image As...', onClick: () => saveImageAs(img.src) },
+				{ label: t('menu.saveImageAs', uiLanguage), onClick: () => saveImageAs(img.src) },
 				{ separator: true }
 			];
 		}
@@ -1336,7 +1343,7 @@ import { processMarkdownHtml } from './utils/markdown';
 		const mermaidDiag = (e.target as HTMLElement).closest('.mermaid-diagram');
 		if (mermaidDiag) {
 			mediaItems = [
-				{ label: 'Save Diagram As SVG...', onClick: () => saveDiagramAs(mermaidDiag as HTMLElement) },
+				{ label: t('menu.saveDiagramAsSvg', uiLanguage), onClick: () => saveDiagramAs(mermaidDiag as HTMLElement) },
 				{ separator: true }
 			];
 		}
@@ -1350,16 +1357,16 @@ import { processMarkdownHtml } from './utils/markdown';
 				...mediaItems,
 				...(isEditing && isInsideEditor
 					? [
-							{ label: 'Undo', shortcut: 'Ctrl+Z', onClick: () => editorPane?.undo() },
-							{ label: 'Redo', shortcut: 'Ctrl+Y', onClick: () => editorPane?.redo() },
+							{ label: t('menu.undo', uiLanguage), shortcut: 'Ctrl+Z', onClick: () => editorPane?.undo() },
+							{ label: t('menu.redo', uiLanguage), shortcut: 'Ctrl+Y', onClick: () => editorPane?.redo() },
 							{ separator: true }
 						]
 					: []),
-				...(hasSelection ? [{ label: 'Copy', onClick: () => {
+				...(hasSelection ? [{ label: t('menu.copy', uiLanguage), onClick: () => {
 					const selection = window.getSelection()?.toString();
 					if (selection) invoke('clipboard_write_text', { text: selection });
 				} }] : []),
-				{ label: 'Select All', onClick: () => {
+				{ label: t('menu.selectAll', uiLanguage), onClick: () => {
 					if (!markdownBody) return;
 					const range = document.createRange();
 					range.selectNodeContents(markdownBody);
@@ -1368,10 +1375,10 @@ import { processMarkdownHtml } from './utils/markdown';
 					selection?.addRange(range);
 				} },
 				{ separator: true },
-				{ label: 'Open File Location', onClick: openFileLocation, disabled: !currentFile },
-				{ label: 'Edit', onClick: () => toggleEdit() },
+				{ label: t('menu.openLocation', uiLanguage), onClick: openFileLocation, disabled: !currentFile },
+				{ label: t('menu.edit', uiLanguage), onClick: () => toggleEdit() },
 				{ separator: true },
-				{ label: 'Close File', onClick: closeFile },
+				{ label: t('menu.closeFile', uiLanguage), onClick: closeFile },
 			],
 		};
 	}
@@ -1521,8 +1528,8 @@ import { processMarkdownHtml } from './utils/markdown';
 					const success = await saveContent();
 					if (!success) return;
 				} else {
-					const response = await askCustom('You have unsaved changes. Do you want to save them before closing split view?', {
-						title: 'Unsaved Changes',
+					const response = await askCustom(t('modal.unsavedChanges.splitView.message'), {
+						title: t('modal.unsavedChanges.title'),
 						kind: 'warning',
 						showSave: true,
 					});
@@ -1797,7 +1804,7 @@ import { processMarkdownHtml } from './utils/markdown';
 					const tab = tabManager.tabs.find((t) => t.id === tabId);
 					if (!tab || !tab.path) return;
 
-					const newName = window.prompt('Rename file:', tab.title);
+					const newName = window.prompt(t('menu.renameFile', settings.language), tab.title);
 					if (newName && newName !== tab.title) {
 						const oldPath = tab.path;
 						const newPath = oldPath.replace(/[/\\][^/\\]+$/, (m) => m.charAt(0) + newName);
@@ -1865,12 +1872,12 @@ import { processMarkdownHtml } from './utils/markdown';
 					console.log('Dirty tabs:', dirtyTabs.length);
 					if (dirtyTabs.length > 0) {
 						console.log('Preventing default close');
-						event.preventDefault();
-						const response = await askCustom(`You have ${dirtyTabs.length} unsaved file(s). Do you want to save your changes?`, {
-							title: 'Unsaved Changes',
-							kind: 'warning',
-							showSave: true,
-						});
+				event.preventDefault();
+				const response = await askCustom(t('modal.youHaveUnsavedFiles', settings.language).replace('{{count}}', dirtyTabs.length.toString()), {
+											title: t('modal.unsavedChanges', settings.language),
+					kind: 'warning',
+					showSave: true,
+				});
 
 						if (response === 'save') {
 							// Attempt to save all dirty tabs
@@ -1940,8 +1947,8 @@ import { processMarkdownHtml } from './utils/markdown';
 								if (ext && ['md', 'markdown', 'txt'].includes(ext)) {
 									loadMarkdown(path);
 								} else {
-									const filename = path.split(/[/\\]/).pop() || 'File';
-									addToast(`Unsupported file type: ${filename}`, 'error');
+									const filename = path.split(/[\/\\]/).pop() || 'File';
+									addToast(t('toast.unsupportedFile').replace('{{filename}}', filename), 'error');
 								}
 							});
 						}
@@ -2191,7 +2198,7 @@ import { processMarkdownHtml } from './utils/markdown';
 												y: e.clientY,
 												items: [
 													{ 
-														label: 'Copy Reference', 
+														label: t('menu.copyReference', uiLanguage),
 														onClick: () => {
 															const tab = tabManager.activeTab;
 															const fn = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : '';
@@ -2272,17 +2279,17 @@ import { processMarkdownHtml } from './utils/markdown';
 			<div class="drag-zones" class:split={isSplit}>
 				{#if isSplit || isEditing}
 					<div class="drag-zone editor-zone" class:active={dragTarget === 'editor'}>
-						<div class="drag-message">
-							<span>Drop to Embed</span>
-						</div>
-					</div>
+								<div class="drag-message">
+									<span>{t('dragAndDrop.embed')}</span>
+								</div>
+							</div>
 				{/if}
 				{#if isSplit || !isEditing}
 					<div class="drag-zone viewer-zone" class:active={dragTarget === 'preview'}>
-						<div class="drag-message">
-							<span>Drop to Open</span>
-						</div>
-					</div>
+								<div class="drag-message">
+									<span>{t('dragAndDrop.open')}</span>
+								</div>
+							</div>
 				{/if}
 			</div>
 		</div>

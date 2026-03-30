@@ -3,6 +3,8 @@
 	import { getVersion } from '@tauri-apps/api/app';
 	import { settings, DEFAULT_FONTS, type OSType } from '../stores/settings.svelte.js';
 	import { fade, scale, fly } from 'svelte/transition';
+	import { t, getSupportedLanguages } from '../utils/i18n.js';
+	import type { LanguageCode } from '../utils/i18n.js';
 
 	let {
 		show = false,
@@ -158,7 +160,7 @@
 			tabindex="-1"
 			onkeydown={handleModalKeydown}>
 			<div class="settings-header">
-				<h1 id="settings-title">Settings</h1>
+				<h1 id="settings-title">{t('settings.title', settings.language)}</h1>
 				<button class="close-btn" onclick={onclose} aria-label="Close">
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
@@ -180,53 +182,53 @@
 				<nav class="settings-nav">
 					<button class="nav-item" class:active={activeCategory === 'editor'} onclick={() => (activeCategory = 'editor')}>
 						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							width="16"
-							height="16"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round">
-							<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-							<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-						</svg>
-						Editor
+								xmlns="http://www.w3.org/2000/svg"
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+							</svg>
+							{t('settings.editor', settings.language)}
 					</button>
 					<button class="nav-item" class:active={activeCategory === 'preview'} onclick={() => (activeCategory = 'preview')}>
 						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							width="16"
-							height="16"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round">
-							<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-							<circle cx="12" cy="12" r="3"></circle>
-						</svg>
-						Preview
+								xmlns="http://www.w3.org/2000/svg"
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+								<circle cx="12" cy="12" r="3"></circle>
+							</svg>
+							{t('settings.preview', settings.language)}
 					</button>
 					<button class="nav-item" class:active={activeCategory === 'appearance'} onclick={() => (activeCategory = 'appearance')}>
 						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							width="16"
-							height="16"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round">
-							<circle cx="12" cy="12" r="3"></circle>
-							<path
-								d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
-							></path>
-						</svg>
-						Appearance
+								xmlns="http://www.w3.org/2000/svg"
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round">
+								<circle cx="12" cy="12" r="3"></circle>
+								<path
+									d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+								></path>
+							</svg>
+							{t('settings.appearance', settings.language)}
 					</button>
 
 					<div class="nav-footer">
@@ -238,11 +240,11 @@
 									.catch(() => window.open('https://github.com/alecdotdev/Markpad', '_blank'))}
 							aria-label="GitHub">
 							<svg viewBox="0 0 24 24" class="github-icon" fill="currentColor">
-								<path
-									d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.161 22 16.418 22 12c0-5.523-4.477-10-10-10z"
-								></path>
-							</svg>
-							<span>GitHub</span>
+									<path
+										d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.161 22 16.418 22 12c0-5.523-4.477-10-10-10z"
+										></path>
+								</svg>
+								<span>{t('menu.github', settings.language)}</span>
 							{#if appVersion}
 								<span class="version-code">v{appVersion}</span>
 							{/if}
@@ -254,21 +256,21 @@
 						{#if activeCategory === 'editor'}
 						<div class="settings-group">
 							<div class="settings-group-header">
-								<h2>Editor Settings</h2>
+								<h2>{t('settings.editorSettings', settings.language)}</h2>
 								<button
 									class="reset-text-btn"
 									class:disabled={settings.editorFont === defaultFonts.editorFont && settings.editorFontSize === 14 && settings.editorMaxWidth === 80}
 									onclick={() => { settings.resetEditorFont(); settings.resetEditorMaxWidth(); }}>
-									Reset editor settings
+									{t('settings.resetEditorSettings', settings.language)}
 								</button>
 							</div>
 
 							<div class="setting-item">
-								<label for="editor-font">Font</label>
+								<label for="editor-font">{t('settings.font', settings.language)}</label>
 								<div class="select-wrapper">
 									<select id="editor-font" bind:value={settings.editorFont}>
 										{#each systemFonts as font}
-											<option value={font}>{font === defaultFonts.editorFont ? font + ' (Default)' : font}</option>
+											<option value={font}>{font === defaultFonts.editorFont ? font + ' (' + t('settings.default', settings.language) + ')' : font}</option>
 										{/each}
 									</select>
 									<svg
@@ -285,7 +287,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="editor-font-size">Font Size</label>
+								<label for="editor-font-size">{t('settings.fontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
 										<button class="spin-btn minus" onclick={() => (settings.editorFontSize = Math.max(10, settings.editorFontSize - 1))} aria-label="Decrease">
@@ -303,7 +305,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="editor-max-width">Wrap Column</label>
+								<label for="editor-max-width">{t('settings.wrapColumn', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
 										<button class="spin-btn minus" onclick={() => (settings.editorMaxWidth = Math.max(20, settings.editorMaxWidth - 10))} aria-label="Decrease">
@@ -321,19 +323,19 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="editor-word-wrap">Word Wrap</label>
+								<label for="editor-word-wrap">{t('settings.wordWrap', settings.language)}</label>
 								<div class="select-wrapper">
 									<select id="editor-word-wrap" bind:value={settings.wordWrap}>
-										<option value="off">Off</option>
-										<option value="on">Window</option>
-										<option value="wordWrapColumn">Column</option>
+										<option value="off">{t('menu.wordWrapOff', settings.language)}</option>
+										<option value="on">{t('menu.wordWrapOn', settings.language)}</option>
+										<option value="wordWrapColumn">{t('menu.wordWrapColumn', settings.language)}</option>
 									</select>
 									<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
 								</div>
 							</div>
 
 							<div class="setting-item">
-								<label for="editor-line-numbers">Line Numbers</label>
+								<label for="editor-line-numbers">{t('settings.lineNumbers', settings.language)}</label>
 								<label class="toggle">
 									<input id="editor-line-numbers" type="checkbox" checked={settings.lineNumbers === 'on'} onchange={() => settings.toggleLineNumbers()} />
 									<span class="toggle-slider"></span>
@@ -341,7 +343,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="editor-minimap">Minimap</label>
+								<label for="editor-minimap">{t('settings.minimap', settings.language)}</label>
 								<label class="toggle">
 									<input id="editor-minimap" type="checkbox" checked={settings.minimap} onchange={() => settings.toggleMinimap()} />
 									<span class="toggle-slider"></span>
@@ -349,7 +351,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="editor-vim-mode">Vim Mode</label>
+								<label for="editor-vim-mode">{t('settings.vimMode', settings.language)}</label>
 								<label class="toggle">
 									<input id="editor-vim-mode" type="checkbox" checked={settings.vimMode} onchange={() => settings.toggleVimMode()} />
 									<span class="toggle-slider"></span>
@@ -357,7 +359,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="editor-status-bar">Status Bar</label>
+								<label for="editor-status-bar">{t('settings.statusBar', settings.language)}</label>
 								<label class="toggle">
 									<input id="editor-status-bar" type="checkbox" checked={settings.statusBar} onchange={() => settings.toggleStatusBar()} />
 									<span class="toggle-slider"></span>
@@ -365,7 +367,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="editor-word-count">Word Count</label>
+								<label for="editor-word-count">{t('settings.wordCount', settings.language)}</label>
 								<label class="toggle">
 									<input id="editor-word-count" type="checkbox" checked={settings.wordCount} onchange={() => settings.toggleWordCount()} />
 									<span class="toggle-slider"></span>
@@ -373,7 +375,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="editor-show-whitespace">Show Whitespace</label>
+								<label for="editor-show-whitespace">{t('settings.showWhitespace', settings.language)}</label>
 								<label class="toggle">
 									<input id="editor-show-whitespace" type="checkbox" checked={settings.showWhitespace} onchange={() => settings.toggleShowWhitespace()} />
 									<span class="toggle-slider"></span>
@@ -381,7 +383,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="editor-line-highlight">Line Highlight</label>
+								<label for="editor-line-highlight">{t('settings.lineHighlight', settings.language)}</label>
 								<label class="toggle">
 									<input id="editor-line-highlight" type="checkbox" checked={settings.renderLineHighlight === 'line'} onchange={() => settings.toggleLineHighlight()} />
 									<span class="toggle-slider"></span>
@@ -391,21 +393,21 @@
 					{:else if activeCategory === 'preview'}
 						<div class="settings-group">
 							<div class="settings-group-header">
-								<h2>Preview Settings</h2>
+								<h2>{t('settings.previewSettings', settings.language)}</h2>
 								<button
 									class="reset-text-btn"
 									class:disabled={settings.previewFont === defaultFonts.previewFont && settings.previewFontSize === 16 && settings.codeFont === defaultFonts.codeFont && settings.codeFontSize === 14}
 									onclick={() => settings.resetPreviewFont()}>
-									Reset font settings
+									{t('settings.resetFontSettings', settings.language)}
 								</button>
 							</div>
 
 							<div class="setting-item">
-								<label for="preview-font">Font</label>
+								<label for="preview-font">{t('settings.font', settings.language)}</label>
 								<div class="select-wrapper">
 									<select id="preview-font" bind:value={settings.previewFont}>
 										{#each systemFonts as font}
-											<option value={font}>{font === defaultFonts.previewFont ? font + ' (Default)' : font}</option>
+											<option value={font}>{font === defaultFonts.previewFont ? font + ' (' + t('settings.default', settings.language) + ')' : font}</option>
 										{/each}
 									</select>
 									<svg
@@ -422,7 +424,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="preview-font-size">Font Size</label>
+								<label for="preview-font-size">{t('settings.fontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
 										<button class="spin-btn minus" onclick={() => (settings.previewFontSize = Math.max(12, settings.previewFontSize - 1))} aria-label="Decrease">
@@ -440,11 +442,11 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="code-font">Code Font</label>
+								<label for="code-font">{t('settings.font', settings.language)}</label>
 								<div class="select-wrapper">
 									<select id="code-font" bind:value={settings.codeFont}>
 										{#each systemFonts as font}
-											<option value={font}>{font === defaultFonts.codeFont ? font + ' (Default)' : font}</option>
+											<option value={font}>{font === defaultFonts.codeFont ? font + ' (' + t('settings.default', settings.language) + ')' : font}</option>
 										{/each}
 									</select>
 									<svg
@@ -461,7 +463,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="code-font-size">Code Font Size</label>
+								<label for="code-font-size">{t('settings.fontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
 										<button class="spin-btn minus" onclick={() => (settings.codeFontSize = Math.max(10, settings.codeFontSize - 1))} aria-label="Decrease">
@@ -480,20 +482,20 @@
 						</div>
 					{:else if activeCategory === 'appearance'}
 						<div class="settings-group">
-							<h2>Appearance Settings</h2>
+							<h2>{t('settings.appearanceSettings', settings.language)}</h2>
 
 							<div class="setting-item" style="align-items: flex-start; padding-top: 16px;">
-								<label for="appearance-theme" style="margin-top: 6px;">Theme</label>
+								<label for="appearance-theme" style="margin-top: 6px;">{t('settings.theme', settings.language)}</label>
 								<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
 									<div class="select-wrapper">
 										<select id="appearance-theme" value={theme} onchange={(e) => onSetTheme?.(e.currentTarget.value as any)}>
-											<option value="system">System</option>
-											<option value="light">Default Light</option>
-											<option value="dark">Default Dark</option>
+											<option value="system">{t('settings.themeFollowSystem', settings.language)}</option>
+											<option value="light">{t('settings.themeDefaultLight', settings.language)}</option>
+											<option value="dark">{t('settings.themeDefaultDark', settings.language)}</option>
 											{#if savedVscodeThemes.length > 0}
-												<optgroup label="VS Code Themes">
-													{#each savedVscodeThemes as t}
-														<option value={`vscode:${t}`}>{t}</option>
+												<optgroup label={t('settings.vsCodeThemes', settings.language)}>
+													{#each savedVscodeThemes as themeOption}
+														<option value={`vscode:${themeOption}`}>{themeOption}</option>
 													{/each}
 												</optgroup>
 											{/if}
@@ -511,15 +513,15 @@
 									</div>
 									{#if theme.startsWith('vscode:')}
 										<button class="reset-text-btn" style="color: var(--color-danger-fg); font-size: 12px; padding: 0;" onclick={() => deleteTheme(theme.replace('vscode:', ''))}>
-											Delete selected theme
-										</button>
+										{t('settings.deleteSelectedTheme', settings.language)}
+									</button>
 									{/if}
 								</div>
 							</div>
 
 							<div class="setting-item" style="flex-direction: column; align-items: flex-start; gap: 8px;">
 								<div style="display: flex; justify-content: space-between; width: 100%;">
-									<label for="theme-import">Import VS Code Theme</label>
+									<label for="theme-import">{t('settings.importVSCodeTheme', settings.language)}</label>
 									<button
 										class="reset-text-btn"
 										onclick={() =>
@@ -527,7 +529,7 @@
 												.then((m) => m.openUrl('https://vscodethemes.com/'))
 												.catch(() => window.open('https://vscodethemes.com/', '_blank'))}
 									>
-										Browse themes
+										{t('settings.browseThemes', settings.language)}
 									</button>
 								</div>
 								<div style="display: flex; gap: 8px; width: 100%;">
@@ -541,13 +543,13 @@
 										onkeydown={e => e.key === 'Enter' && importVscodeTheme()}
 									/>
 									<button class="import-btn" onclick={importVscodeTheme} disabled={importingTheme || !themeImportUrl}>
-										{importingTheme ? 'Importing...' : 'Import'}
+										{importingTheme ? t('settings.importing', settings.language) : t('settings.import', settings.language)}
 									</button>
 								</div>
 							</div>
 
 							<div class="setting-item">
-								<label for="appearance-tabs">Show Tabs</label>
+								<label for="appearance-tabs">{t('settings.showTabs', settings.language)}</label>
 								<label class="toggle">
 									<input id="appearance-tabs" type="checkbox" checked={settings.showTabs} onchange={() => settings.toggleTabs()} />
 									<span class="toggle-slider"></span>
@@ -555,7 +557,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="appearance-restore-state">Restore State on Reopen</label>
+								<label for="appearance-restore-state">{t('settings.restoreStateOnReopen', settings.language)}</label>
 								<label class="toggle">
 									<input id="appearance-restore-state" type="checkbox" checked={settings.restoreStateOnReopen} onchange={() => settings.toggleRestoreStateOnReopen()} />
 									<span class="toggle-slider"></span>
@@ -563,55 +565,77 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="appearance-start-editor">Start in Editor</label>
+								<label for="appearance-start-editor">{t('settings.startInEditor', settings.language)}</label>
 								<label class="toggle">
 									<input id="appearance-start-editor" type="checkbox" checked={settings.startInEditor} onchange={() => settings.toggleStartInEditor()} />
 									<span class="toggle-slider"></span>
 								</label>
 							</div>
 							<div class="setting-item">
-								<label for="appearance-toc">Show Table of Contents</label>
-								<label class="toggle">
-									<input id="appearance-toc" type="checkbox" checked={settings.showToc} onchange={() => settings.toggleToc()} />
-									<span class="toggle-slider"></span>
-								</label>
-							</div>
+							<label for="appearance-toc">{t('settings.showTableOfContents', settings.language)}</label>
+							<label class="toggle">
+								<input id="appearance-toc" type="checkbox" checked={settings.showToc} onchange={() => settings.toggleToc()} />
+								<span class="toggle-slider"></span>
+							</label>
+						</div>
 
-							<div class="setting-item">
-								<label for="appearance-highlight-color">Highlight Color</label>
-								<div class="custom-dropdown-wrapper">
-									<button 
-										class="custom-dropdown-btn" 
-										onclick={(e) => { e.stopPropagation(); highlightMenuOpen = !highlightMenuOpen; }}>
+						<div class="setting-item">
+							<label for="appearance-highlight-color">{t('settings.highlightColor', settings.language)}</label>
+							<div class="custom-dropdown-wrapper">
+								<button 
+									class="custom-dropdown-btn" 
+									onclick={(e) => { e.stopPropagation(); highlightMenuOpen = !highlightMenuOpen; }}>
 										<div style="display: flex; align-items: center; gap: 8px;">
 											<div class="color-circle" style="background-color: {highlightColors.find(c => c.value === settings.highlightColor)?.color || 'var(--color-accent-fg)'}"></div>
-											<span>{highlightColors.find(c => c.value === settings.highlightColor)?.label || 'Default'}</span>
+											<span>{highlightColors.find(c => c.value === settings.highlightColor)?.label || t('settings.default', settings.language)}</span>
 										</div>
 										<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-									</button>
-									{#if highlightMenuOpen}
-										<div class="custom-dropdown-menu" transition:fly={{ y: 5, duration: 150 }} onclick={(e) => e.stopPropagation()}>
-											{#each highlightColors as color, index}
-												{#if index === 1}
-													<div class="theme-menu-divider" style="height: 1px; background-color: var(--color-border-muted); margin: 4px 0; transform: scaleY(0.5);"></div>
-												{/if}
-												<button 
-													class="custom-dropdown-option {settings.highlightColor === color.value ? 'selected' : ''}" 
-													onclick={() => {
-														settings.highlightColor = color.value;
-														highlightMenuOpen = false;
-													}}>
-													<div class="color-circle" style="background-color: {color.color}"></div>
-													<span>{color.label}</span>
-												</button>
-											{/each}
-										</div>
-									{/if}
-								</div>
+								</button>
+								{#if highlightMenuOpen}
+									<div class="custom-dropdown-menu" transition:fly={{ y: 5, duration: 150 }} onclick={(e) => e.stopPropagation()}>
+										{#each highlightColors as color, index}
+											{#if index === 1}
+												<div class="theme-menu-divider" style="height: 1px; background-color: var(--color-border-muted); margin: 4px 0; transform: scaleY(0.5);"></div>
+											{/if}
+											<button 
+												class="custom-dropdown-option {settings.highlightColor === color.value ? 'selected' : ''}" 
+												onclick={() => {
+													settings.highlightColor = color.value;
+													highlightMenuOpen = false;
+												}}
+											>
+												<div class="color-circle" style="background-color: {color.color}"></div>
+												<span>{color.label}</span>
+											</button>
+										{/each}
+									</div>
+								{/if}
 							</div>
+						</div>
+
+						<div class="setting-item">
+							<label for="appearance-language">{t('settings.language', settings.language)}</label>
+							<div class="select-wrapper">
+								<select id="appearance-language" value={settings.language} onchange={(e) => settings.setLanguage(e.currentTarget.value as LanguageCode)}>
+									{#each getSupportedLanguages() as lang}
+										<option value={lang.code}>{lang.nativeName}</option>
+									{/each}
+								</select>
+								<svg
+									class="select-arrow"
+									width="12"
+									height="12"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+							</div>
+						</div>
 
 							<div class="setting-item">
-								<label for="appearance-zen-mode">Zen Mode</label>
+								<label for="appearance-zen-mode">{t('settings.zenMode', settings.language)}</label>
 								<label class="toggle">
 									<input id="appearance-zen-mode" type="checkbox" checked={settings.zenMode} onchange={() => settings.toggleZenMode()} />
 									<span class="toggle-slider"></span>
