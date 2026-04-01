@@ -2240,12 +2240,12 @@ import { t } from './utils/i18n.js';
 							class:on-right={settings.tocSide === 'right'}
 							class:in-edit-mode={isEditing && !settings.showToc}
 							onclick={() => settings.toggleToc()}
-							aria-label="{settings.showToc ? 'Hide' : 'Show'} Table of Contents"
+							aria-label={settings.showToc ? t('tooltip.hideTableOfContents', settings.language) : t('tooltip.showTableOfContents', settings.language)}
 							onmouseenter={(e) => {
 								const rect = e.currentTarget.getBoundingClientRect();
 								tooltip = { 
 									show: true, 
-									text: (settings.showToc ? 'Hide' : 'Show') + ' Table of Contents', 
+									text: settings.showToc ? t('tooltip.hideTableOfContents', settings.language) : t('tooltip.showTableOfContents', settings.language), 
 									shortcut: '',
 									html: '', 
 									isFootnote: false, 

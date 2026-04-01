@@ -257,7 +257,11 @@ export const translations: Record<LanguageCode, Translation> = {
             switchSide: 'Switch side',
             toggleFold: 'Toggle fold',
             undockToc: 'Undock Table of Contents',
-            dockToc: 'Dock Table of Contents'
+            dockToc: 'Dock Table of Contents',
+            showTableOfContents: 'Show Table of Contents',
+            hideTableOfContents: 'Hide Table of Contents',
+            newTab: 'New Tab',
+            close: 'Close'
         },
         toc: {
             noHeadingsFound: 'No headings found'
@@ -508,7 +512,11 @@ export const translations: Record<LanguageCode, Translation> = {
             switchSide: '切换侧边',
             toggleFold: '切换折叠',
             undockToc: '取消固定目录',
-            dockToc: '固定目录'
+            dockToc: '固定目录',
+            showTableOfContents: '显示目录',
+            hideTableOfContents: '隐藏目录',
+            newTab: '新标签页',
+            close: '关闭'
         },
         toc: {
             noHeadingsFound: '未找到标题'
@@ -758,7 +766,11 @@ export const translations: Record<LanguageCode, Translation> = {
             switchSide: '側を切り替え',
             toggleFold: '折りたたみを切り替え',
             undockToc: '目次の固定を解除',
-            dockToc: '目次を固定'
+            dockToc: '目次を固定',
+            showTableOfContents: '目次を表示',
+            hideTableOfContents: '目次を隠す',
+            newTab: '新しいタブ',
+            close: '閉じる'
         },
         toc: {
             noHeadingsFound: '見出しが見つかりません'
@@ -1001,7 +1013,22 @@ export const translations: Record<LanguageCode, Translation> = {
             editFile: '編輯文件',
             changeTheme: '更改主題',
             zoomIn: '放大',
-            zoomOut: '縮小'
+            zoomOut: '縮小',
+            toggleZenMode: '切換禪模式',
+            toggleSplitView: '切換分割視圖',
+            toggleScrollSync: '切換同步滾動',
+            toggleFullWidth: '切換全寬',
+            toggleAutoReload: '切換自動重載',
+            undock: '取消固定',
+            dock: '固定',
+            switchSide: '切換側邊',
+            toggleFold: '切換摺疊',
+            undockToc: '取消固定目錄',
+            dockToc: '固定目錄',
+            showTableOfContents: '顯示目錄',
+            hideTableOfContents: '隱藏目錄',
+            newTab: '新標籤頁',
+            close: '關閉'
         },
         uninstaller: {
             uninstallMarkpad: '您想要卸載 Markpad 嗎？',
@@ -1018,7 +1045,10 @@ export const translations: Record<LanguageCode, Translation> = {
             close: '關閉',
             minimize: '最小化',
             maximize: '最大化'
-        }
+        },
+        toc: {
+            noHeadingsFound: '未找到標題'
+        },
     },
     ko: {
         settings: {
@@ -4106,7 +4136,10 @@ export const translations: Record<LanguageCode, Translation> = {
             editFile: 'Upravit soubor',
             changeTheme: 'Změnit motiv',
             zoomIn: 'Přiblížit',
-            zoomOut: 'Oddálit'
+            zoomOut: 'Oddálit',
+            dock: 'pevný',
+            undock: 'zrušit pevné',
+            switchSide: 'Switch side',
         },
         uninstaller: {
             uninstallMarkpad: 'Chcete odinstalovat Markpad?',
@@ -4123,7 +4156,10 @@ export const translations: Record<LanguageCode, Translation> = {
             close: 'Zavřít',
             minimize: 'Minimalizovat',
             maximize: 'Maximalizovat'
-        }
+        },
+        toc: {
+            noHeadingsFound: 'Nenalezen název'
+        },
     },
     sk: {
         settings: {

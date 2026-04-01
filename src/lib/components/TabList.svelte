@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { type Tab as TabData, tabManager } from '../stores/tabs.svelte.js';
-import Tab from './Tab.svelte';
-import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
-import { t } from '../utils/i18n.js';
-import { settings } from '../stores/settings.svelte.js';
-import { emit } from '@tauri-apps/api/event';
+	import Tab from './Tab.svelte';
+	import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
+	import { t } from '../utils/i18n.js';
+	import { settings } from '../stores/settings.svelte.js';
+	import { emit } from '@tauri-apps/api/event';
 
-import { flip } from 'svelte/animate';
-import { tick } from 'svelte';
+	import { flip } from 'svelte/animate';
+	import { tick } from 'svelte';
 
 	let {
 		onnewTab,
@@ -222,7 +222,7 @@ import { tick } from 'svelte';
 		<div class="scroll-shadow right" class:visible={showRightArrow}></div>
 	</div>
 
-	<button class="new-tab-btn" onclick={onnewTab} onmousedown={(e) => e.preventDefault()} title="New tab (Ctrl+T)">
+	<button class="new-tab-btn" onclick={onnewTab} onmousedown={(e) => e.preventDefault()} title={`${t('tooltip.newTab', settings.language)} (Ctrl+T)`}>
 		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 			><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 	</button>

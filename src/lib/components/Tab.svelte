@@ -1,9 +1,9 @@
 <script lang="ts">
 	import type { Tab } from '../stores/tabs.svelte.js';
-import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
-import { emit } from '@tauri-apps/api/event';
-import { t } from '../utils/i18n.js';
-import { settings } from '../stores/settings.svelte.js';
+	import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
+	import { emit } from '@tauri-apps/api/event';
+	import { t } from '../utils/i18n.js';
+	import { settings } from '../stores/settings.svelte.js';
 
 	let { tab, isActive, isLast, onclick, onclose } = $props<{
 		tab: Tab;
@@ -78,7 +78,7 @@ import { settings } from '../stores/settings.svelte.js';
 		<button class="tab-close" class:dirty={tab.isDirty} onclick={handleClose} onmousedown={(e) => {
 			e.stopPropagation();
 			e.preventDefault();
-		}} title="Close (Ctrl+W)">
+		}} title={`${t('tooltip.close', settings.language)} (Ctrl+W)`}>
 			{#if tab.isDirty}
 				<span class="dirty-dot"></span>
 			{/if}
