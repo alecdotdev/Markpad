@@ -40,17 +40,22 @@
     "fileAssociations": [
       {
         "ext": ["md", "markdown"],
+        "contentTypes": [
+          "net.daringfireball.markdown",
+          "public.markdown"
+        ],
         "mimeType": "text/markdown",
         "name": "Markdown File",
         "description": "Opens Markdown files with Markpad",
-        "role": "Viewer"
+        "role": "Editor"
       },
       {
         "ext": ["txt"],
+        "contentTypes": ["public.plain-text"],
         "mimeType": "text/plain",
         "name": "Text File",
         "description": "Opens Text files with Markpad",
-        "role": "Viewer"
+        "role": "Editor"
       }
     ],
     "windows": {
