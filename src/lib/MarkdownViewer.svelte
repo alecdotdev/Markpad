@@ -1281,12 +1281,30 @@ import { t } from './utils/i18n.js';
 	}
 
 	async function closeFile() {
-		if (tabManager.activeTabId) {
-			if (await canCloseTab(tabManager.activeTabId)) {
-				tabManager.closeTab(tabManager.activeTabId);
-			}
+		if (!tabManager.activeTabId) {
+			await destroyWindowAfterTabsClosed();
+			return;
 		}
-		if (liveMode && tabManager.tabs.length === 0) invoke('unwatch_file').catch(console.error);
+
+		await closeTabAndWindowIfLast(tabManager.activeTabId);
+	}
+
+	async function closeTabAndWindowIfLast(tabId: string) {
+		if (!(await canCloseTab(tabId))) return;
+
+		tabManager.closeTab(tabId);
+		if (tabManager.tabs.length > 0) return;
+
+		if (liveMode) invoke('unwatch_file').catch(console.error);
+		await destroyWindowAfterTabsClosed();
+	}
+
+	async function destroyWindowAfterTabsClosed() {
+		if (settings.restoreStateOnReopen) {
+			localStorage.setItem('savedTabsData', tabManager.serializeState());
+		}
+
+		await appWindow.destroy();
 	}
 
 	async function openFileLocation() {
@@ -1915,9 +1933,7 @@ import { t } from './utils/i18n.js';
 			unlisteners.push(
 				await listen('menu-tab-close', async (event) => {
 					const tabId = event.payload as string;
-					if (await canCloseTab(tabId)) {
-						tabManager.closeTab(tabId);
-					}
+					await closeTabAndWindowIfLast(tabId);
 				}),
 			);
 			unlisteners.push(
@@ -2106,11 +2122,7 @@ import { t } from './utils/i18n.js';
 		{theme}
 		onSetTheme={(t) => (theme = t)}
 		onopenSettings={() => (showSettings = true)}
-		oncloseTab={(id) => {
-			canCloseTab(id).then((can) => {
-				if (can) tabManager.closeTab(id);
-			});
-		}} />
+		oncloseTab={closeTabAndWindowIfLast} />
 	<div class="loading-screen">
 		<svg class="spinner" viewBox="0 0 50 50">
 			<circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="4"></circle>
@@ -2153,11 +2165,7 @@ import { t } from './utils/i18n.js';
 		{theme}
 		onSetTheme={(t) => (theme = t)}
 		onopenSettings={() => (showSettings = true)}
-		oncloseTab={(id) => {
-			canCloseTab(id).then((can) => {
-				if (can) tabManager.closeTab(id);
-			});
-		}} />
+		oncloseTab={closeTabAndWindowIfLast} />
 
 	<Settings show={showSettings} {theme} onSetTheme={(t) => (theme = t)} onclose={() => (showSettings = false)} />
 
