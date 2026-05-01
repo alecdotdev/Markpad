@@ -186,6 +186,7 @@ jobs:
 
       - name: Build and Publish Snap Package
         if: matrix.platform == 'ubuntu-24.04'
+        continue-on-error: true
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
