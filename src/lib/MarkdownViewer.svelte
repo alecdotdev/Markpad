@@ -1685,6 +1685,22 @@ import { t } from './utils/i18n.js';
 			e.preventDefault();
 			tabManager.cycleTab(e.shiftKey ? 'prev' : 'next');
 		}
+		if (cmdOrCtrl && code === 'PageUp') {
+			e.preventDefault();
+			tabManager.cycleTab('prev');
+		}
+		if (cmdOrCtrl && code === 'PageDown') {
+			e.preventDefault();
+			tabManager.cycleTab('next');
+		}
+		if (e.metaKey && e.altKey && code === 'ArrowLeft') {
+			e.preventDefault();
+			tabManager.cycleTab('prev');
+		}
+		if (e.metaKey && e.altKey && code === 'ArrowRight') {
+			e.preventDefault();
+			tabManager.cycleTab('next');
+		}
 		if (cmdOrCtrl && (key === '=' || key === '+')) {
 			e.preventDefault();
 			zoomLevel = Math.min(zoomLevel + 10, 500);
