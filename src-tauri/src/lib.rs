@@ -17,11 +17,34 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// On both Unix and Windows `fs::rename` is atomic when source and destination
 /// live on the same filesystem; placing the temp next to the target guarantees
 /// that. On crash mid-write the original file is left intact.
+///
+/// Two correctness preservations vs. `fs::write`:
+/// - **Symlinks:** if `target` is a symbolic link, follow it to the real file
+///   so the rename replaces the actual content rather than the link itself.
+/// - **Permissions:** when overwriting an existing file, restore its original
+///   mode bits after the rename, since the temp file is created with the
+///   process default umask.
 fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    // Resolve symlinks so we update the real file. `symlink_metadata` does NOT
+    // follow links (unlike `metadata`); if target is a symlink, canonicalize
+    // returns the real path it points to. For a non-existent target or a
+    // regular file, we keep the original path.
+    let resolved: PathBuf = match fs::symlink_metadata(target) {
+        Ok(m) if m.file_type().is_symlink() => target.canonicalize()?,
+        _ => target.to_path_buf(),
+    };
+    let target = resolved.as_path();
+
     let parent = match target.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => return fs::write(target, bytes),
     };
+
+    // Snapshot existing permissions so we can re-apply them after rename.
+    // `fs::rename` brings over the temp file's permissions, dropping mode
+    // bits / ACLs that the destination had. `None` means "target didn't
+    // exist", in which case there's nothing to restore.
+    let existing_perms = fs::metadata(target).ok().map(|m| m.permissions());
 
     let file_name = target
         .file_name()
@@ -54,6 +77,13 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Err(e) = fs::rename(&temp_path, target) {
         let _ = fs::remove_file(&temp_path);
         return Err(e);
+    }
+
+    // Best-effort restore of the original mode bits. If this fails (e.g. the
+    // filesystem doesn't support it, or the user lacks privileges), the file
+    // contents are still correctly written, so we don't surface the error.
+    if let Some(perms) = existing_perms {
+        let _ = fs::set_permissions(target, perms);
     }
 
     Ok(())
