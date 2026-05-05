@@ -9,22 +9,12 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// Write `bytes` to `target` durably and as atomically as the platform allows:
-/// write to a sibling temp file, fsync it, then rename over the target. Falls
-/// back to a plain `fs::write` only if the target has no parent directory
-/// (a path like "foo.md" with no leading dir), which `fs::rename` would not
-/// be able to handle safely anyway.
-///
-/// **Atomicity guarantees:**
-/// - **Unix:** fully atomic. `fs::rename` is a single `rename(2)` syscall and
-///   the parent directory is fsync'd afterwards so the rename survives a
-///   crash.
-/// - **Windows:** near-atomic. `std::fs::rename` does NOT replace an existing
-///   destination on Windows, so we fall back to `remove + rename` if the
-///   first rename fails. There is a very short window where `target` is
-///   briefly absent. A truly atomic Windows replace would need a
-///   `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` call, which would require
-///   pulling in `windows-sys` as a dep.
+/// Write `bytes` to `target` durably and atomically: write to a sibling temp
+/// file, fsync it, then rename over the target. Atomic on both Unix and
+/// modern Windows — `std::fs::rename` calls `MoveFileExW` with
+/// `MOVEFILE_REPLACE_EXISTING` on Windows since Rust 1.35, so an existing
+/// destination is replaced atomically without a dedicated fallback path.
+/// Markpad targets Tauri v2 (Rust 1.70+), so we can rely on this everywhere.
 ///
 /// **Other correctness preservations vs. plain `fs::write`:**
 /// - **Symlinks:** if `target` is a symlink, follow it to the real file so we
@@ -32,6 +22,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// - **Permissions:** on overwrite, restore the destination's original mode
 ///   bits after the rename; the temp file otherwise inherits the process
 ///   umask.
+/// - **POSIX durability:** on Unix, fsync the parent directory after the
+///   rename so the directory entry update survives a crash. Windows NTFS
+///   journals this on its own, so no extra step is needed there.
 fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     // Resolve symlinks so we update the real file. `symlink_metadata` does NOT
     // follow links (unlike `metadata`); if target is a symlink, canonicalize
@@ -86,37 +79,16 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
         return Err(e);
     }
 
-    // Try rename; on Windows std::fs::rename refuses to replace an existing
-    // destination, so on the first error retry with a remove+rename — but
-    // ONLY when the destination actually exists. Otherwise the rename
-    // failed for some other reason (permissions, AV lock, missing temp)
-    // and removing the target would risk leaving the user with no file.
+    // Atomic on both Unix and modern Windows: std::fs::rename uses
+    // `rename(2)` (POSIX) or `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`
+    // (Windows since Rust 1.35). The destination is either fully replaced
+    // or left untouched — never partially overwritten or missing. If the
+    // rename fails (e.g. target locked by another process on Windows),
+    // we clean up the temp file and surface the original error without
+    // touching the target.
     if let Err(e) = fs::rename(&temp_path, target) {
-        #[cfg(windows)]
-        {
-            if target.exists() {
-                let _ = fs::remove_file(target);
-                if let Err(e2) = fs::rename(&temp_path, target) {
-                    // Both attempts failed: clean up the temp and surface
-                    // the second error. The original target may already
-                    // be gone here, but that is the worst case for any
-                    // non-MoveFileExW recovery without `windows-sys`.
-                    let _ = fs::remove_file(&temp_path);
-                    return Err(e2);
-                }
-            } else {
-                // The rename failed but the target doesn't exist: the
-                // problem isn't "destination exists". Don't risk removing
-                // anything, just clean up the temp and surface the error.
-                let _ = fs::remove_file(&temp_path);
-                return Err(e);
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = fs::remove_file(&temp_path);
-            return Err(e);
-        }
+        let _ = fs::remove_file(&temp_path);
+        return Err(e);
     }
 
     // Best-effort restore of the original mode bits. If this fails (e.g. the
