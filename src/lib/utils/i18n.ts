@@ -68,9 +68,13 @@ export const translations: Record<LanguageCode, Translation> = {
             editor: 'Editor',
             preview: 'Preview',
             appearance: 'Appearance',
+            files: 'Files',
             editorSettings: 'Editor Settings',
             previewSettings: 'Preview Settings',
             appearanceSettings: 'Appearance Settings',
+            fileSettings: 'File Settings',
+            autoSave: 'Auto-save edits',
+            confirmBeforeSave: 'Ask for confirmation before saving',
             resetEditorSettings: 'Reset editor settings',
             resetFontSettings: 'Reset font settings',
             font: 'Font',
@@ -200,7 +204,8 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagram saved as SVG',
             failedToSaveDiagram: 'Failed to save diagram',
             failedToCopyCode: 'Failed to copy code',
-            unsupportedFile: 'Unsupported file type: {{filename}}'
+            unsupportedFile: 'Unsupported file type: {{filename}}',
+            autoSaveFailed: 'Auto-save failed — unsaved changes still in memory'
         },
         modal: {
             confirmExit: 'Confirm Exit',
@@ -1263,9 +1268,13 @@ export const translations: Record<LanguageCode, Translation> = {
             editor: 'Редактор',
             preview: 'Предпросмотр',
             appearance: 'Внешний вид',
+            files: 'Файлы',
             editorSettings: 'Настройки редактора',
             previewSettings: 'Настройки предпросмотра',
             appearanceSettings: 'Настройки внешнего вида',
+            fileSettings: 'Настройки файлов',
+            autoSave: 'Автосохранение изменений',
+            confirmBeforeSave: 'Спрашивать подтверждение перед сохранением',
             resetEditorSettings: 'Сбросить настройки редактора',
             resetFontSettings: 'Сбросить настройки шрифта',
             font: 'Шрифт',
@@ -1395,7 +1404,8 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Диаграмма сохранена как SVG',
             failedToSaveDiagram: 'Не удалось сохранить диаграмму',
             failedToCopyCode: 'Не удалось скопировать код',
-            unsupportedFile: 'Неподдерживаемый тип файла: {{filename}}'
+            unsupportedFile: 'Неподдерживаемый тип файла: {{filename}}',
+            autoSaveFailed: 'Автосохранение не удалось — несохранённые правки остались только в памяти'
         },
         modal: {
             confirmExit: 'Подтвердить выход',

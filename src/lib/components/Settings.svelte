@@ -13,7 +13,7 @@
 		onclose,
 	} = $props<{ show?: boolean; theme?: string; onSetTheme?: (t: string) => void; onclose: () => void }>();
 
-	let activeCategory = $state<'editor' | 'preview' | 'appearance'>('editor');
+	let activeCategory = $state<'editor' | 'preview' | 'appearance' | 'files'>('editor');
 	let highlightMenuOpen = $state(false);
 	const highlightColors = [
 		{ value: 'default', color: 'var(--color-accent-fg)' },
@@ -229,6 +229,24 @@
 								></path>
 							</svg>
 							{t('settings.appearance', settings.language)}
+					</button>
+					<button class="nav-item" class:active={activeCategory === 'files'} onclick={() => (activeCategory = 'files')}>
+						<svg
+								xmlns="http://www.w3.org/2000/svg"
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round">
+								<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+								<polyline points="14 2 14 8 20 8"></polyline>
+								<line x1="9" y1="13" x2="15" y2="13"></line>
+								<line x1="9" y1="17" x2="13" y2="17"></line>
+							</svg>
+							{t('settings.files', settings.language)}
 					</button>
 
 					<div class="nav-footer">
@@ -665,6 +683,28 @@
 							<span class="toggle-slider"></span>
 						</label>
 					</div>
+					</div>
+					{:else if activeCategory === 'files'}
+					<div class="settings-group">
+						<div class="settings-group-header">
+							<h2>{t('settings.fileSettings', settings.language)}</h2>
+						</div>
+
+						<div class="setting-item">
+							<label for="files-auto-save">{t('settings.autoSave', settings.language)}</label>
+							<label class="toggle">
+								<input id="files-auto-save" type="checkbox" checked={settings.autoSave} onchange={() => settings.toggleAutoSave()} />
+								<span class="toggle-slider"></span>
+							</label>
+						</div>
+
+						<div class="setting-item">
+							<label for="files-confirm-before-save">{t('settings.confirmBeforeSave', settings.language)}</label>
+							<label class="toggle">
+								<input id="files-confirm-before-save" type="checkbox" checked={settings.confirmBeforeSave} onchange={() => settings.toggleConfirmBeforeSave()} />
+								<span class="toggle-slider"></span>
+							</label>
+						</div>
 					</div>
 					{/if}
 				</div>

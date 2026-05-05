@@ -3,9 +3,61 @@ use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::fs;
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
+
+/// Write `bytes` to `target` atomically: write to a sibling temp file, fsync it,
+/// then rename over the target. Falls back to a plain `fs::write` only if the
+/// target has no parent directory (a path like "foo.md" with no leading dir),
+/// which `fs::rename` would not be able to handle safely anyway.
+///
+/// On both Unix and Windows `fs::rename` is atomic when source and destination
+/// live on the same filesystem; placing the temp next to the target guarantees
+/// that. On crash mid-write the original file is left intact.
+fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = match target.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => return fs::write(target, bytes),
+    };
+
+    let file_name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "markpad".to_string());
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let temp_name = format!(".{}.markpad-tmp-{}-{}", file_name, pid, nanos);
+    let mut temp_path: PathBuf = parent;
+    temp_path.push(temp_name);
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(e);
+    }
+
+    if let Err(e) = fs::rename(&temp_path, target) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(e);
+    }
+
+    Ok(())
+}
 
 struct WatcherState {
     watcher: Mutex<Option<RecommendedWatcher>>,
@@ -210,12 +262,12 @@ fn read_file_content(path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn save_file_content(path: String, content: String) -> Result<(), String> {
-    fs::write(path, content).map_err(|e| e.to_string())
+    atomic_write(Path::new(&path), content.as_bytes()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn save_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
-    fs::write(path, data).map_err(|e| e.to_string())
+    atomic_write(Path::new(&path), &data).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
