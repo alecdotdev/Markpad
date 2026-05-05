@@ -92,11 +92,11 @@ import { t } from './utils/i18n.js';
 	// --- Auto-save bookkeeping (see saveContent + auto-save $effect below) ---
 	// Per-tab debounce timers so switching tabs cannot kill another tab's pending save.
 	const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
-	// Per-tab last-seen rawContent reference, used by the auto-save effect
-	// to detect which tab actually changed in this run. Strings in JS are
-	// immutable, so a `===` compare on the reference catches all edits —
-	// including same-length ones (overwriting characters, formatting
-	// toggles) that a length-based tick would miss.
+	// Per-tab last-seen rawContent value, used by the auto-save effect to
+	// detect which tab actually changed in this run. JS string `===` is a
+	// value compare, so any edit yields a different value — including
+	// same-length ones (overwriting characters, formatting toggles) that
+	// a length-based tick would miss.
 	const lastContentRefByTab = new Map<string, string>();
 	// Suppress the file-watcher reload that fires when we ourselves write the file.
 	// Maps absolute path -> wall-clock ms after which an event for that path is real again.
@@ -1157,10 +1157,19 @@ import { t } from './utils/i18n.js';
 		if (settings.autoSave && !settings.confirmBeforeSave && tab.path !== '') {
 			cancelPendingAutoSave(tabId);
 			const success = await saveContent(tabId);
-			if (success) return true;
-			// Silent save failed — fall through to the modal so the user can
-			// pick Discard / Cancel rather than silently losing data.
-			addToast(t('toast.autoSaveFailed', settings.language), 'error');
+			// Only allow the close if the tab is fully clean afterwards.
+			// `saveContent` resolves true even when post-save `isDirty=true`
+			// (the user typed during the await — TOCTOU) — closing here
+			// would silently drop those new keystrokes.
+			if (success && !tab.isDirty) return true;
+			if (success) {
+				// Save succeeded but the tab is dirty again — let the user
+				// decide via the modal whether to save again, discard, or cancel.
+				addToast(t('toast.savedNewerEdits', settings.language), 'info');
+			} else {
+				// Silent save failed — surface and fall through to the modal.
+				addToast(t('toast.autoSaveFailed', settings.language), 'error');
+			}
 		}
 
 		const response = await askCustom(t('modal.youHaveUnsavedChanges', settings.language).replace('{title}', tab.title), {
@@ -1192,8 +1201,11 @@ import { t } from './utils/i18n.js';
 		if (isEditing) {
 			// Switch back to view
 			if (tab.isDirty && tab.path !== '') {
+				// `confirmBeforeSave` always wins: when the user has asked
+				// for confirmation, every dirty toggle must show the modal,
+				// even if the caller passed `silentSave=true` (hotkey path).
 				const shouldSilent =
-					silentSave || (settings.autoSave && !settings.confirmBeforeSave);
+					!settings.confirmBeforeSave && (silentSave || settings.autoSave);
 				if (shouldSilent) {
 					cancelPendingAutoSave(tab.id);
 					const success = await saveContent(tab.id);
@@ -1288,12 +1300,12 @@ import { t } from './utils/i18n.js';
 			? tabManager.tabs.find((t) => t.id === tabId)
 			: tabManager.activeTab;
 		if (!tab) return false;
-
-		// Untitled tabs need an interactive Save dialog, which only makes
-		// sense from edit/split context. Tabs with a real path can be saved
-		// at any time — including the post-TOCTOU case where the user typed
-		// during a save and the tab moved out of edit mode while still dirty.
-		if (tab.path === '' && !tab.isEditing && !tab.isSplit) return false;
+		// No further gating: explicit user-initiated saves should always
+		// work. Auto-save filters by `path !== '' && (isEditing || isSplit)`
+		// in the effect itself, so untitled or view-mode tabs can only
+		// reach this function through a modal "Save" choice or a hotkey,
+		// both of which are legitimate save triggers — including for
+		// untitled tabs in view mode (e.g. unsaved-changes modal at close).
 
 		let targetPath = tab.path;
 
@@ -1838,8 +1850,11 @@ import { t } from './utils/i18n.js';
 			if (liveMode) toggleLiveMode();
 		} else {
 			if (tab.isDirty && tab.path !== '') {
+				// `confirmBeforeSave` always wins: when the user has asked
+				// for confirmation, every dirty toggle must show the modal,
+				// even if the caller passed `silentSave=true` (hotkey path).
 				const shouldSilent =
-					silentSave || (settings.autoSave && !settings.confirmBeforeSave);
+					!settings.confirmBeforeSave && (silentSave || settings.autoSave);
 				if (shouldSilent) {
 					cancelPendingAutoSave(tab.id);
 					const success = await saveContent(tab.id);
