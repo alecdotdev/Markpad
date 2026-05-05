@@ -43,9 +43,13 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     };
     let target = resolved.as_path();
 
+    // For a relative path with no leading directory (e.g. just "foo.md"),
+    // `target.parent()` returns Some("") which is unusable for the temp
+    // file. Treat that as the current directory so we can still place the
+    // temp alongside the target and keep the rename atomic.
     let parent_path: PathBuf = match target.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
-        _ => return fs::write(target, bytes),
+        _ => PathBuf::from("."),
     };
 
     // Snapshot existing permissions so we can re-apply them after rename.
@@ -83,16 +87,29 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     }
 
     // Try rename; on Windows std::fs::rename refuses to replace an existing
-    // destination, so on the first error retry with a remove+rename. Unix
-    // hits the success branch on the first try.
+    // destination, so on the first error retry with a remove+rename — but
+    // ONLY when the destination actually exists. Otherwise the rename
+    // failed for some other reason (permissions, AV lock, missing temp)
+    // and removing the target would risk leaving the user with no file.
     if let Err(e) = fs::rename(&temp_path, target) {
         #[cfg(windows)]
         {
-            // Best-effort: drop the existing destination, then retry.
-            let _ = fs::remove_file(target);
-            if let Err(e2) = fs::rename(&temp_path, target) {
+            if target.exists() {
+                let _ = fs::remove_file(target);
+                if let Err(e2) = fs::rename(&temp_path, target) {
+                    // Both attempts failed: clean up the temp and surface
+                    // the second error. The original target may already
+                    // be gone here, but that is the worst case for any
+                    // non-MoveFileExW recovery without `windows-sys`.
+                    let _ = fs::remove_file(&temp_path);
+                    return Err(e2);
+                }
+            } else {
+                // The rename failed but the target doesn't exist: the
+                // problem isn't "destination exists". Don't risk removing
+                // anything, just clean up the temp and surface the error.
                 let _ = fs::remove_file(&temp_path);
-                return Err(e2);
+                return Err(e);
             }
         }
         #[cfg(not(windows))]

@@ -92,11 +92,12 @@ import { t } from './utils/i18n.js';
 	// --- Auto-save bookkeeping (see saveContent + auto-save $effect below) ---
 	// Per-tab debounce timers so switching tabs cannot kill another tab's pending save.
 	const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
-	// Per-tab last-seen rawContent length, used by the auto-save effect to
-	// detect which tab actually changed in this run. Without this, every
-	// keystroke in any tab restarts every other dirty tab's timer too,
-	// indefinitely postponing background saves.
-	const lastContentTickByTab = new Map<string, number>();
+	// Per-tab last-seen rawContent reference, used by the auto-save effect
+	// to detect which tab actually changed in this run. Strings in JS are
+	// immutable, so a `===` compare on the reference catches all edits —
+	// including same-length ones (overwriting characters, formatting
+	// toggles) that a length-based tick would miss.
+	const lastContentRefByTab = new Map<string, string>();
 	// Suppress the file-watcher reload that fires when we ourselves write the file.
 	// Maps absolute path -> wall-clock ms after which an event for that path is real again.
 	const selfWriteUntilByPath = new Map<string, number>();
@@ -1221,17 +1222,21 @@ import { t } from './utils/i18n.js';
 					}
 				}
 			}
+			// If `saveContent` left `tab.isDirty=true` (TOCTOU — user typed
+			// during the await), staying in edit mode is the safe default:
+			// a non-editable dirty tab disables auto-save, blocks Cmd+S,
+			// and risks getting clobbered by the next disk reload. Surface
+			// a hint and keep the tab editable.
+			if (tab.path !== '' && tab.isDirty) {
+				addToast(t('toast.savedNewerEdits', settings.language), 'info');
+				return;
+			}
+
 			tab.isEditing = false;
-			// `saveContent` now correctly leaves `isDirty=true` if the user
-			// kept typing during the in-flight save (TOCTOU fix). Don't
-			// force it back to false here — and don't reload from disk in
-			// that case, because the on-disk snapshot is older than the
-			// current rawContent buffer.
-			if (tab.path !== '' && !tab.isDirty) {
+			if (tab.path !== '') {
 				await loadMarkdown(tab.path, { preserveEditState: true });
 			} else {
-				// Untitled OR rawContent is fresher than disk: render the
-				// in-memory buffer for the preview instead of reloading.
+				// Untitled: render the in-memory buffer for the preview.
 				try {
 					const html = (await invoke('render_markdown', { content: tab.rawContent })) as string;
 					const processedInfo = processMarkdownHtml(html, '', collapsedHeaders);
@@ -1243,13 +1248,21 @@ import { t } from './utils/i18n.js';
 		} else {
 			// Switch to edit
 			if (tab.path !== '') {
-				try {
-					const content = (await invoke('read_file_content', { path: tab.path })) as string;
-					tab.rawContent = content;
+				if (tab.isDirty) {
+					// Already have unsaved in-memory edits (e.g. from an
+					// earlier session restored from localStorage, or from
+					// post-save TOCTOU). Reading from disk would clobber
+					// them, so just flip into edit mode without a reload.
 					tab.isEditing = true;
-					tab.isDirty = false;
-				} catch (e) {
-					console.error('Failed to read file for editing', e);
+				} else {
+					try {
+						const content = (await invoke('read_file_content', { path: tab.path })) as string;
+						tab.rawContent = content;
+						tab.isEditing = true;
+						tab.isDirty = false;
+					} catch (e) {
+						console.error('Failed to read file for editing', e);
+					}
 				}
 			} else {
 				tab.isEditing = true;
@@ -1274,7 +1287,13 @@ import { t } from './utils/i18n.js';
 		const tab = tabId
 			? tabManager.tabs.find((t) => t.id === tabId)
 			: tabManager.activeTab;
-		if (!tab || (!tab.isEditing && !tab.isSplit)) return false;
+		if (!tab) return false;
+
+		// Untitled tabs need an interactive Save dialog, which only makes
+		// sense from edit/split context. Tabs with a real path can be saved
+		// at any time — including the post-TOCTOU case where the user typed
+		// during a save and the tab moved out of edit mode while still dirty.
+		if (tab.path === '' && !tab.isEditing && !tab.isSplit) return false;
 
 		let targetPath = tab.path;
 
@@ -1376,21 +1395,21 @@ import { t } from './utils/i18n.js';
 			untrack(() => {
 				for (const t of autoSaveTimers.values()) clearTimeout(t);
 				autoSaveTimers.clear();
-				lastContentTickByTab.clear();
+				lastContentRefByTab.clear();
 			});
 			return;
 		}
 
 		// Reactive reads — every keystroke flows through updateTabRawContent,
-		// which mutates rawContent and isDirty. We touch every tab's
-		// rawContent so the effect re-runs on any keystroke.
+		// which assigns a new immutable string to `tab.rawContent`. Capturing
+		// the reference here triggers re-runs on any edit (including
+		// same-length ones like overwrite or formatting toggles).
 		const snapshot = tabManager.tabs.map((tab) => ({
 			id: tab.id,
 			path: tab.path,
 			isDirty: tab.isDirty,
 			editable: tab.isEditing || tab.isSplit,
-			// `.length` is enough to detect changes without copying the buffer.
-			contentTick: tab.rawContent.length,
+			contentRef: tab.rawContent,
 		}));
 
 		untrack(() => {
@@ -1398,8 +1417,8 @@ import { t } from './utils/i18n.js';
 			for (const s of snapshot) {
 				seenIds.add(s.id);
 				const eligible = s.isDirty && s.path !== '' && s.editable;
-				const prevTick = lastContentTickByTab.get(s.id);
-				const tickChanged = prevTick !== s.contentTick;
+				const prevRef = lastContentRefByTab.get(s.id);
+				const refChanged = prevRef !== s.contentRef;
 
 				if (!eligible) {
 					// Tab is no longer dirty / editable / has a path — drop
@@ -1409,11 +1428,11 @@ import { t } from './utils/i18n.js';
 						clearTimeout(existing);
 						autoSaveTimers.delete(s.id);
 					}
-					lastContentTickByTab.delete(s.id);
+					lastContentRefByTab.delete(s.id);
 					continue;
 				}
 
-				if (!tickChanged && autoSaveTimers.has(s.id)) {
+				if (!refChanged && autoSaveTimers.has(s.id)) {
 					// Eligible but no new edit AND a timer is already armed —
 					// leave it alone so background tabs don't get their
 					// debounce reset by foreground typing.
@@ -1424,7 +1443,7 @@ import { t } from './utils/i18n.js';
 				// (e.g. user pressed Save As). (Re)arm the debounce.
 				const existing = autoSaveTimers.get(s.id);
 				if (existing) clearTimeout(existing);
-				lastContentTickByTab.set(s.id, s.contentTick);
+				lastContentRefByTab.set(s.id, s.contentRef);
 				const timer = setTimeout(() => {
 					autoSaveTimers.delete(s.id);
 					// `saveContent` resolves with a boolean; it does not
@@ -1458,8 +1477,8 @@ import { t } from './utils/i18n.js';
 					autoSaveTimers.delete(id);
 				}
 			}
-			for (const id of [...lastContentTickByTab.keys()]) {
-				if (!seenIds.has(id)) lastContentTickByTab.delete(id);
+			for (const id of [...lastContentRefByTab.keys()]) {
+				if (!seenIds.has(id)) lastContentRefByTab.delete(id);
 			}
 		});
 	});
@@ -1848,11 +1867,17 @@ import { t } from './utils/i18n.js';
 					}
 				}
 			}
+			// Same TOCTOU guard as toggleEdit: if the user typed during
+			// the save, the tab is still dirty. Keep it in split mode so
+			// auto-save keeps firing and Cmd+S still works on it; flipping
+			// it out would make a non-editable dirty tab.
+			if (tab.path !== '' && tab.isDirty) {
+				addToast(t('toast.savedNewerEdits', settings.language), 'info');
+				return;
+			}
+
 			tabManager.setSplitEnabled(tab.id, false);
-			// Same TOCTOU guard as in toggleEdit: if the user typed during
-			// the save, leave the buffer alone instead of reloading from
-			// disk and losing those keystrokes.
-			if (tab.path !== '' && !tab.isDirty) {
+			if (tab.path !== '') {
 				await loadMarkdown(tab.path);
 			}
 		}

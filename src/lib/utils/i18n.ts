@@ -205,7 +205,8 @@ export const translations: Record<LanguageCode, Translation> = {
             failedToSaveDiagram: 'Failed to save diagram',
             failedToCopyCode: 'Failed to copy code',
             unsupportedFile: 'Unsupported file type: {{filename}}',
-            autoSaveFailed: 'Auto-save failed — unsaved changes still in memory'
+            autoSaveFailed: 'Auto-save failed — unsaved changes still in memory',
+            savedNewerEdits: 'Saved — staying in edit mode because you have newer edits'
         },
         modal: {
             confirmExit: 'Confirm Exit',
@@ -1405,7 +1406,8 @@ export const translations: Record<LanguageCode, Translation> = {
             failedToSaveDiagram: 'Не удалось сохранить диаграмму',
             failedToCopyCode: 'Не удалось скопировать код',
             unsupportedFile: 'Неподдерживаемый тип файла: {{filename}}',
-            autoSaveFailed: 'Автосохранение не удалось — несохранённые правки остались только в памяти'
+            autoSaveFailed: 'Автосохранение не удалось — несохранённые правки остались только в памяти',
+            savedNewerEdits: 'Сохранено — остаюсь в режиме редактирования, так как есть более новые правки'
         },
         modal: {
             confirmExit: 'Подтвердить выход',
