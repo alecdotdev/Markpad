@@ -3,9 +3,115 @@ use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::fs;
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
+
+/// Write `bytes` to `target` durably and atomically: write to a sibling temp
+/// file, fsync it, then rename over the target. Atomic on both Unix and
+/// modern Windows — `std::fs::rename` calls `MoveFileExW` with
+/// `MOVEFILE_REPLACE_EXISTING` on Windows since Rust 1.35, so an existing
+/// destination is replaced atomically without a dedicated fallback path.
+/// Markpad targets Tauri v2 (Rust 1.70+), so we can rely on this everywhere.
+///
+/// **Other correctness preservations vs. plain `fs::write`:**
+/// - **Symlinks:** if `target` is a symlink, follow it to the real file so we
+///   replace the linked content rather than the link itself.
+/// - **Permissions:** on overwrite, restore the destination's original mode
+///   bits after the rename; the temp file otherwise inherits the process
+///   umask.
+/// - **POSIX durability:** on Unix, fsync the parent directory after the
+///   rename so the directory entry update survives a crash. Windows NTFS
+///   journals this on its own, so no extra step is needed there.
+fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    // Resolve symlinks so we update the real file. `symlink_metadata` does NOT
+    // follow links (unlike `metadata`); if target is a symlink, canonicalize
+    // returns the real path it points to. For a non-existent target or a
+    // regular file, we keep the original path.
+    let resolved: PathBuf = match fs::symlink_metadata(target) {
+        Ok(m) if m.file_type().is_symlink() => target.canonicalize()?,
+        _ => target.to_path_buf(),
+    };
+    let target = resolved.as_path();
+
+    // For a relative path with no leading directory (e.g. just "foo.md"),
+    // `target.parent()` returns Some("") which is unusable for the temp
+    // file. Treat that as the current directory so we can still place the
+    // temp alongside the target and keep the rename atomic.
+    let parent_path: PathBuf = match target.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+
+    // Snapshot existing permissions so we can re-apply them after rename.
+    // `fs::rename` brings over the temp file's permissions, dropping mode
+    // bits / ACLs that the destination had. `None` means "target didn't
+    // exist", in which case there's nothing to restore.
+    let existing_perms = fs::metadata(target).ok().map(|m| m.permissions());
+
+    let file_name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "markpad".to_string());
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let temp_name = format!(".{}.markpad-tmp-{}-{}", file_name, pid, nanos);
+    let mut temp_path = parent_path.clone();
+    temp_path.push(temp_name);
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(e);
+    }
+
+    // Atomic on both Unix and modern Windows: std::fs::rename uses
+    // `rename(2)` (POSIX) or `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`
+    // (Windows since Rust 1.35). The destination is either fully replaced
+    // or left untouched — never partially overwritten or missing. If the
+    // rename fails (e.g. target locked by another process on Windows),
+    // we clean up the temp file and surface the original error without
+    // touching the target.
+    if let Err(e) = fs::rename(&temp_path, target) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(e);
+    }
+
+    // Best-effort restore of the original mode bits. If this fails (e.g. the
+    // filesystem doesn't support it, or the user lacks privileges), the file
+    // contents are still correctly written, so we don't surface the error.
+    if let Some(perms) = existing_perms {
+        let _ = fs::set_permissions(target, perms);
+    }
+
+    // POSIX durability: a rename is not durable until the parent directory's
+    // metadata is also flushed to disk. Without this, a crash right after
+    // rename could leave the target missing or pointing at the old inode.
+    // Windows doesn't expose directory fsync semantics — its NTFS journal
+    // already handles this, so we skip the call there.
+    #[cfg(unix)]
+    {
+        if let Ok(dir) = fs::File::open(&parent_path) {
+            let _ = dir.sync_all();
+        }
+    }
+
+    Ok(())
+}
 
 struct WatcherState {
     watcher: Mutex<Option<RecommendedWatcher>>,
@@ -210,12 +316,12 @@ fn read_file_content(path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn save_file_content(path: String, content: String) -> Result<(), String> {
-    fs::write(path, content).map_err(|e| e.to_string())
+    atomic_write(Path::new(&path), content.as_bytes()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn save_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
-    fs::write(path, data).map_err(|e| e.to_string())
+    atomic_write(Path::new(&path), &data).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

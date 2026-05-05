@@ -162,6 +162,12 @@ export class SettingsStore {
 	codeFont = $state('Consolas');
 	codeFontSize = $state(14);
 
+	// File-save behavior. autoSave = silently persist edits without Cmd+S.
+	// confirmBeforeSave = if true, keep the unsaved-changes modals on close/toggle
+	// (i.e. ask for confirmation) even when autoSave is on.
+	autoSave = $state(true);
+	confirmBeforeSave = $state(false);
+
 	constructor() {
 		if (typeof localStorage !== 'undefined') {
 			const savedMinimap = localStorage.getItem('editor.minimap');
@@ -194,6 +200,11 @@ export class SettingsStore {
 			const savedPreviewFontSize = localStorage.getItem('preview.fontSize');
 			const savedCodeFont = localStorage.getItem('preview.codeFont');
 			const savedCodeFontSize = localStorage.getItem('preview.codeFontSize');
+
+			const savedAutoSave = localStorage.getItem('editor.autoSave');
+			const savedConfirmBeforeSave = localStorage.getItem('editor.confirmBeforeSave');
+			if (savedAutoSave !== null) this.autoSave = savedAutoSave === 'true';
+			if (savedConfirmBeforeSave !== null) this.confirmBeforeSave = savedConfirmBeforeSave === 'true';
 
 			const parseFontSize = (value: string | null, fallback: number, min: number, max: number) => {
 				if (value === null) return fallback;
@@ -295,6 +306,8 @@ export class SettingsStore {
 					localStorage.setItem('preview.fontSize', String(this.previewFontSize));
 					localStorage.setItem('preview.codeFont', this.codeFont);
 					localStorage.setItem('preview.codeFontSize', String(this.codeFontSize));
+					localStorage.setItem('editor.autoSave', String(this.autoSave));
+					localStorage.setItem('editor.confirmBeforeSave', String(this.confirmBeforeSave));
 					if (this.preZenState) {
 						localStorage.setItem('editor.preZenState', JSON.stringify(this.preZenState));
 					} else {
@@ -403,6 +416,14 @@ export class SettingsStore {
 
 	toggleMacosImageScaling() {
 		this.macosImageScaling = !this.macosImageScaling;
+	}
+
+	toggleAutoSave() {
+		this.autoSave = !this.autoSave;
+	}
+
+	toggleConfirmBeforeSave() {
+		this.confirmBeforeSave = !this.confirmBeforeSave;
 	}
 
 	setLanguage(lang: LanguageCode) {
