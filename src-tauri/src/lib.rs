@@ -9,21 +9,29 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// Write `bytes` to `target` atomically: write to a sibling temp file, fsync it,
-/// then rename over the target. Falls back to a plain `fs::write` only if the
-/// target has no parent directory (a path like "foo.md" with no leading dir),
-/// which `fs::rename` would not be able to handle safely anyway.
+/// Write `bytes` to `target` durably and as atomically as the platform allows:
+/// write to a sibling temp file, fsync it, then rename over the target. Falls
+/// back to a plain `fs::write` only if the target has no parent directory
+/// (a path like "foo.md" with no leading dir), which `fs::rename` would not
+/// be able to handle safely anyway.
 ///
-/// On both Unix and Windows `fs::rename` is atomic when source and destination
-/// live on the same filesystem; placing the temp next to the target guarantees
-/// that. On crash mid-write the original file is left intact.
+/// **Atomicity guarantees:**
+/// - **Unix:** fully atomic. `fs::rename` is a single `rename(2)` syscall and
+///   the parent directory is fsync'd afterwards so the rename survives a
+///   crash.
+/// - **Windows:** near-atomic. `std::fs::rename` does NOT replace an existing
+///   destination on Windows, so we fall back to `remove + rename` if the
+///   first rename fails. There is a very short window where `target` is
+///   briefly absent. A truly atomic Windows replace would need a
+///   `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` call, which would require
+///   pulling in `windows-sys` as a dep.
 ///
-/// Two correctness preservations vs. `fs::write`:
-/// - **Symlinks:** if `target` is a symbolic link, follow it to the real file
-///   so the rename replaces the actual content rather than the link itself.
-/// - **Permissions:** when overwriting an existing file, restore its original
-///   mode bits after the rename, since the temp file is created with the
-///   process default umask.
+/// **Other correctness preservations vs. plain `fs::write`:**
+/// - **Symlinks:** if `target` is a symlink, follow it to the real file so we
+///   replace the linked content rather than the link itself.
+/// - **Permissions:** on overwrite, restore the destination's original mode
+///   bits after the rename; the temp file otherwise inherits the process
+///   umask.
 fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     // Resolve symlinks so we update the real file. `symlink_metadata` does NOT
     // follow links (unlike `metadata`); if target is a symlink, canonicalize
@@ -35,7 +43,7 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     };
     let target = resolved.as_path();
 
-    let parent = match target.parent() {
+    let parent_path: PathBuf = match target.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => return fs::write(target, bytes),
     };
@@ -56,7 +64,7 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .unwrap_or(0);
     let pid = std::process::id();
     let temp_name = format!(".{}.markpad-tmp-{}-{}", file_name, pid, nanos);
-    let mut temp_path: PathBuf = parent;
+    let mut temp_path = parent_path.clone();
     temp_path.push(temp_name);
 
     let write_result = (|| -> std::io::Result<()> {
@@ -74,9 +82,24 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
         return Err(e);
     }
 
+    // Try rename; on Windows std::fs::rename refuses to replace an existing
+    // destination, so on the first error retry with a remove+rename. Unix
+    // hits the success branch on the first try.
     if let Err(e) = fs::rename(&temp_path, target) {
-        let _ = fs::remove_file(&temp_path);
-        return Err(e);
+        #[cfg(windows)]
+        {
+            // Best-effort: drop the existing destination, then retry.
+            let _ = fs::remove_file(target);
+            if let Err(e2) = fs::rename(&temp_path, target) {
+                let _ = fs::remove_file(&temp_path);
+                return Err(e2);
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = fs::remove_file(&temp_path);
+            return Err(e);
+        }
     }
 
     // Best-effort restore of the original mode bits. If this fails (e.g. the
@@ -84,6 +107,18 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     // contents are still correctly written, so we don't surface the error.
     if let Some(perms) = existing_perms {
         let _ = fs::set_permissions(target, perms);
+    }
+
+    // POSIX durability: a rename is not durable until the parent directory's
+    // metadata is also flushed to disk. Without this, a crash right after
+    // rename could leave the target missing or pointing at the old inode.
+    // Windows doesn't expose directory fsync semantics — its NTFS journal
+    // already handles this, so we skip the call there.
+    #[cfg(unix)]
+    {
+        if let Ok(dir) = fs::File::open(&parent_path) {
+            let _ = dir.sync_all();
+        }
     }
 
     Ok(())

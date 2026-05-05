@@ -92,11 +92,29 @@ import { t } from './utils/i18n.js';
 	// --- Auto-save bookkeeping (see saveContent + auto-save $effect below) ---
 	// Per-tab debounce timers so switching tabs cannot kill another tab's pending save.
 	const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	// Per-tab last-seen rawContent length, used by the auto-save effect to
+	// detect which tab actually changed in this run. Without this, every
+	// keystroke in any tab restarts every other dirty tab's timer too,
+	// indefinitely postponing background saves.
+	const lastContentTickByTab = new Map<string, number>();
 	// Suppress the file-watcher reload that fires when we ourselves write the file.
 	// Maps absolute path -> wall-clock ms after which an event for that path is real again.
 	const selfWriteUntilByPath = new Map<string, number>();
 	const SELF_WRITE_GRACE_MS = 400;
 	const AUTO_SAVE_DEBOUNCE_MS = 1500;
+
+	// Cancel a pending auto-save for a tab. Call this only on paths that
+	// COMMIT to a save or discard outcome — never before showing a modal,
+	// because if the user picks Cancel, the timer is gone forever and
+	// background auto-save is silently disabled for that tab until the
+	// next keystroke.
+	function cancelPendingAutoSave(tabId: string) {
+		const t = autoSaveTimers.get(tabId);
+		if (t) {
+			clearTimeout(t);
+			autoSaveTimers.delete(tabId);
+		}
+	}
 
 	// in-page scroll position history for mouse 4/5 nav
 	let scrollHistory: number[] = [];
@@ -1130,18 +1148,13 @@ import { t } from './utils/i18n.js';
 
 		if (!tab.isDirty) return true;
 
-		// Cancel any pending auto-save timer — we're handling this tab now,
-		// either by saving immediately or by surrendering to the user's choice.
-		const pendingTimer = autoSaveTimers.get(tabId);
-		if (pendingTimer) {
-			clearTimeout(pendingTimer);
-			autoSaveTimers.delete(tabId);
-		}
-
-		// Silent save path: only when auto-save is on, the user did NOT ask for
-		// confirmation, and the tab has a real path. Untitled tabs always need
-		// a save dialog, which means the modal flow is the right place for them.
+		// Silent save path: only when auto-save is on, the user did NOT ask
+		// for confirmation, and the tab has a real path. Untitled tabs always
+		// need a save dialog, which means the modal flow is the right place
+		// for them. We cancel the pending timer right before the manual save
+		// to avoid a duplicate write from a timer that fires concurrently.
 		if (settings.autoSave && !settings.confirmBeforeSave && tab.path !== '') {
+			cancelPendingAutoSave(tabId);
 			const success = await saveContent(tabId);
 			if (success) return true;
 			// Silent save failed — fall through to the modal so the user can
@@ -1155,12 +1168,20 @@ import { t } from './utils/i18n.js';
 			showSave: true,
 		});
 
+		// Important: do NOT cancel the pending auto-save timer before this
+		// modal. If the user clicks Cancel, the tab remains dirty and we
+		// want background auto-save to keep firing on the existing schedule.
 		if (response === 'cancel') return false;
 		if (response === 'save') {
+			cancelPendingAutoSave(tabId);
 			return await saveContent(tabId);
 		}
 
-		return true; // discard
+		// Discard: drop pending save so we don't write what the user just
+		// threw away. The effect will re-arm a timer if the tab gets edited
+		// again.
+		cancelPendingAutoSave(tabId);
+		return true;
 	}
 
 	async function toggleEdit(silentSave = false) {
@@ -1170,50 +1191,53 @@ import { t } from './utils/i18n.js';
 		if (isEditing) {
 			// Switch back to view
 			if (tab.isDirty && tab.path !== '') {
-				// Cancel pending auto-save timer for this tab — we're flushing now.
-				const pendingTimer = autoSaveTimers.get(tab.id);
-				if (pendingTimer) {
-					clearTimeout(pendingTimer);
-					autoSaveTimers.delete(tab.id);
-				}
-
-				// Silent save when caller asked for it (hotkey path) OR when the
-				// user enabled auto-save without confirmation in settings.
 				const shouldSilent =
 					silentSave || (settings.autoSave && !settings.confirmBeforeSave);
 				if (shouldSilent) {
-				const success = await saveContent(tab.id);
-				if (!success) {
-					addToast(t('toast.autoSaveFailed', settings.language), 'error');
-					return; // If save fails, stay in edit mode
-				}
-			} else {
-				const response = await askCustom(t('modal.unsavedChanges.viewMode.message'), {
-					title: t('modal.unsavedChanges.title'),
-					kind: 'warning',
-					showSave: true,
-				});
+					cancelPendingAutoSave(tab.id);
+					const success = await saveContent(tab.id);
+					if (!success) {
+						addToast(t('toast.autoSaveFailed', settings.language), 'error');
+						return; // If save fails, stay in edit mode
+					}
+				} else {
+					const response = await askCustom(t('modal.unsavedChanges.viewMode.message'), {
+						title: t('modal.unsavedChanges.title'),
+						kind: 'warning',
+						showSave: true,
+					});
 
+					// Cancel only happens on save / discard. If user picks
+					// Cancel, the pending auto-save timer keeps running.
 					if (response === 'cancel') return;
 					if (response === 'save') {
+						cancelPendingAutoSave(tab.id);
 						const success = await saveContent(tab.id);
 						if (!success) return;
 					} else if (response === 'discard') {
+						cancelPendingAutoSave(tab.id);
 						tab.rawContent = tab.originalContent;
+						tab.isDirty = false;
 					}
 				}
 			}
 			tab.isEditing = false;
-			if (tab.path !== '') {
-				tab.isDirty = false;
+			// `saveContent` now correctly leaves `isDirty=true` if the user
+			// kept typing during the in-flight save (TOCTOU fix). Don't
+			// force it back to false here — and don't reload from disk in
+			// that case, because the on-disk snapshot is older than the
+			// current rawContent buffer.
+			if (tab.path !== '' && !tab.isDirty) {
 				await loadMarkdown(tab.path, { preserveEditState: true });
 			} else {
+				// Untitled OR rawContent is fresher than disk: render the
+				// in-memory buffer for the preview instead of reloading.
 				try {
 					const html = (await invoke('render_markdown', { content: tab.rawContent })) as string;
 					const processedInfo = processMarkdownHtml(html, '', collapsedHeaders);
 					tabManager.updateTabContent(tab.id, processedInfo);
 				} catch (e) {
-					console.error('Failed to render markdown for unsaved file', e);
+					console.error('Failed to render markdown', e);
 				}
 			}
 		} else {
@@ -1342,23 +1366,31 @@ import { t } from './utils/i18n.js';
 	 * cancelled and a manual Cmd+S becomes the only path again.
 	 */
 	$effect(() => {
-		if (!settings.autoSave) {
+		// Disable background auto-save in two cases:
+		//   1. The user turned `autoSave` off entirely.
+		//   2. The user enabled `confirmBeforeSave` — the Settings UI label
+		//      promises confirmation before each save, so silent debounced
+		//      writes contradict that contract. With this flag on, saves
+		//      happen only via Cmd+S or via the close/toggle modals.
+		if (!settings.autoSave || settings.confirmBeforeSave) {
 			untrack(() => {
 				for (const t of autoSaveTimers.values()) clearTimeout(t);
 				autoSaveTimers.clear();
+				lastContentTickByTab.clear();
 			});
 			return;
 		}
 
 		// Reactive reads — every keystroke flows through updateTabRawContent,
-		// which mutates rawContent and isDirty in the tab object. Reading both
-		// here ensures Svelte 5 re-runs this effect on each change.
+		// which mutates rawContent and isDirty. We touch every tab's
+		// rawContent so the effect re-runs on any keystroke.
 		const snapshot = tabManager.tabs.map((tab) => ({
 			id: tab.id,
 			path: tab.path,
 			isDirty: tab.isDirty,
 			editable: tab.isEditing || tab.isSplit,
-			contentTick: tab.rawContent.length, // touch rawContent so we track it
+			// `.length` is enough to detect changes without copying the buffer.
+			contentTick: tab.rawContent.length,
 		}));
 
 		untrack(() => {
@@ -1366,27 +1398,68 @@ import { t } from './utils/i18n.js';
 			for (const s of snapshot) {
 				seenIds.add(s.id);
 				const eligible = s.isDirty && s.path !== '' && s.editable;
-				const existing = autoSaveTimers.get(s.id);
-				if (eligible) {
-					if (existing) clearTimeout(existing);
-					const timer = setTimeout(() => {
+				const prevTick = lastContentTickByTab.get(s.id);
+				const tickChanged = prevTick !== s.contentTick;
+
+				if (!eligible) {
+					// Tab is no longer dirty / editable / has a path — drop
+					// any pending timer and forget its tick.
+					const existing = autoSaveTimers.get(s.id);
+					if (existing) {
+						clearTimeout(existing);
 						autoSaveTimers.delete(s.id);
-						saveContent(s.id).catch((e) =>
-							console.error('Auto-save failed', e),
-						);
-					}, AUTO_SAVE_DEBOUNCE_MS);
-					autoSaveTimers.set(s.id, timer);
-				} else if (existing) {
-					clearTimeout(existing);
-					autoSaveTimers.delete(s.id);
+					}
+					lastContentTickByTab.delete(s.id);
+					continue;
 				}
+
+				if (!tickChanged && autoSaveTimers.has(s.id)) {
+					// Eligible but no new edit AND a timer is already armed —
+					// leave it alone so background tabs don't get their
+					// debounce reset by foreground typing.
+					continue;
+				}
+
+				// Either content changed, or the tab just became eligible
+				// (e.g. user pressed Save As). (Re)arm the debounce.
+				const existing = autoSaveTimers.get(s.id);
+				if (existing) clearTimeout(existing);
+				lastContentTickByTab.set(s.id, s.contentTick);
+				const timer = setTimeout(() => {
+					autoSaveTimers.delete(s.id);
+					// `saveContent` resolves with a boolean; it does not
+					// reject on save failure, so `.catch` alone hid errors.
+					// Surface failures via toast + console.
+					saveContent(s.id).then(
+						(ok) => {
+							if (!ok) {
+								console.error('Auto-save failed for tab', s.id);
+								addToast(
+									t('toast.autoSaveFailed', settings.language),
+									'error',
+								);
+							}
+						},
+						(e) => {
+							console.error('Auto-save threw for tab', s.id, e);
+							addToast(
+								t('toast.autoSaveFailed', settings.language),
+								'error',
+							);
+						},
+					);
+				}, AUTO_SAVE_DEBOUNCE_MS);
+				autoSaveTimers.set(s.id, timer);
 			}
-			// Tabs that were closed: drop their timers.
+			// Tabs that were closed: drop their timers and tick records.
 			for (const id of [...autoSaveTimers.keys()]) {
 				if (!seenIds.has(id)) {
 					clearTimeout(autoSaveTimers.get(id)!);
 					autoSaveTimers.delete(id);
 				}
+			}
+			for (const id of [...lastContentTickByTab.keys()]) {
+				if (!seenIds.has(id)) lastContentTickByTab.delete(id);
 			}
 		});
 	});
@@ -1746,15 +1819,10 @@ import { t } from './utils/i18n.js';
 			if (liveMode) toggleLiveMode();
 		} else {
 			if (tab.isDirty && tab.path !== '') {
-				const pendingTimer = autoSaveTimers.get(tab.id);
-				if (pendingTimer) {
-					clearTimeout(pendingTimer);
-					autoSaveTimers.delete(tab.id);
-				}
-
 				const shouldSilent =
 					silentSave || (settings.autoSave && !settings.confirmBeforeSave);
 				if (shouldSilent) {
+					cancelPendingAutoSave(tab.id);
 					const success = await saveContent(tab.id);
 					if (!success) {
 						addToast(t('toast.autoSaveFailed', settings.language), 'error');
@@ -1767,20 +1835,25 @@ import { t } from './utils/i18n.js';
 						showSave: true,
 					});
 
+					// Cancel keeps the pending auto-save timer alive.
 					if (response === 'cancel') return;
 					if (response === 'save') {
+						cancelPendingAutoSave(tab.id);
 						const success = await saveContent(tab.id);
 						if (!success) return;
 					} else if (response === 'discard') {
+						cancelPendingAutoSave(tab.id);
 						tab.rawContent = tab.originalContent;
+						tab.isDirty = false;
 					}
 				}
 			}
 			tabManager.setSplitEnabled(tab.id, false);
-			if (tab.path !== '') {
-				tab.isDirty = false;
+			// Same TOCTOU guard as in toggleEdit: if the user typed during
+			// the save, leave the buffer alone instead of reloading from
+			// disk and losing those keystrokes.
+			if (tab.path !== '' && !tab.isDirty) {
 				await loadMarkdown(tab.path);
-			} else {
 			}
 		}
 	}
@@ -2151,31 +2224,31 @@ import { t } from './utils/i18n.js';
 						console.log('Preventing default close');
 				event.preventDefault();
 
-				// Cancel any pending auto-save timers — we own these saves now.
-				for (const t of autoSaveTimers.values()) clearTimeout(t);
-				autoSaveTimers.clear();
-
 				// Auto-save without confirmation: try silently saving every dirty
-				// tab that has a real path. If any fails, OR there are untitled
-				// tabs (which would need a Save dialog), fall through to the
-				// modal so the user is in control.
+				// tab that has a real path. If untitled tabs exist they need a
+				// Save dialog, so we just fall through to the modal — that is
+				// NOT a failure case and shouldn't show an error toast. We
+				// also DON'T clear pending timers up front: if the user picks
+				// Cancel in the modal below, we want the timers to keep
+				// running for tabs that are still dirty.
 				if (settings.autoSave && !settings.confirmBeforeSave) {
 					const tabsWithPath = dirtyTabs.filter((t) => t.path !== '');
-					const untitled = dirtyTabs.filter((t) => t.path === '');
-					let allOk = untitled.length === 0;
-					if (allOk) {
-						allOk = true;
+					const hasUntitled = dirtyTabs.some((t) => t.path === '');
+					if (!hasUntitled) {
+						let allOk = true;
 						for (const tab of tabsWithPath) {
+							cancelPendingAutoSave(tab.id);
 							const ok = await saveContent(tab.id);
 							if (!ok) { allOk = false; break; }
 						}
+						if (allOk) {
+							appWindow.close();
+							return;
+						}
+						// A real save failure happened — surface it.
+						addToast(t('toast.autoSaveFailed', settings.language), 'error');
 					}
-					if (allOk) {
-						appWindow.close();
-						return;
-					}
-					addToast(t('toast.autoSaveFailed', settings.language), 'error');
-					// fall through to modal
+					// hasUntitled: skip toast, just fall through to the modal.
 				}
 
 				const response = await askCustom(t('modal.youHaveUnsavedFiles', settings.language).replace('{{count}}', dirtyTabs.length.toString()), {
@@ -2189,6 +2262,7 @@ import { t } from './utils/i18n.js';
 							for (const tab of dirtyTabs) {
 								tabManager.setActive(tab.id);
 								await tick();
+								cancelPendingAutoSave(tab.id);
 								const saved = await saveContent(tab.id);
 								if (!saved) return; // Cancelled or failed
 							}
