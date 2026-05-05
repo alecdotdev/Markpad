@@ -369,7 +369,11 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefault: '默认',
             themeDefaultLight: '默认浅色',
             themeDefaultDark: '默认深色',
-            themeFollowSystem: '跟随系统'
+            themeFollowSystem: '跟随系统',
+            files: '文件',
+            fileSettings: '文件设置',
+            autoSave: '自动保存编辑',
+            confirmBeforeSave: '保存前进行确认'
         },
         colors: {
             default: '默认',
@@ -461,7 +465,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: '图表已保存为SVG',
             failedToSaveDiagram: '保存图表失败',
             failedToCopyCode: '复制代码失败',
-            unsupportedFile: '不支持的文件类型: {{filename}}'
+            unsupportedFile: '不支持的文件类型: {{filename}}',
+            autoSaveFailed: '自动保存失败 — 未保存的更改仍在内存中',
+            savedNewerEdits: '已保存 — 因为存在更新的编辑,继续保持编辑模式'
         },
         modal: {
             confirmExit: '确认退出',
@@ -623,7 +629,11 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefault: 'デフォルト',
             themeDefaultLight: 'デフォルトの明るい',
             themeDefaultDark: 'デフォルトの暗い',
-            themeFollowSystem: 'システムに従う'
+            themeFollowSystem: 'システムに従う',
+            files: 'ファイル',
+            fileSettings: 'ファイル設定',
+            autoSave: '編集を自動保存',
+            confirmBeforeSave: '保存前に確認する'
         },
         colors: {
             default: 'デフォルト',
@@ -715,7 +725,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: '図がSVGとして保存されました',
             failedToSaveDiagram: '図の保存に失敗しました',
             failedToCopyCode: 'コードのコピーに失敗しました',
-            unsupportedFile: 'サポートされていないファイル形式: {{filename}}'
+            unsupportedFile: 'サポートされていないファイル形式: {{filename}}',
+            autoSaveFailed: '自動保存に失敗しました — 未保存の変更はメモリ内に残っています',
+            savedNewerEdits: '保存しました — 新しい編集があるため編集モードを継続します'
         },
         modal: {
             confirmExit: '終了を確認',
@@ -888,7 +900,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: '藍色',
                 cyan: '青色',
                 green: '綠色'
-            }
+            },
+            files: '檔案',
+            fileSettings: '檔案設定',
+            autoSave: '自動儲存編輯',
+            confirmBeforeSave: '儲存前先確認'
         },
         menu: {
             file: '文件',
@@ -969,7 +985,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: '圖表已保存為SVG',
             failedToSaveDiagram: '保存圖表失敗',
             failedToCopyCode: '複製代碼失敗',
-            unsupportedFile: '不支持的文件類型: {{filename}}'
+            unsupportedFile: '不支持的文件類型: {{filename}}',
+            autoSaveFailed: '自動儲存失敗 — 未儲存的變更仍在記憶體中',
+            savedNewerEdits: '已儲存 — 因有較新的編輯,繼續保持編輯模式'
         },
         modal: {
             confirmExit: '確認退出',
@@ -1113,7 +1131,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: '파란색',
                 cyan: '청록색',
                 green: '초록색'
-            }
+            },
+            files: '파일',
+            fileSettings: '파일 설정',
+            autoSave: '편집 내용 자동 저장',
+            confirmBeforeSave: '저장 전 확인'
         },
         menu: {
             file: '파일',
@@ -1194,7 +1216,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: '다이어그램이 SVG로 저장되었습니다',
             failedToSaveDiagram: '다이어그램 저장 실패',
             failedToCopyCode: '코드 복사 실패',
-            unsupportedFile: '지원되지 않는 파일 형식: {{filename}}'
+            unsupportedFile: '지원되지 않는 파일 형식: {{filename}}',
+            autoSaveFailed: '자동 저장 실패 — 저장되지 않은 변경 사항은 메모리에 남아 있습니다',
+            savedNewerEdits: '저장됨 — 새로운 편집이 있어 편집 모드를 유지합니다'
         },
         modal: {
             confirmExit: '종료 확인',
@@ -1533,7 +1557,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Azul',
                 cyan: 'Cian',
                 green: 'Verde'
-            }
+            },
+            files: 'Archivos',
+            fileSettings: 'Configuración de archivos',
+            autoSave: 'Guardar cambios automáticamente',
+            confirmBeforeSave: 'Pedir confirmación antes de guardar'
         },
         menu: {
             file: 'Archivo',
@@ -1614,7 +1642,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagrama guardado como SVG',
             failedToSaveDiagram: 'Error al guardar diagrama',
             failedToCopyCode: 'Error al copiar código',
-            unsupportedFile: 'Tipo de archivo no compatible: {{filename}}'
+            unsupportedFile: 'Tipo de archivo no compatible: {{filename}}',
+            autoSaveFailed: 'Error de autoguardado — los cambios no guardados siguen en memoria',
+            savedNewerEdits: 'Guardado — se mantiene el modo de edición porque hay cambios más recientes'
         },
         modal: {
             confirmExit: 'Confirmar salida',
@@ -1740,7 +1770,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Bleu',
                 cyan: 'Cyan',
                 green: 'Vert'
-            }
+            },
+            files: 'Fichiers',
+            fileSettings: 'Paramètres des fichiers',
+            autoSave: 'Enregistrement automatique des modifications',
+            confirmBeforeSave: 'Demander confirmation avant d\'enregistrer'
         },
         menu: {
             file: 'Fichier',
@@ -1821,7 +1855,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagramme enregistré en SVG',
             failedToSaveDiagram: 'Échec de l\'enregistrement du diagramme',
             failedToCopyCode: 'Échec de la copie du code',
-            unsupportedFile: 'Type de fichier non pris en charge : {{filename}}'
+            unsupportedFile: 'Type de fichier non pris en charge : {{filename}}',
+            autoSaveFailed: 'Échec de l\'enregistrement automatique — les modifications non enregistrées restent en mémoire',
+            savedNewerEdits: 'Enregistré — maintien du mode édition car des modifications plus récentes existent'
         },
         modal: {
             confirmExit: 'Confirmer la sortie',
@@ -1947,7 +1983,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Blau',
                 cyan: 'Cyan',
                 green: 'Grün'
-            }
+            },
+            files: 'Dateien',
+            fileSettings: 'Datei-Einstellungen',
+            autoSave: 'Änderungen automatisch speichern',
+            confirmBeforeSave: 'Vor dem Speichern bestätigen'
         },
         menu: {
             file: 'Datei',
@@ -2028,7 +2068,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagramm als SVG gespeichert',
             failedToSaveDiagram: 'Diagramm speichern fehlgeschlagen',
             failedToCopyCode: 'Code kopieren fehlgeschlagen',
-            unsupportedFile: 'Nicht unterstützter Dateityp: {{filename}}'
+            unsupportedFile: 'Nicht unterstützter Dateityp: {{filename}}',
+            autoSaveFailed: 'Automatisches Speichern fehlgeschlagen — nicht gespeicherte Änderungen bleiben im Speicher',
+            savedNewerEdits: 'Gespeichert — Bearbeitungsmodus bleibt aktiv, da neuere Änderungen vorliegen'
         },
         modal: {
             confirmExit: 'Beenden bestätigen',
@@ -2154,7 +2196,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Azul',
                 cyan: 'Ciano',
                 green: 'Verde'
-            }
+            },
+            files: 'Arquivos',
+            fileSettings: 'Configurações de arquivos',
+            autoSave: 'Salvar edições automaticamente',
+            confirmBeforeSave: 'Pedir confirmação antes de salvar'
         },
         menu: {
             file: 'Arquivo',
@@ -2235,7 +2281,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagrama salvo como SVG',
             failedToSaveDiagram: 'Falha ao salvar diagrama',
             failedToCopyCode: 'Falha ao copiar código',
-            unsupportedFile: 'Tipo de arquivo não suportado: {{filename}}'
+            unsupportedFile: 'Tipo de arquivo não suportado: {{filename}}',
+            autoSaveFailed: 'Falha ao salvar automaticamente — alterações não salvas ainda estão na memória',
+            savedNewerEdits: 'Salvo — mantendo o modo de edição porque há edições mais recentes'
         },
         modal: {
             confirmExit: 'Confirmar saída',
@@ -2361,7 +2409,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Blu',
                 cyan: 'Ciano',
                 green: 'Verde'
-            }
+            },
+            files: 'File',
+            fileSettings: 'Impostazioni file',
+            autoSave: 'Salvataggio automatico delle modifiche',
+            confirmBeforeSave: 'Chiedi conferma prima di salvare'
         },
         menu: {
             file: 'File',
@@ -2442,7 +2494,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagramma salvato come SVG',
             failedToSaveDiagram: 'Impossibile salvare diagramma',
             failedToCopyCode: 'Impossibile copiare codice',
-            unsupportedFile: 'Tipo file non supportato: {{filename}}'
+            unsupportedFile: 'Tipo file non supportato: {{filename}}',
+            autoSaveFailed: 'Salvataggio automatico non riuscito — le modifiche non salvate sono ancora in memoria',
+            savedNewerEdits: 'Salvato — mantengo la modalità modifica perché ci sono modifiche più recenti'
         },
         modal: {
             confirmExit: 'Conferma uscita',
@@ -2568,7 +2622,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Niebieski',
                 cyan: 'Cyjan',
                 green: 'Zielony'
-            }
+            },
+            files: 'Pliki',
+            fileSettings: 'Ustawienia plików',
+            autoSave: 'Autozapis zmian',
+            confirmBeforeSave: 'Pytaj o potwierdzenie przed zapisem'
         },
         menu: {
             file: 'Plik',
@@ -2649,7 +2707,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagram zapisany jako SVG',
             failedToSaveDiagram: 'Nie udało się zapisać diagramu',
             failedToCopyCode: 'Nie udało się skopiować kodu',
-            unsupportedFile: 'Nieobsługiwany typ pliku: {{filename}}'
+            unsupportedFile: 'Nieobsługiwany typ pliku: {{filename}}',
+            autoSaveFailed: 'Autozapis nie powiódł się — niezapisane zmiany pozostają w pamięci',
+            savedNewerEdits: 'Zapisano — pozostaję w trybie edycji, ponieważ są nowsze zmiany'
         },
         modal: {
             confirmExit: 'Potwierdź wyjście',
@@ -2775,7 +2835,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Blauw',
                 cyan: 'Cyaan',
                 green: 'Groen'
-            }
+            },
+            files: 'Bestanden',
+            fileSettings: 'Bestandsinstellingen',
+            autoSave: 'Wijzigingen automatisch opslaan',
+            confirmBeforeSave: 'Bevestiging vragen voor opslaan'
         },
         menu: {
             file: 'Bestand',
@@ -2856,7 +2920,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagram opgeslagen als SVG',
             failedToSaveDiagram: 'Kan diagram niet opslaan',
             failedToCopyCode: 'Kan code niet kopiëren',
-            unsupportedFile: 'Niet-ondersteund bestandstype: {{filename}}'
+            unsupportedFile: 'Niet-ondersteund bestandstype: {{filename}}',
+            autoSaveFailed: 'Automatisch opslaan mislukt — niet-opgeslagen wijzigingen staan nog in het geheugen',
+            savedNewerEdits: 'Opgeslagen — bewerkmodus blijft actief omdat er nieuwere wijzigingen zijn'
         },
         modal: {
             confirmExit: 'Bevestig afsluiten',
@@ -2982,7 +3048,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Blå',
                 cyan: 'Cyan',
                 green: 'Grön'
-            }
+            },
+            files: 'Filer',
+            fileSettings: 'Filinställningar',
+            autoSave: 'Spara ändringar automatiskt',
+            confirmBeforeSave: 'Fråga om bekräftelse innan sparande'
         },
         menu: {
             file: 'Arkiv',
@@ -3063,7 +3133,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagram sparat som SVG',
             failedToSaveDiagram: 'Kunde inte spara diagram',
             failedToCopyCode: 'Kunde inte kopiera kod',
-            unsupportedFile: 'Filtyp stöds inte: {{filename}}'
+            unsupportedFile: 'Filtyp stöds inte: {{filename}}',
+            autoSaveFailed: 'Automatisk sparning misslyckades — osparade ändringar finns kvar i minnet',
+            savedNewerEdits: 'Sparat — stannar i redigeringsläge eftersom det finns nyare ändringar'
         },
         modal: {
             confirmExit: 'Bekräfta avslut',
@@ -3189,7 +3261,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Xanh dương',
                 cyan: 'Xanh lam',
                 green: 'Xanh lá'
-            }
+            },
+            files: 'Tệp',
+            fileSettings: 'Cài đặt tệp',
+            autoSave: 'Tự động lưu chỉnh sửa',
+            confirmBeforeSave: 'Hỏi xác nhận trước khi lưu'
         },
         menu: {
             file: 'Tệp',
@@ -3270,7 +3346,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Đã lưu sơ đồ dưới dạng SVG',
             failedToSaveDiagram: 'Không thể lưu sơ đồ',
             failedToCopyCode: 'Không thể sao chép mã',
-            unsupportedFile: 'Loại tệp không được hỗ trợ: {{filename}}'
+            unsupportedFile: 'Loại tệp không được hỗ trợ: {{filename}}',
+            autoSaveFailed: 'Tự động lưu thất bại — các thay đổi chưa lưu vẫn còn trong bộ nhớ',
+            savedNewerEdits: 'Đã lưu — vẫn ở chế độ chỉnh sửa vì bạn có chỉnh sửa mới hơn'
         },
         modal: {
             confirmExit: 'Xác nhận thoát',
@@ -3396,7 +3474,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Azul',
                 cyan: 'Ciano',
                 green: 'Verde'
-            }
+            },
+            files: 'Ficheiros',
+            fileSettings: 'Definições de ficheiros',
+            autoSave: 'Guardar edições automaticamente',
+            confirmBeforeSave: 'Pedir confirmação antes de guardar'
         },
         menu: {
             file: 'Ficheiro',
@@ -3477,7 +3559,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagrama guardado como SVG',
             failedToSaveDiagram: 'Falha ao guardar diagrama',
             failedToCopyCode: 'Falha ao copiar código',
-            unsupportedFile: 'Tipo de ficheiro não suportado: {{filename}}'
+            unsupportedFile: 'Tipo de ficheiro não suportado: {{filename}}',
+            autoSaveFailed: 'Falha ao guardar automaticamente — as alterações não guardadas continuam em memória',
+            savedNewerEdits: 'Guardado — a manter o modo de edição porque tem edições mais recentes'
         },
         modal: {
             confirmExit: 'Confirmar saída',
@@ -3603,7 +3687,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Albastru',
                 cyan: 'Cyan',
                 green: 'Verde'
-            }
+            },
+            files: 'Fișiere',
+            fileSettings: 'Setări fișiere',
+            autoSave: 'Salvare automată a modificărilor',
+            confirmBeforeSave: 'Solicită confirmare înainte de salvare'
         },
         menu: {
             file: 'Fișier',
@@ -3684,7 +3772,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagramă salvată ca SVG',
             failedToSaveDiagram: 'Eșec la salvarea diagramei',
             failedToCopyCode: 'Eșec la copierea codului',
-            unsupportedFile: 'Tip fișier neacceptat: {{filename}}'
+            unsupportedFile: 'Tip fișier neacceptat: {{filename}}',
+            autoSaveFailed: 'Salvarea automată a eșuat — modificările nesalvate sunt încă în memorie',
+            savedNewerEdits: 'Salvat — rămân în modul de editare deoarece există modificări mai noi'
         },
         modal: {
             confirmExit: 'Confirmare ieșire',
@@ -3810,7 +3900,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Kék',
                 cyan: 'Cián',
                 green: 'Zöld'
-            }
+            },
+            files: 'Fájlok',
+            fileSettings: 'Fájlbeállítások',
+            autoSave: 'Módosítások automatikus mentése',
+            confirmBeforeSave: 'Mentés előtt kérjen megerősítést'
         },
         menu: {
             file: 'Fájl',
@@ -3891,7 +3985,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagram SVG-ként mentve',
             failedToSaveDiagram: 'Diagram mentése sikertelen',
             failedToCopyCode: 'Kód másolása sikertelen',
-            unsupportedFile: 'Nem támogatott fájltípus: {{filename}}'
+            unsupportedFile: 'Nem támogatott fájltípus: {{filename}}',
+            autoSaveFailed: 'Automatikus mentés sikertelen — a nem mentett módosítások még a memóriában vannak',
+            savedNewerEdits: 'Elmentve — a szerkesztési mód marad, mert újabb módosítások vannak'
         },
         modal: {
             confirmExit: 'Kilépés megerősítése',
@@ -4017,7 +4113,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Modrá',
                 cyan: 'Azurová',
                 green: 'Zelená'
-            }
+            },
+            files: 'Soubory',
+            fileSettings: 'Nastavení souborů',
+            autoSave: 'Automaticky ukládat úpravy',
+            confirmBeforeSave: 'Před uložením se zeptat na potvrzení'
         },
         menu: {
             file: 'Soubor',
@@ -4098,7 +4198,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagram uložen jako SVG',
             failedToSaveDiagram: 'Nepodařilo se uložit diagram',
             failedToCopyCode: 'Nepodařilo se zkopírovat kód',
-            unsupportedFile: 'Nepodporovaný typ souboru: {{filename}}'
+            unsupportedFile: 'Nepodporovaný typ souboru: {{filename}}',
+            autoSaveFailed: 'Automatické uložení selhalo — neuložené změny zůstávají v paměti',
+            savedNewerEdits: 'Uloženo — zůstávám v režimu úprav, protože máte novější změny'
         },
         modal: {
             confirmExit: 'Potvrdit ukončení',
@@ -4230,7 +4332,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Modrá',
                 cyan: 'Azúrová',
                 green: 'Zelená'
-            }
+            },
+            files: 'Súbory',
+            fileSettings: 'Nastavenia súborov',
+            autoSave: 'Automaticky ukladať úpravy',
+            confirmBeforeSave: 'Pred uložením sa opýtať na potvrdenie'
         },
         menu: {
             file: 'Súbor',
@@ -4311,7 +4417,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagram uložený ako SVG',
             failedToSaveDiagram: 'Nepodarilo sa uložiť diagram',
             failedToCopyCode: 'Nepodarilo sa skopírovať kód',
-            unsupportedFile: 'Nepodporovaný typ súboru: {{filename}}'
+            unsupportedFile: 'Nepodporovaný typ súboru: {{filename}}',
+            autoSaveFailed: 'Automatické ukladanie zlyhalo — neuložené zmeny zostávajú v pamäti',
+            savedNewerEdits: 'Uložené — zostávam v režime úprav, pretože máte novšie zmeny'
         },
         modal: {
             confirmExit: 'Potvrdiť ukončenie',
@@ -4437,7 +4545,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Μπλε',
                 cyan: 'Κυανό',
                 green: 'Πράσινο'
-            }
+            },
+            files: 'Αρχεία',
+            fileSettings: 'Ρυθμίσεις αρχείων',
+            autoSave: 'Αυτόματη αποθήκευση αλλαγών',
+            confirmBeforeSave: 'Ζήτηση επιβεβαίωσης πριν την αποθήκευση'
         },
         menu: {
             file: 'Αρχείο',
@@ -4518,7 +4630,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Το διάγραμμα αποθηκεύτηκε ως SVG',
             failedToSaveDiagram: 'Αποτυχία αποθήκευσης διαγράμματος',
             failedToCopyCode: 'Αποτυχία αντιγραφής κώδικα',
-            unsupportedFile: 'Μη υποστηριζόμενος τύπος αρχείου: {{filename}}'
+            unsupportedFile: 'Μη υποστηριζόμενος τύπος αρχείου: {{filename}}',
+            autoSaveFailed: 'Η αυτόματη αποθήκευση απέτυχε — οι μη αποθηκευμένες αλλαγές παραμένουν στη μνήμη',
+            savedNewerEdits: 'Αποθηκεύτηκε — παραμένω σε λειτουργία επεξεργασίας επειδή υπάρχουν νεότερες αλλαγές'
         },
         modal: {
             confirmExit: 'Επιβεβαίωση εξόδου',
@@ -4644,7 +4758,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Sininen',
                 cyan: 'Syaani',
                 green: 'Vihreä'
-            }
+            },
+            files: 'Tiedostot',
+            fileSettings: 'Tiedostoasetukset',
+            autoSave: 'Tallenna muutokset automaattisesti',
+            confirmBeforeSave: 'Pyydä vahvistus ennen tallennusta'
         },
         menu: {
             file: 'Tiedosto',
@@ -4725,7 +4843,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Kaavio tallennettu SVG-muodossa',
             failedToSaveDiagram: 'Kaavion tallennus epäonnistui',
             failedToCopyCode: 'Koodin kopioiminen epäonnistui',
-            unsupportedFile: 'Ei-tuettu tiedostotyyppi: {{filename}}'
+            unsupportedFile: 'Ei-tuettu tiedostotyyppi: {{filename}}',
+            autoSaveFailed: 'Automaattinen tallennus epäonnistui — tallentamattomat muutokset ovat yhä muistissa',
+            savedNewerEdits: 'Tallennettu — pysytään muokkaustilassa, koska sinulla on uudempia muutoksia'
         },
         modal: {
             confirmExit: 'Vahvista poistuminen',
@@ -4851,7 +4971,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Blå',
                 cyan: 'Cyan',
                 green: 'Grøn'
-            }
+            },
+            files: 'Filer',
+            fileSettings: 'Filindstillinger',
+            autoSave: 'Gem ændringer automatisk',
+            confirmBeforeSave: 'Bed om bekræftelse før der gemmes'
         },
         menu: {
             file: 'Fil',
@@ -4932,7 +5056,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagram gemt som SVG',
             failedToSaveDiagram: 'Kunne ikke gemme diagram',
             failedToCopyCode: 'Kunne ikke kopiere kode',
-            unsupportedFile: 'Ikke-understøttet filtype: {{filename}}'
+            unsupportedFile: 'Ikke-understøttet filtype: {{filename}}',
+            autoSaveFailed: 'Automatisk gemning mislykkedes — ikke-gemte ændringer er stadig i hukommelsen',
+            savedNewerEdits: 'Gemt — bliver i redigeringstilstand, fordi du har nyere ændringer'
         },
         modal: {
             confirmExit: 'Bekræft afslutning',
@@ -5058,7 +5184,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Blå',
                 cyan: 'Cyan',
                 green: 'Grønn'
-            }
+            },
+            files: 'Filer',
+            fileSettings: 'Filinnstillinger',
+            autoSave: 'Lagre endringer automatisk',
+            confirmBeforeSave: 'Be om bekreftelse før lagring'
         },
         menu: {
             file: 'Fil',
@@ -5139,7 +5269,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagram lagret som SVG',
             failedToSaveDiagram: 'Kunne ikke lagre diagram',
             failedToCopyCode: 'Kunne ikke kopiere kode',
-            unsupportedFile: 'Ikke-støttet filtype: {{filename}}'
+            unsupportedFile: 'Ikke-støttet filtype: {{filename}}',
+            autoSaveFailed: 'Automatisk lagring mislyktes — ulagrede endringer er fortsatt i minnet',
+            savedNewerEdits: 'Lagret — forblir i redigeringsmodus fordi du har nyere endringer'
         },
         modal: {
             confirmExit: 'Bekreft avslutning',
@@ -5265,7 +5397,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Biru',
                 cyan: 'Sian',
                 green: 'Hijau'
-            }
+            },
+            files: 'Berkas',
+            fileSettings: 'Pengaturan berkas',
+            autoSave: 'Simpan otomatis perubahan',
+            confirmBeforeSave: 'Minta konfirmasi sebelum menyimpan'
         },
         menu: {
             file: 'Berkas',
@@ -5346,7 +5482,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagram disimpan sebagai SVG',
             failedToSaveDiagram: 'Gagal menyimpan diagram',
             failedToCopyCode: 'Gagal menyalin kode',
-            unsupportedFile: 'Jenis berkas tidak didukung: {{filename}}'
+            unsupportedFile: 'Jenis berkas tidak didukung: {{filename}}',
+            autoSaveFailed: 'Penyimpanan otomatis gagal — perubahan yang belum disimpan masih ada di memori',
+            savedNewerEdits: 'Tersimpan — tetap di mode edit karena ada perubahan yang lebih baru'
         },
         modal: {
             confirmExit: 'Konfirmasi Keluar',
@@ -5472,7 +5610,11 @@ export const translations: Record<LanguageCode, Translation> = {
                 blue: 'Mavi',
                 cyan: 'Camgöbeği',
                 green: 'Yeşil'
-            }
+            },
+            files: 'Dosyalar',
+            fileSettings: 'Dosya ayarları',
+            autoSave: 'Düzenlemeleri otomatik kaydet',
+            confirmBeforeSave: 'Kaydetmeden önce onay iste'
         },
         menu: {
             file: 'Dosya',
@@ -5553,7 +5695,9 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diyagram SVG olarak kaydedildi',
             failedToSaveDiagram: 'Diyagram kaydedilemedi',
             failedToCopyCode: 'Kod kopyalanamadı',
-            unsupportedFile: 'Desteklenmeyen dosya türü: {{filename}}'
+            unsupportedFile: 'Desteklenmeyen dosya türü: {{filename}}',
+            autoSaveFailed: 'Otomatik kaydetme başarısız — kaydedilmemiş değişiklikler hâlâ bellekte',
+            savedNewerEdits: 'Kaydedildi — daha yeni düzenlemeleriniz olduğu için düzenleme modunda kalınıyor'
         },
         modal: {
             confirmExit: 'Çıkışı Onayla',
