@@ -277,8 +277,8 @@ import { t } from './utils/i18n.js';
 		if (settings.restoreStateOnReopen) {
 			const hasUnsaved = tabManager.tabs.some((t) => t.isDirty || (t.path === '' && t.rawContent.trim() !== ''));
 			if (hasUnsaved) {
-				const response = await askCustom(t('modal.exit.unsaved.message'), {
-					title: t('modal.exit.unsaved.title'),
+				const response = await askCustom(t('modal.areYouSureYouWantToExit', settings.language), {
+					title: t('modal.confirmExit', settings.language),
 					kind: 'warning',
 					showSave: false,
 				});
@@ -1163,7 +1163,7 @@ import { t } from './utils/i18n.js';
 		}
 
 		const response = await askCustom(t('modal.youHaveUnsavedChanges', settings.language).replace('{title}', tab.title), {
-			title: t('modal.unsavedChanges.title'),
+			title: t('modal.unsavedChanges', settings.language),
 			kind: 'warning',
 			showSave: true,
 		});
@@ -1201,8 +1201,8 @@ import { t } from './utils/i18n.js';
 						return; // If save fails, stay in edit mode
 					}
 				} else {
-					const response = await askCustom(t('modal.unsavedChanges.viewMode.message'), {
-						title: t('modal.unsavedChanges.title'),
+					const response = await askCustom(t('modal.youHaveUnsavedChangesBeforeReturning', settings.language), {
+						title: t('modal.unsavedChanges', settings.language),
 						kind: 'warning',
 						showSave: true,
 					});
@@ -1829,8 +1829,8 @@ import { t } from './utils/i18n.js';
 						return;
 					}
 				} else {
-					const response = await askCustom(t('modal.unsavedChanges.splitView.message'), {
-						title: t('modal.unsavedChanges.title'),
+					const response = await askCustom(t('modal.youHaveUnsavedChangesBeforeClosingSplitView', settings.language), {
+						title: t('modal.unsavedChanges', settings.language),
 						kind: 'warning',
 						showSave: true,
 					});
@@ -2207,6 +2207,26 @@ import { t } from './utils/i18n.js';
 				await appWindow.onCloseRequested(async (event) => {
 					console.log('onCloseRequested triggered');
 					if (isForceExiting) return;
+
+					// CRITICAL: before serializing tab state to localStorage
+					// (the restore-on-reopen path), make sure all pending
+					// auto-save edits are actually flushed to disk. Without
+					// this, closing the window with auto-save on but
+					// confirmBeforeSave off would silently put unsaved edits
+					// in localStorage only and never persist them to file.
+					if (settings.autoSave && !settings.confirmBeforeSave) {
+						const dirtyWithPath = tabManager.tabs.filter(
+							(t) => t.isDirty && t.path !== '',
+						);
+						for (const tab of dirtyWithPath) {
+							cancelPendingAutoSave(tab.id);
+							try {
+								await saveContent(tab.id);
+							} catch (e) {
+								console.error('Flush-on-close save failed for tab', tab.id, e);
+							}
+						}
+					}
 
 					if (settings.restoreStateOnReopen) {
 						try {
