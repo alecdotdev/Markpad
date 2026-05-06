@@ -13,6 +13,8 @@
 	import TitleBar from './components/TitleBar.svelte';
 	import Editor from './components/Editor.svelte';
 	import Modal from './components/Modal.svelte';
+	import UpdateDialog from './components/UpdateDialog.svelte';
+	import { updateStore } from './stores/update.svelte.js';
 	import ContextMenu, { type ContextMenuItem } from './components/ContextMenu.svelte';
 	import Toc from './components/Toc.svelte';
 	import Toast from './components/Toast.svelte';
@@ -2244,6 +2246,11 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 			unlisteners.push(
+				await listen('menu-check-updates', () => {
+					updateStore.openDialog();
+				}),
+			);
+			unlisteners.push(
 				await appWindow.onCloseRequested(async (event) => {
 					console.log('onCloseRequested triggered');
 					if (isForceExiting) return;
@@ -2693,6 +2700,8 @@ import { t } from './utils/i18n.js';
 		onconfirm={handleModalConfirm}
 		onsave={handleModalSave}
 		oncancel={handleModalCancel} />
+
+	<UpdateDialog />
 
 	<div class="toast-container">
 		{#each toasts as toast (toast.id)}

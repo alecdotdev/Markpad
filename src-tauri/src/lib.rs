@@ -888,6 +888,8 @@ pub fn run() {
                 .set_focus();
         }))
         .plugin(tauri_plugin_prevent_default::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(
@@ -945,6 +947,55 @@ pub fn run() {
             }
 
             let _window = window_builder.build()?;
+
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+
+                let app_name = app.package_info().name.clone();
+
+                let check_item =
+                    MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
+
+                let app_submenu = SubmenuBuilder::new(app, &app_name)
+                    .item(&PredefinedMenuItem::about(
+                        app,
+                        Some(&format!("About {}", app_name)),
+                        None,
+                    )?)
+                    .separator()
+                    .item(&check_item)
+                    .separator()
+                    .item(&PredefinedMenuItem::services(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::hide(app, None)?)
+                    .item(&PredefinedMenuItem::hide_others(app, None)?)
+                    .item(&PredefinedMenuItem::show_all(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::quit(app, None)?)
+                    .build()?;
+
+                let edit_submenu = SubmenuBuilder::new(app, "Edit")
+                    .item(&PredefinedMenuItem::undo(app, None)?)
+                    .item(&PredefinedMenuItem::redo(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::cut(app, None)?)
+                    .item(&PredefinedMenuItem::copy(app, None)?)
+                    .item(&PredefinedMenuItem::paste(app, None)?)
+                    .item(&PredefinedMenuItem::select_all(app, None)?)
+                    .build()?;
+
+                let window_submenu = SubmenuBuilder::new(app, "Window")
+                    .item(&PredefinedMenuItem::minimize(app, None)?)
+                    .item(&PredefinedMenuItem::close_window(app, None)?)
+                    .build()?;
+
+                let menu = MenuBuilder::new(app)
+                    .items(&[&app_submenu, &edit_submenu, &window_submenu])
+                    .build()?;
+
+                app.set_menu(menu)?;
+            }
 
             let config_dir = app.path().app_config_dir()?;
             let theme_path = config_dir.join("theme.txt");
@@ -1026,6 +1077,11 @@ pub fn run() {
             cleanup_empty_img_dir,
             list_directory_contents
         ])
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "check-updates" {
+                let _ = app.emit("menu-check-updates", ());
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, _event| {

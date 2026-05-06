@@ -2,6 +2,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { getVersion } from '@tauri-apps/api/app';
 	import { settings, DEFAULT_FONTS, type OSType } from '../stores/settings.svelte.js';
+	import { updateStore } from '../stores/update.svelte.js';
 	import { fade, scale, fly } from 'svelte/transition';
 	import { t, getSupportedLanguages } from '../utils/i18n.js';
 	import type { LanguageCode } from '../utils/i18n.js';
@@ -250,6 +251,25 @@
 					</button>
 
 					<div class="nav-footer">
+						<button
+							class="check-updates-btn"
+							onclick={() => updateStore.openDialog()}
+							aria-label={t('menu.checkForUpdates', settings.language)}>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round">
+								<polyline points="23 4 23 10 17 10"></polyline>
+								<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+							</svg>
+							<span>{t('menu.checkForUpdates', settings.language)}</span>
+						</button>
 						<button
 							class="github-btn"
 							onclick={() =>
@@ -822,7 +842,8 @@
 		flex-direction: column;
 	}
 
-	.github-btn {
+	.github-btn,
+	.check-updates-btn {
 		display: flex;
 		align-items: center;
 		padding: 8px 12px;
@@ -836,10 +857,22 @@
 		text-align: left;
 		transition: all 0.1s;
 		gap: 8px;
+		font-family: inherit;
 	}
 
-	.github-btn:hover {
+	.github-btn:hover,
+	.check-updates-btn:hover {
 		opacity: 1;
+	}
+
+	.check-updates-btn svg {
+		width: 16px;
+		height: 16px;
+		flex-shrink: 0;
+	}
+
+	.check-updates-btn span {
+		margin-top: 1px;
 	}
 
 	.github-btn .github-icon {

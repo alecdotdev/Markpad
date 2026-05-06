@@ -164,3 +164,14 @@ All file operations go through Rust commands - never use Node.js fs APIs.
 - The app runs as SPA (ssr: false in +layout.ts)
 - Uses Monaco Editor for text editing
 - Supports Windows, macOS, and Linux
+
+## Versioning
+
+When bumping the app version, update both files in the same commit:
+
+- `package.json` `version`
+- `src-tauri/Cargo.toml` `version`
+
+Tauri runtime reads `app.package_info().version` from `Cargo.toml`, while the
+Tauri config and the frontend rely on `package.json`. Keeping them in sync is
+mandatory for `tauri-plugin-updater` to compare versions correctly.

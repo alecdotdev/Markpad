@@ -1,6 +1,6 @@
 [package]
 name = "Markpad"
-version = "2.3.1"
+version = "2.6.6"
 description = "Simple Markdown viewer and text editor"
 authors = ["you"]
 edition = "2021"
@@ -31,6 +31,8 @@ serde = { version = "1", features = ["derive"] }
 comrak = "0.18"
 serde_json = "1"
 tauri-plugin-prevent-default = "2.0.0-rc.1"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 notify = "6"
 regex = "1"
 
