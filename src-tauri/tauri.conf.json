@@ -29,7 +29,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage", "dmg", "rpm"],
+    "targets": ["deb", "appimage", "dmg", "rpm", "app", "nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -70,6 +71,15 @@
       "frameworks": [],
       "providerShortName": null,
       "signingIdentity": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/alecdotdev/Markpad/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIzMENBRkQ5NjFGRkM4NDcKUldSSHlQOWgyYThNczhINFc4VzVmVEcrS2JGRlRKRWFTVHVTVU9saC9WdFJQZjc0RjZzNmdQRGcK",
+      "windows": { "installMode": "passive" }
     }
   }
 }

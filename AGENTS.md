@@ -175,3 +175,14 @@ When bumping the app version, update both files in the same commit:
 Tauri runtime reads `app.package_info().version` from `Cargo.toml`, while the
 Tauri config and the frontend rely on `package.json`. Keeping them in sync is
 mandatory for `tauri-plugin-updater` to compare versions correctly.
+
+## Releasing
+
+See [RELEASING.md](RELEASING.md) for the maintainer-facing release runbook
+(keypair generation, GitHub Secrets setup, per-release workflow, troubleshooting).
+
+For agents: never modify `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`.
+That value is set once by the maintainer and shipping a different one breaks
+auto-update for all existing users — they have to manually re-install Markpad.
+The placeholder string in PR-2 is replaced exactly once, by the maintainer,
+right before the first auto-update-capable release.

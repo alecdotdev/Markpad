@@ -115,6 +115,9 @@ jobs:
       # --- Windows Build (x64) ---
       - name: Build Windows x64
         if: matrix.platform == 'windows-latest' && matrix.arch == 'x64'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
 
       - name: Upload Windows x64 Artifacts
@@ -127,6 +130,8 @@ jobs:
           cp src-tauri/target/release/Markpad.exe "Markpad_${VERSION}_x64.exe"
           cp "Markpad_${VERSION}_x64.exe" "MarkpadInstaller_${VERSION}_x64.exe"
           gh release upload v$VERSION "Markpad_${VERSION}_x64.exe" "MarkpadInstaller_${VERSION}_x64.exe" --clobber
+          find src-tauri/target/release/bundle/nsis -name "*-setup.exe" -exec gh release upload v$VERSION {} --clobber \;
+          find src-tauri/target/release/bundle/nsis -name "*-setup.exe.sig" -exec gh release upload v$VERSION {} --clobber \;
 
       - name: Create Chocolatey Package
         if: matrix.platform == 'windows-latest' && matrix.arch == 'x64'
@@ -153,6 +158,9 @@ jobs:
       # --- Windows Build (ARM64) ---
       - name: Build Windows ARM64
         if: matrix.platform == 'windows-latest' && matrix.arch == 'arm64'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --target aarch64-pc-windows-msvc
 
       - name: Upload Windows ARM64 Artifacts
@@ -165,6 +173,8 @@ jobs:
           cp src-tauri/target/aarch64-pc-windows-msvc/release/Markpad.exe "Markpad_${VERSION}_arm64.exe"
           cp "Markpad_${VERSION}_arm64.exe" "MarkpadInstaller_${VERSION}_arm64.exe"
           gh release upload v$VERSION "Markpad_${VERSION}_arm64.exe" "MarkpadInstaller_${VERSION}_arm64.exe" --clobber
+          find src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis -name "*-setup.exe" -exec gh release upload v$VERSION {} --clobber \;
+          find src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis -name "*-setup.exe.sig" -exec gh release upload v$VERSION {} --clobber \;
 
       # --- Linux Build ---
       - name: Pre-download AppImage Dependencies
@@ -177,6 +187,9 @@ jobs:
 
       - name: Build Linux
         if: matrix.platform == 'ubuntu-24.04'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
 
       - name: Upload Linux Artifacts
@@ -188,6 +201,7 @@ jobs:
           find src-tauri/target/release/bundle/deb -name "*.deb" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
           find src-tauri/target/release/bundle/rpm -name "*.rpm" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
           find src-tauri/target/release/bundle/appimage -name "*.AppImage" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
+          find src-tauri/target/release/bundle/appimage -name "*.AppImage.sig" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
 
       - name: Build and Publish Snap Package
         if: matrix.platform == 'ubuntu-24.04'
@@ -219,6 +233,8 @@ jobs:
         env:
           # Fix OOM issue
           NODE_OPTIONS: "--max-old-space-size=8192"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --target universal-apple-darwin
 
       - name: Upload MacOS Artifacts
@@ -228,3 +244,86 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name "*.dmg" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
+          find src-tauri/target/universal-apple-darwin/release/bundle/macos -name "*.app.tar.gz" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
+          find src-tauri/target/universal-apple-darwin/release/bundle/macos -name "*.app.tar.gz.sig" -exec gh release upload v${{ needs.create-release.outputs.version }} {} --clobber \;
+
+  generate-update-feed:
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    # Run even when one matrix leg failed (the existing sig_count > 0 sanity
+    # check inside still gates publication on at least one platform succeeding).
+    if: ${{ always() && needs.create-release.result == 'success' }}
+    steps:
+      - name: Generate latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p ./sigs
+          # Fail loudly on auth/rate-limit/transient issues — never silently
+          # publish an empty latest.json that would overwrite a previously-good one.
+          gh release download "v$VERSION" --repo "$REPO" --pattern "*.sig" --dir ./sigs
+
+          sig_count=$(find ./sigs -maxdepth 1 -name "*.sig" -type f | wc -l)
+          if [ "$sig_count" -eq 0 ]; then
+            echo "ERROR: no .sig files in release v${VERSION} — every matrix build either failed or didn't produce updater artifacts. Aborting before overwriting latest.json with an empty feed." >&2
+            exit 1
+          fi
+
+          # Default Tauri v2 updater mode: macOS .app.tar.gz, Windows NSIS *-setup.exe, Linux *.AppImage
+          # (NOT v1Compatible mode — which would use .nsis.zip / .AppImage.tar.gz wrappers)
+          MAC_SIG=$(ls ./sigs/*.app.tar.gz.sig 2>/dev/null | head -1 || true)
+          WIN_X64_SIG=$(ls ./sigs/*x64*-setup.exe.sig 2>/dev/null | head -1 || true)
+          WIN_ARM_SIG=$(ls ./sigs/*arm64*-setup.exe.sig 2>/dev/null | head -1 || true)
+          LINUX_SIG=$(ls ./sigs/*.AppImage.sig 2>/dev/null | head -1 || true)
+
+          platform_entry() {
+            local sig_file="$1"
+            if [ -z "$sig_file" ] || [ ! -f "$sig_file" ]; then
+              printf 'null'
+              return
+            fi
+            local artifact
+            artifact=$(basename "${sig_file%.sig}")
+            # Strip CR/LF that Windows-produced .sig files may carry; minisign signatures
+            # don't contain whitespace within the payload, so it's safe to remove.
+            local sig
+            sig=$(tr -d '\r\n' < "$sig_file")
+            local url="https://github.com/${REPO}/releases/download/v${VERSION}/${artifact}"
+            jq -n --arg sig "$sig" --arg url "$url" '{signature: $sig, url: $url}'
+          }
+
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          DARWIN_AARCH64=$(platform_entry "$MAC_SIG")
+          DARWIN_X86_64=$(platform_entry "$MAC_SIG")
+          WINDOWS_X86_64=$(platform_entry "$WIN_X64_SIG")
+          WINDOWS_AARCH64=$(platform_entry "$WIN_ARM_SIG")
+          LINUX_X86_64=$(platform_entry "$LINUX_SIG")
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "See https://github.com/${REPO}/releases/tag/v${VERSION}" \
+            --arg pub_date "$DATE" \
+            --argjson darwin_aarch64 "$DARWIN_AARCH64" \
+            --argjson darwin_x86_64 "$DARWIN_X86_64" \
+            --argjson windows_x86_64 "$WINDOWS_X86_64" \
+            --argjson windows_aarch64 "$WINDOWS_AARCH64" \
+            --argjson linux_x86_64 "$LINUX_X86_64" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: ({
+                "darwin-aarch64":   $darwin_aarch64,
+                "darwin-x86_64":    $darwin_x86_64,
+                "windows-x86_64":   $windows_x86_64,
+                "windows-aarch64":  $windows_aarch64,
+                "linux-x86_64":     $linux_x86_64
+              } | with_entries(select(.value != null)))
+            }' > latest.json
+
+          cat latest.json
+          gh release upload "v$VERSION" latest.json --clobber --repo "$REPO"
