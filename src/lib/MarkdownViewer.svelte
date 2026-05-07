@@ -131,11 +131,20 @@ import { t } from './utils/i18n.js';
 
 	// derived from tab manager
 	let currentFile = $derived(tabManager.activeTab?.path ?? '');
-	let isMarkdown = $derived(['md', 'markdown', 'mdown', 'mkd', 'txt'].includes(currentFile.split('.').pop()?.toLowerCase() || ''));
+	const markdownLinkExtensions = ['.md', '.markdown', '.mdown', '.mkd', '.txt'];
+	function hasMarkdownLinkExtension(path: string) {
+		const normalizedPath = path.toLowerCase();
+		return markdownLinkExtensions.some((ext) => normalizedPath.endsWith(ext));
+	}
+	let isMarkdown = $derived(hasMarkdownLinkExtension(currentFile));
 	let editorLanguage = $derived(getLanguage(currentFile));
 	let htmlContent = $derived(tabManager.activeTab?.content ?? '');
+	const markdownLinkExtensionPattern = markdownLinkExtensions
+		.map((ext) => ext.slice(1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+		.join('|');
+	const allowedMarkdownUriPattern = new RegExp(`^(?:(?:[a-z]:[^?#]*\\.(?:${markdownLinkExtensionPattern})(?:[?#].*)?$)|(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|asset|tauri):|[^a-z]|[a-z+.\\-]+(?:[^a-z+.\\-:]|$))`, 'i');
 	let sanitizedHtml = $derived(DOMPurify.sanitize(htmlContent, {
-		ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|asset|tauri):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+		ALLOWED_URI_REGEXP: allowedMarkdownUriPattern,
 	}));
 	let scrollTop = $derived(tabManager.activeTab?.scrollTop ?? 0);
 	let isScrolled = $derived(scrollTop > 0);
@@ -463,10 +472,21 @@ import { t } from './utils/i18n.js';
 		}
 	}
 
-	async function loadMarkdown(filePath: string, options: { navigate?: boolean; skipTabManagement?: boolean; preserveEditState?: boolean } = {}) {
+	type LoadMarkdownOptions = {
+		navigate?: boolean;
+		skipTabManagement?: boolean;
+		preserveEditState?: boolean;
+		resetScrollHistory?: boolean;
+	};
+
+	async function loadMarkdown(filePath: string, options: LoadMarkdownOptions = {}) {
 		showHome = false;
 		let existing = null;
 		try {
+			if (options.resetScrollHistory || filePath !== currentFile) {
+				scrollHistory = [];
+				scrollFuture = [];
+			}
 			if (options.navigate && tabManager.activeTab) {
 				tabManager.navigate(tabManager.activeTab.id, filePath);
 			} else if (!options.skipTabManagement) {
@@ -482,8 +502,7 @@ import { t } from './utils/i18n.js';
 			const activeId = tabManager.activeTabId;
 			if (!activeId) return;
 
-			const ext = filePath.split('.').pop()?.toLowerCase();
-			const isMarkdown = ['md', 'markdown', 'mdown', 'mkd', 'txt'].includes(ext || '');
+			const isMarkdown = hasMarkdownLinkExtension(filePath);
 			const tab = tabManager.tabs.find((t) => t.id === activeId);
 
 			if (isMarkdown) {
@@ -696,7 +715,7 @@ import { t } from './utils/i18n.js';
 	}
 
 	$effect(() => {
-		if (htmlContent && markdownBody && !isEditing && hljs && renderMathInElement && mermaid) renderRichContent();
+		if (sanitizedHtml && markdownBody && !isEditing && hljs && renderMathInElement && mermaid) renderRichContent();
 	});
 
 	$effect(() => {
@@ -933,7 +952,103 @@ import { t } from './utils/i18n.js';
 		wrapper.classList.toggle('is-collapsed', !isCurrentlyCollapsed);
 	}
 
-	function handleLinkClick(e: MouseEvent) {
+	type RelativeMarkdownTarget = {
+		path: string;
+		hash: string;
+	};
+
+	function decodeLinkPath(path: string) {
+		try {
+			return decodeURIComponent(path);
+		} catch {
+			return path;
+		}
+	}
+
+	function normalizeComparableMarkdownPath(path: string) {
+		const normalized = path.replace(/\\/g, '/');
+		const comparable = normalized.startsWith('//')
+			? `//${normalized.slice(2).replace(/\/+/g, '/')}`
+			: normalized.replace(/\/+/g, '/');
+		if (settings.osType === 'windows' || /^[a-z]:/i.test(comparable) || comparable.startsWith('//')) {
+			return comparable.toLowerCase();
+		}
+		return comparable;
+	}
+
+	function isAbsoluteMarkdownPath(path: string) {
+		return path.startsWith('/') || path.startsWith('\\') || /^[a-z]:/i.test(path);
+	}
+
+	function getRelativeMarkdownTarget(href: string): RelativeMarkdownTarget | null {
+		const pathWithoutHash = href.split('#')[0].split('?')[0];
+		const isMarkdownTarget = hasMarkdownLinkExtension(pathWithoutHash);
+		const isWindowsDrivePath = /^[a-z]:/i.test(href);
+		const isProtocolRelativeExternal = href.startsWith('//');
+		const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(href);
+		if (!isMarkdownTarget || isProtocolRelativeExternal || (hasScheme && !isWindowsDrivePath)) return null;
+
+		const hashIndex = href.indexOf('#');
+		return {
+			path: decodeLinkPath(pathWithoutHash),
+			hash: hashIndex === -1 ? '' : href.slice(hashIndex + 1)
+		};
+	}
+
+	function scrollToAnchor(anchor: string, options: { pushHistory?: boolean } = {}) {
+		let id = decodeLinkPath(anchor);
+		if (id.startsWith('^')) {
+			id = id.substring(1);
+		}
+		const el =
+			(markdownBody?.querySelector(`[id="${CSS.escape(id)}"]`) as HTMLElement | null) ||
+			(markdownBody?.querySelector(`[name="${CSS.escape(id)}"]`) as HTMLElement | null);
+		if (el && markdownBody) {
+			if (options.pushHistory !== false) pushScrollHistory();
+			const containerRect = markdownBody.getBoundingClientRect();
+			const elRect = el.getBoundingClientRect();
+			const targetScrollTop = elRect.top - containerRect.top + markdownBody.scrollTop - 60;
+			markdownBody.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
+			return true;
+		}
+		return false;
+	}
+
+	async function scrollToAnchorWhenReady(anchor: string, options: { pushHistory?: boolean } = {}, expectedFile = currentFile) {
+		const baseAttempts = 20;
+		const maxAttempts = 60;
+		for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+			if (expectedFile && currentFile !== expectedFile) return false;
+			await tick();
+			if (scrollToAnchor(anchor, options)) return true;
+			const isFullDocumentLoading = tabManager.activeTabId ? loadingTabs.includes(tabManager.activeTabId) : false;
+			if (attempt >= baseAttempts && !isFullDocumentLoading) return false;
+			await new Promise((resolve) => setTimeout(resolve, attempt < 5 ? 50 : 250));
+		}
+		return false;
+	}
+
+	async function openRelativeMarkdownTarget(target: RelativeMarkdownTarget) {
+		const isAbsoluteTarget = isAbsoluteMarkdownPath(target.path);
+		if (!currentFile && !isAbsoluteTarget) return;
+		const resolved = isAbsoluteTarget ? target.path : resolvePath(currentFile, target.path);
+		if (normalizeComparableMarkdownPath(resolved) === normalizeComparableMarkdownPath(currentFile)) {
+			if (target.hash) {
+				await scrollToAnchorWhenReady(target.hash);
+			} else if (markdownBody) {
+				pushScrollHistory();
+				markdownBody.scrollTo({ top: 0, behavior: 'smooth' });
+			}
+			return;
+		}
+		if (tabManager.activeTabId && !(await canCloseTab(tabManager.activeTabId))) return;
+		await loadMarkdown(resolved, { navigate: true });
+		if (target.hash) {
+			await scrollToAnchorWhenReady(target.hash, { pushHistory: false }, resolved);
+		}
+	}
+
+	async function handleLinkClick(e: MouseEvent) {
 		const target = e.target as HTMLElement;
 
 		// header fold toggle
@@ -986,20 +1101,16 @@ import { t } from './utils/i18n.js';
 			const href = a.getAttribute('href');
 			if (href?.startsWith('#') && href.length > 1) {
 				e.preventDefault();
-				let id = href.substring(1);
-				if (id.startsWith('^')) {
-					id = id.substring(1);
-				}
-				const el =
-					(markdownBody?.querySelector(`[id="${CSS.escape(id)}"]`) as HTMLElement | null) ||
-					(markdownBody?.querySelector(`[name="${CSS.escape(id)}"]`) as HTMLElement | null);
-				if (el && markdownBody) {
-					pushScrollHistory();
-					const containerRect = markdownBody.getBoundingClientRect();
-					const elRect = el.getBoundingClientRect();
-					const targetScrollTop = elRect.top - containerRect.top + markdownBody.scrollTop - 60;
-					markdownBody.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
-				}
+				await scrollToAnchorWhenReady(href.substring(1));
+				return;
+			}
+
+			const relativeMarkdownTarget = href ? getRelativeMarkdownTarget(href) : null;
+			if (relativeMarkdownTarget) {
+				e.preventDefault();
+				e.stopPropagation();
+				await openRelativeMarkdownTarget(relativeMarkdownTarget);
+				return;
 			}
 		}
 
@@ -1775,16 +1886,11 @@ import { t } from './utils/i18n.js';
 			if (!rawHref) return;
 
 			if (rawHref.startsWith('#')) return;
-			const isMarkdown = ['.md', '.markdown', '.mdown', '.mkd', '.txt'].some((ext) => {
-				const urlNoHash = rawHref.split('#')[0].split('?')[0];
-				return urlNoHash.toLowerCase().endsWith(ext);
-			});
 
-			if (isMarkdown && !rawHref.match(/^[a-z]+:\/\//i)) {
+			const relativeMarkdownTarget = getRelativeMarkdownTarget(rawHref);
+			if (relativeMarkdownTarget) {
 				event.preventDefault();
-				const urlNoHash = rawHref.split('#')[0].split('?')[0];
-				const resolved = resolvePath(currentFile, urlNoHash);
-				await loadMarkdown(resolved, { navigate: true });
+				await openRelativeMarkdownTarget(relativeMarkdownTarget);
 				return;
 			}
 
@@ -1998,7 +2104,9 @@ import { t } from './utils/i18n.js';
 				markdownBody.scrollTo({ top: pos, behavior: 'smooth' });
 			} else if (tabManager.activeTabId) {
 				const path = tabManager.goBack(tabManager.activeTabId);
-				if (path) loadMarkdown(path, { skipTabManagement: true });
+				if (path) {
+					loadMarkdown(path, { skipTabManagement: true, resetScrollHistory: true });
+				}
 			}
 		} else if (e.button === 4) {
 			// Forward
@@ -2010,7 +2118,9 @@ import { t } from './utils/i18n.js';
 				markdownBody.scrollTo({ top: pos, behavior: 'smooth' });
 			} else if (tabManager.activeTabId) {
 				const path = tabManager.goForward(tabManager.activeTabId);
-				if (path) loadMarkdown(path, { skipTabManagement: true });
+				if (path) {
+					loadMarkdown(path, { skipTabManagement: true, resetScrollHistory: true });
+				}
 			}
 		}
 	}
@@ -2382,8 +2492,7 @@ import { t } from './utils/i18n.js';
 							});
 						} else if (dragTarget === 'preview' || (!isSplit && !isEditing)) {
 							paths.forEach(path => {
-								const ext = path.split('.').pop()?.toLowerCase();
-								if (ext && ['md', 'markdown', 'txt'].includes(ext)) {
+								if (hasMarkdownLinkExtension(path)) {
 									loadMarkdown(path);
 								} else {
 									const filename = path.split(/[\/\\]/).pop() || 'File';
@@ -2565,7 +2674,7 @@ import { t } from './utils/i18n.js';
 								bind:this={markdownBody}
 								contenteditable="false"
 								class="markdown-body {isFullWidth ? 'full-width' : ''} {settings.showToc ? 'toc-active' : ''}"
-								bind:innerHTML={htmlContent}
+								bind:innerHTML={sanitizedHtml}
 								onscroll={handleScroll}
 								onclick={handleLinkClick}
 								onkeydown={(e) => { if(e.key === 'Enter' || e.key === ' ') handleLinkClick(e as unknown as MouseEvent); }}
@@ -2618,7 +2727,7 @@ import { t } from './utils/i18n.js';
 								class:on-right={settings.tocSide === 'right'}>
 								<Toc 
 										{markdownBody} 
-										{htmlContent} 
+										htmlContent={sanitizedHtml}
 										onBeforeJump={pushScrollHistory} 
 										{collapsedHeaders} 
 										ontoggleFold={toggleFold} 
