@@ -1277,26 +1277,42 @@ body {
 
 .markdown-body ul li.task-list-item,
 .markdown-body .task-list-item {
+	--task-checkbox-size: 15px;
 	padding-left: 0;
 	margin-left: -1.5em;
-	display: flex;
+	display: grid;
+	grid-template-columns: var(--task-checkbox-size) minmax(0, 1fr);
+	column-gap: 0.5em;
 	align-items: baseline;
-	gap: 0.5em;
+}
+
+.markdown-body .task-text {
+	display: block;
+	min-width: 0;
+	grid-column: 2;
+}
+
+.markdown-body .task-list-item > :not(input[data-task-checkbox]):not(.task-text) {
+	grid-column: 2;
+}
+
+.markdown-body .task-list-item > input[data-task-checkbox] + :not(.task-text) {
+	grid-row: 2;
 }
 
 .markdown-body input[data-task-checkbox] {
 	-webkit-appearance: none;
 	appearance: none;
-	width: 15px;
-	height: 15px;
-	min-width: 15px;
+	width: var(--task-checkbox-size, 15px);
+	height: var(--task-checkbox-size, 15px);
+	min-width: var(--task-checkbox-size, 15px);
 	border: 1.5px solid var(--color-border-default);
 	border-radius: 3px;
 	background: transparent;
 	cursor: pointer;
 	position: relative;
 	top: 2px;
-	flex-shrink: 0;
+	grid-column: 1;
 	transition: background-color 0.1s ease, border-color 0.1s ease;
 }
 

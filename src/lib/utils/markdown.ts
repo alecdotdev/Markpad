@@ -311,36 +311,155 @@ function processBlockIds(root: Element, doc: Document) {
 	}
 }
 
+const taskTextBoundaryTags = new Set([
+	"ADDRESS",
+	"ARTICLE",
+	"ASIDE",
+	"BLOCKQUOTE",
+	"DD",
+	"DETAILS",
+	"DIALOG",
+	"DIV",
+	"DL",
+	"DT",
+	"FIELDSET",
+	"FIGCAPTION",
+	"FIGURE",
+	"FOOTER",
+	"FORM",
+	"H1",
+	"H2",
+	"H3",
+	"H4",
+	"H5",
+	"H6",
+	"HEADER",
+	"HR",
+	"LI",
+	"MAIN",
+	"NAV",
+	"OL",
+	"P",
+	"PRE",
+	"SECTION",
+	"TABLE",
+	"UL",
+]);
+
+function stripLeadingWhitespace(nodes: Node[]) {
+	for (let index = 0; index < nodes.length; ) {
+		const node = nodes[index];
+		if (node.nodeType !== 3) break;
+
+		const trimmed = node.textContent?.replace(/^\s+/, "") || "";
+		if (trimmed) {
+			node.textContent = trimmed;
+			break;
+		}
+		node.parentNode?.removeChild(node);
+		nodes.splice(index, 1);
+	}
+}
+
+function isWhitespaceText(node: Node) {
+	return node.nodeType === 3 && !node.textContent?.trim();
+}
+
+function startsWithNode(element: Element, target: Node) {
+	const firstContentNode = Array.from(element.childNodes).find(
+		(node) => !isWhitespaceText(node),
+	);
+	return firstContentNode === target;
+}
+
+function isTaskCheckbox(input: Element, li: Element) {
+	const looksRenderedByTaskList =
+		input.hasAttribute("data-task-checkbox") ||
+		li.classList.contains("task-list-item");
+	if (!looksRenderedByTaskList) return false;
+
+	const inputParent = input.parentElement;
+	if (inputParent === li) {
+		return startsWithNode(li, input);
+	}
+
+	return (
+		inputParent?.tagName === "P" &&
+		inputParent.parentElement === li &&
+		startsWithNode(li, inputParent) &&
+		startsWithNode(inputParent, input)
+	);
+}
+
 function processTaskItems(root: Element) {
 	for (const input of Array.from(
 		root.querySelectorAll('li input[type="checkbox"]'),
 	)) {
+		const li = input.closest("li");
+		if (!li) continue;
+		if (!isTaskCheckbox(input, li)) continue;
+
 		input.setAttribute("data-task-checkbox", "");
 		input.removeAttribute("disabled");
 		(input as HTMLInputElement).style.cursor = "pointer";
 
-		const li = input.closest("li");
-		if (!li) continue;
+		const inputParagraph = input.parentElement;
+		if (inputParagraph?.tagName === "P" && inputParagraph.parentElement === li) {
+			li.insertBefore(input, inputParagraph);
+		}
 
 		const nodes = Array.from(li.childNodes);
 		const inputIdx = nodes.indexOf(input);
+		if (inputIdx === -1) continue;
 		const afterInput = nodes.slice(inputIdx + 1);
 
-		const inlineNodes = [];
+		const inlineNodes: Node[] = [];
+		let paragraphNode: Element | null = null;
 		for (const n of afterInput) {
-			if (
-				n.nodeType === 1 &&
-				["P", "DIV", "UL", "OL"].includes((n as Element).tagName)
-			)
+			if (n.nodeType === 3 && !n.textContent?.trim()) {
+				inlineNodes.push(n);
+				continue;
+			}
+
+			if (n.nodeType === 1 && taskTextBoundaryTags.has((n as Element).tagName)) {
+				const onlyLeadingWhitespace = inlineNodes.every(
+					(node) => node.nodeType === 3 && !node.textContent?.trim(),
+				);
+				if ((n as Element).tagName === "P" && onlyLeadingWhitespace) {
+					paragraphNode = n as Element;
+				}
 				break;
+			}
 			inlineNodes.push(n);
 		}
 
-		if (inlineNodes.length > 0) {
+		const hasInlineText = inlineNodes.some(
+			(n) => n.nodeType !== 3 || n.textContent?.trim(),
+		);
+		if (paragraphNode) {
+			stripLeadingWhitespace(inlineNodes);
+			const paragraphChildren = Array.from(paragraphNode.childNodes);
+			const hasParagraphText = paragraphChildren.some(
+				(n) => n.nodeType !== 3 || n.textContent?.trim(),
+			);
+			if (!hasParagraphText) {
+				paragraphNode.remove();
+			} else {
+				stripLeadingWhitespace(paragraphChildren);
+				const wrapper = root.ownerDocument!.createElement("span");
+				wrapper.className = "task-text";
+				for (const n of paragraphChildren) wrapper.appendChild(n);
+				paragraphNode.replaceWith(wrapper);
+			}
+		} else if (hasInlineText) {
+			const insertBeforeNode = afterInput[inlineNodes.length] || null;
+			stripLeadingWhitespace(inlineNodes);
 			const wrapper = root.ownerDocument!.createElement("span");
 			wrapper.className = "task-text";
 			for (const n of inlineNodes) wrapper.appendChild(n);
-			li.insertBefore(wrapper, afterInput[inlineNodes.length] || null);
+			li.insertBefore(wrapper, insertBeforeNode);
+		} else {
+			stripLeadingWhitespace(inlineNodes);
 		}
 
 		if ((input as HTMLInputElement).checked) {
