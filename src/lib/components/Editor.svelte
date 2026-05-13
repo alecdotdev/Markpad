@@ -68,7 +68,7 @@
 	let cursorCount = $state(0);
 	let wordCount = $state(0);
 	let currentLanguage = $state("markdown");
-	let currentTabId = $state(tabManager.activeTabId);
+	let currentTabId = tabManager.activeTabId;
 	let uiLanguage = $state(settings.language);
 
 	$effect(() => {
@@ -198,14 +198,12 @@
 
 		if (tabManager.activeTab?.editorViewState) {
 			editor.restoreViewState(tabManager.activeTab.editorViewState);
-		}
-
-		let scrolled = false;
-		if (tabManager.activeTab) {
+		} else if (tabManager.activeTab) {
+			let scrolled = false;
 			if (tabManager.activeTab.anchorLine > 0) {
 				editor.revealLineNearTop(
 					Math.max(1, tabManager.activeTab.anchorLine - 2),
-					monaco.editor.ScrollType.Smooth,
+					monaco.editor.ScrollType.Immediate,
 				);
 				scrolled = true;
 			}
