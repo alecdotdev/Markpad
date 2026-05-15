@@ -147,6 +147,7 @@ export class SettingsStore {
 	occurrencesHighlight = $state(false);
 	showWhitespace = $state(false);
 	startInEditor = $state(false);
+	showRecentFiles = $state(true);
 	editorMaxWidth = $state(80);
 	pinnedToc = $state(false);
 	tocSide = $state<'left' | 'right'>('left');
@@ -187,6 +188,7 @@ export class SettingsStore {
 			const savedShowToc = localStorage.getItem('editor.showToc');
 			const savedHighlightColor = localStorage.getItem('editor.highlightColor');
 			const savedStartInEditor = localStorage.getItem('editor.startInEditor');
+			const savedShowRecentFiles = localStorage.getItem('editor.showRecentFiles');
 			const savedEditorMaxWidth = localStorage.getItem('editor.maxWidth');
 			const savedPinnedToc = localStorage.getItem('editor.pinnedToc');
 			const savedTocSide = localStorage.getItem('editor.tocSide');
@@ -229,6 +231,7 @@ export class SettingsStore {
 			if (savedShowToc !== null) this.showToc = savedShowToc === 'true';
 			if (savedHighlightColor !== null) this.highlightColor = savedHighlightColor;
 			if (savedStartInEditor !== null) this.startInEditor = savedStartInEditor === 'true';
+			if (savedShowRecentFiles !== null) this.showRecentFiles = savedShowRecentFiles === 'true';
 			if (savedEditorMaxWidth !== null) this.editorMaxWidth = parseFontSize(savedEditorMaxWidth, 80, 20, 500);
 			if (savedPinnedToc !== null) this.pinnedToc = savedPinnedToc === 'true';
 			if (savedTocSide !== null) this.tocSide = savedTocSide as 'left' | 'right';
@@ -294,6 +297,7 @@ export class SettingsStore {
 					localStorage.setItem('editor.showToc', String(this.showToc));
 					localStorage.setItem('editor.highlightColor', this.highlightColor);
 					localStorage.setItem('editor.startInEditor', String(this.startInEditor));
+					localStorage.setItem('editor.showRecentFiles', String(this.showRecentFiles));
 					localStorage.setItem('editor.maxWidth', String(this.editorMaxWidth));
 					localStorage.setItem('editor.pinnedToc', String(this.pinnedToc));
 				  localStorage.setItem('editor.tocSide', this.tocSide);
@@ -358,6 +362,10 @@ export class SettingsStore {
 
 	toggleRestoreStateOnReopen() {
 		this.restoreStateOnReopen = !this.restoreStateOnReopen;
+	}
+
+	toggleShowRecentFiles() {
+		this.showRecentFiles = !this.showRecentFiles;
 	}
 
 	toggleZenMode() {

@@ -358,7 +358,7 @@
 				{t('menu.openFile', currentLanguage)}
 				<span class="menu-shortcut">{modifier}+O</span>
 			</button>
-					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.isEditing)}
+					{#if currentFile !== '' || (tabManager.activeTab && (tabManager.activeTab.isEditing || tabManager.activeTab.content))}
 						<button
 						class="home-menu-item"
 						onclick={() => {
