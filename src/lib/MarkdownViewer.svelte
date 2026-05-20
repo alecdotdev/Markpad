@@ -2928,7 +2928,7 @@ import { t } from './utils/i18n.js';
 		box-sizing: border-box;
 		min-width: 200px;
 		margin: 0;
-		padding: 50px clamp(24px, 5vw, 50px);
+		padding: 50px max(24px, calc((100% - 780px) / 2));
 		height: 100%;
 		overflow-y: auto;
 		overflow-x: hidden;
