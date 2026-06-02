@@ -655,6 +655,13 @@
 								</label>
 							</div>
 							<div class="setting-item">
+								<label for="appearance-recent-files">{t('settings.showRecentFiles', settings.language)}</label>
+								<label class="toggle">
+									<input id="appearance-recent-files" type="checkbox" checked={settings.showRecentFiles} onchange={() => settings.toggleShowRecentFiles()} />
+									<span class="toggle-slider"></span>
+								</label>
+							</div>
+							<div class="setting-item">
 							<label for="appearance-toc">{t('settings.showTableOfContents', settings.language)}</label>
 							<label class="toggle">
 								<input id="appearance-toc" type="checkbox" checked={settings.showToc} onchange={() => settings.toggleToc()} />
