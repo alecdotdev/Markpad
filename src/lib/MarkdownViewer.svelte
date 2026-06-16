@@ -2035,6 +2035,10 @@ import { t } from './utils/i18n.js';
 			e.preventDefault();
 			closeFile();
 		}
+		if (cmdOrCtrl && e.code === 'F4') {
+			e.preventDefault();
+			closeFile();
+		}
 		if (cmdOrCtrl && !e.shiftKey && key === 't') {
 			e.preventDefault();
 			tabManager.addHomeTab();
