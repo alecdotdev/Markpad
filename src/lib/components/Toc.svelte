@@ -289,7 +289,7 @@
 
 <style>
 	.toc-container {
-		width: 240px;
+		width: 100%;
 		flex-shrink: 0;
 		height: 100%;
 		background-color: transparent;

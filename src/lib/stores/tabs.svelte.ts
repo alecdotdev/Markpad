@@ -1,5 +1,14 @@
 import { t } from '../utils/i18n.js';
 import { settings } from './settings.svelte.js';
+import {
+	canGoBackInHistory,
+	canGoForwardInHistory,
+	createFileHistory,
+	goBackInHistory,
+	goForwardInHistory,
+	navigateFileHistory,
+	replaceCurrentHistoryEntry,
+} from '../utils/tabHistory.js';
 
 export interface Tab {
 	id: string;
@@ -68,6 +77,7 @@ class TabManager {
 	addTab(path: string, content: string = '') {
 		const id = crypto.randomUUID();
 		const filename = path.split('\\').pop()?.split('/').pop() || t('tabs.untitled', settings.language);
+		const fileHistory = createFileHistory(path, content);
 
 		this.tabs.push({
 			id,
@@ -79,8 +89,8 @@ class TabManager {
 			scrollTop: 0,
 			isDirty: false,
 			isEditing: false,
-			history: [content],
-			historyIndex: 0,
+			history: fileHistory.history,
+			historyIndex: fileHistory.historyIndex,
 			editorViewState: null,
 			scrollPercentage: 0,
 			anchorLine: 0,
@@ -290,12 +300,14 @@ class TabManager {
 			tab.path = path;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
-			if (tab.history.length > 0) {
-				tab.history[tab.historyIndex] = path;
-			} else {
-				tab.history = [path];
-				tab.historyIndex = 0;
-			}
+			const fileHistory = replaceCurrentHistoryEntry({
+				currentPath: tab.path,
+				targetPath: path,
+				history: tab.history,
+				historyIndex: tab.historyIndex,
+			});
+			tab.history = fileHistory.history;
+			tab.historyIndex = fileHistory.historyIndex;
 		}
 	}
 
@@ -304,9 +316,14 @@ class TabManager {
 		if (tab) {
 			tab.path = newPath;
 			tab.title = newPath.split(/[/\\]/).pop() || 'Untitled';
-			if (tab.history.length > 0) {
-				tab.history[tab.historyIndex] = newPath;
-			}
+			const fileHistory = replaceCurrentHistoryEntry({
+				currentPath: tab.path,
+				targetPath: newPath,
+				history: tab.history,
+				historyIndex: tab.historyIndex,
+			});
+			tab.history = fileHistory.history;
+			tab.historyIndex = fileHistory.historyIndex;
 		}
 	}
 
@@ -315,9 +332,14 @@ class TabManager {
 		if (tab) {
 			if (tab.path === path) return;
 
-			tab.history = tab.history.slice(0, tab.historyIndex + 1);
-			tab.history.push(path);
-			tab.historyIndex++;
+			const fileHistory = navigateFileHistory({
+				currentPath: tab.path,
+				targetPath: path,
+				history: tab.history,
+				historyIndex: tab.historyIndex,
+			});
+			tab.history = fileHistory.history;
+			tab.historyIndex = fileHistory.historyIndex;
 
 			tab.path = path;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
@@ -328,19 +350,22 @@ class TabManager {
 
 	canGoBack(id: string): boolean {
 		const tab = this.tabs.find(t => t.id === id);
-		return tab ? tab.historyIndex > 0 : false;
+		return tab ? canGoBackInHistory(tab) : false;
 	}
 
 	canGoForward(id: string): boolean {
 		const tab = this.tabs.find(t => t.id === id);
-		return tab ? tab.historyIndex < tab.history.length - 1 : false;
+		return tab ? canGoForwardInHistory(tab) : false;
 	}
 
 	goBack(id: string): string | null {
 		const tab = this.tabs.find(t => t.id === id);
-		if (tab && tab.historyIndex > 0) {
-			tab.historyIndex--;
-			const path = tab.history[tab.historyIndex];
+		if (tab) {
+			const result = goBackInHistory(tab);
+			if (!result.path) return null;
+			const path = result.path;
+			tab.history = result.history;
+			tab.historyIndex = result.historyIndex;
 			tab.path = path;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
@@ -351,9 +376,12 @@ class TabManager {
 
 	goForward(id: string): string | null {
 		const tab = this.tabs.find(t => t.id === id);
-		if (tab && tab.historyIndex < tab.history.length - 1) {
-			tab.historyIndex++;
-			const path = tab.history[tab.historyIndex];
+		if (tab) {
+			const result = goForwardInHistory(tab);
+			if (!result.path) return null;
+			const path = result.path;
+			tab.history = result.history;
+			tab.historyIndex = result.historyIndex;
 			tab.path = path;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;

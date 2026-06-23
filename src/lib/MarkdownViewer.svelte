@@ -22,6 +22,14 @@
 	import { exportAsHtml as _exportHtml, exportAsPdf } from './utils/export';
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
+import {
+	decodeLinkPath,
+	getMarkdownLinkTarget as getRelativeMarkdownTarget,
+	hasMarkdownLinkExtension,
+	normalizeComparableMarkdownPath,
+	resolveMarkdownTargetPath,
+	type MarkdownLinkTarget as RelativeMarkdownTarget,
+} from './utils/markdownLinks.js';
 
 	const appWindow = getCurrentWindow();
 
@@ -154,10 +162,6 @@ import { t } from './utils/i18n.js';
 	// derived from tab manager
 	let currentFile = $derived(tabManager.activeTab?.path ?? '');
 	const markdownLinkExtensions = ['.md', '.markdown', '.mdown', '.mkd', '.txt'];
-	function hasMarkdownLinkExtension(path: string) {
-		const normalizedPath = path.toLowerCase();
-		return markdownLinkExtensions.some((ext) => normalizedPath.endsWith(ext));
-	}
 	let isMarkdown = $derived(hasMarkdownLinkExtension(currentFile));
 	let editorLanguage = $derived(getLanguage(currentFile));
 	let htmlContent = $derived(tabManager.activeTab?.content ?? '');
@@ -172,6 +176,8 @@ import { t } from './utils/i18n.js';
 	let isScrolled = $derived(scrollTop > 0);
 	let windowTitle = $derived(tabManager.activeTab?.title ?? 'Markpad');
 	let isScrollSynced = $derived(tabManager.activeTab?.isScrollSynced ?? false);
+	let canGoBackInFileHistory = $derived(tabManager.activeTabId ? tabManager.canGoBack(tabManager.activeTabId) : false);
+	let canGoForwardInFileHistory = $derived(tabManager.activeTabId ? tabManager.canGoForward(tabManager.activeTabId) : false);
 
 	let loadingTabs = $state<string[]>([]);
 	let isAtBottom = $state(false);
@@ -179,8 +185,11 @@ import { t } from './utils/i18n.js';
 	let showHome = $state(false);
 	let isFullWidth = $state(localStorage.getItem('isFullWidth') === 'true');
 	let viewerWidth = $state(0);
-	const TOC_WIDTH = 240;
-	let isOverhanging = $derived(isFullWidth || (viewerWidth > 0 && TOC_WIDTH > Math.max(50, (viewerWidth - 780) / 2)));
+	const TOC_MIN_WIDTH = 180;
+	const TOC_MAX_WIDTH = 420;
+	const TOC_RESIZE_STEP = 16;
+	let isTocResizing = $state(false);
+	let isOverhanging = $derived(isFullWidth || (viewerWidth > 0 && settings.tocWidth > Math.max(50, (viewerWidth - 780) / 2)));
 
 	$effect(() => {
 		localStorage.setItem('isFullWidth', String(isFullWidth));
@@ -300,6 +309,28 @@ import { t } from './utils/i18n.js';
 			tabManager.setSplitRatio(tabManager.activeTabId, Math.max(0.1, activeTab.splitRatio - 0.05));
 		} else if (e.key === 'ArrowRight') {
 			tabManager.setSplitRatio(tabManager.activeTabId, Math.min(0.9, activeTab.splitRatio + 0.05));
+		}
+	}
+
+	function setTocWidth(width: number) {
+		settings.setTocWidth(Math.min(TOC_MAX_WIDTH, Math.max(TOC_MIN_WIDTH, width)));
+	}
+
+	function handleTocResizeKeyDown(e: KeyboardEvent) {
+		const keyDelta = e.key === 'ArrowRight' ? TOC_RESIZE_STEP : e.key === 'ArrowLeft' ? -TOC_RESIZE_STEP : 0;
+		if (keyDelta !== 0) {
+			e.preventDefault();
+			const widthDelta = settings.tocSide === 'left' ? keyDelta : -keyDelta;
+			setTocWidth(settings.tocWidth + widthDelta);
+			return;
+		}
+
+		if (e.key === 'Home') {
+			e.preventDefault();
+			setTocWidth(TOC_MIN_WIDTH);
+		} else if (e.key === 'End') {
+			e.preventDefault();
+			setTocWidth(TOC_MAX_WIDTH);
 		}
 	}
 
@@ -477,13 +508,14 @@ import { t } from './utils/i18n.js';
 	async function loadMarkdown(filePath: string, options: LoadMarkdownOptions = {}) {
 		showHome = false;
 		let existing = null;
+		let pendingNavigateTabId: string | null = null;
 		try {
 			if (options.resetScrollHistory || filePath !== currentFile) {
 				scrollHistory = [];
 				scrollFuture = [];
 			}
 			if (options.navigate && tabManager.activeTab) {
-				tabManager.navigate(tabManager.activeTab.id, filePath);
+				pendingNavigateTabId = tabManager.activeTab.id;
 			} else if (!options.skipTabManagement) {
 				existing = tabManager.tabs.find((t) => t.path === filePath);
 				if (existing) {
@@ -506,6 +538,9 @@ import { t } from './utils/i18n.js';
 					tab.isEditing = settings.startInEditor;
 				}
 				const [html, content, isFull] = await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 }) as [string, string, boolean];
+				if (pendingNavigateTabId) {
+					tabManager.navigate(pendingNavigateTabId, filePath);
+				}
 				const processedInfo = processMarkdownHtml(html, filePath, collapsedHeaders);
 				tabManager.updateTabContent(activeId, processedInfo);
 				tabManager.setTabRawContent(activeId, content);
@@ -557,8 +592,11 @@ import { t } from './utils/i18n.js';
 					});
 				}
 			} else {
-				if (tab) tab.isEditing = true;
 				const content = (await invoke('read_file_content', { path: filePath })) as string;
+				if (pendingNavigateTabId) {
+					tabManager.navigate(pendingNavigateTabId, filePath);
+				}
+				if (tab) tab.isEditing = true;
 				tabManager.setTabRawContent(activeId, content);
 			}
 
@@ -958,49 +996,6 @@ import { t } from './utils/i18n.js';
 		wrapper.classList.toggle('is-collapsed', !isCurrentlyCollapsed);
 	}
 
-	type RelativeMarkdownTarget = {
-		path: string;
-		hash: string;
-	};
-
-	function decodeLinkPath(path: string) {
-		try {
-			return decodeURIComponent(path);
-		} catch {
-			return path;
-		}
-	}
-
-	function normalizeComparableMarkdownPath(path: string) {
-		const normalized = path.replace(/\\/g, '/');
-		const comparable = normalized.startsWith('//')
-			? `//${normalized.slice(2).replace(/\/+/g, '/')}`
-			: normalized.replace(/\/+/g, '/');
-		if (settings.osType === 'windows' || /^[a-z]:/i.test(comparable) || comparable.startsWith('//')) {
-			return comparable.toLowerCase();
-		}
-		return comparable;
-	}
-
-	function isAbsoluteMarkdownPath(path: string) {
-		return path.startsWith('/') || path.startsWith('\\') || /^[a-z]:/i.test(path);
-	}
-
-	function getRelativeMarkdownTarget(href: string): RelativeMarkdownTarget | null {
-		const pathWithoutHash = href.split('#')[0].split('?')[0];
-		const isMarkdownTarget = hasMarkdownLinkExtension(pathWithoutHash);
-		const isWindowsDrivePath = /^[a-z]:/i.test(href);
-		const isProtocolRelativeExternal = href.startsWith('//');
-		const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(href);
-		if (!isMarkdownTarget || isProtocolRelativeExternal || (hasScheme && !isWindowsDrivePath)) return null;
-
-		const hashIndex = href.indexOf('#');
-		return {
-			path: decodeLinkPath(pathWithoutHash),
-			hash: hashIndex === -1 ? '' : href.slice(hashIndex + 1)
-		};
-	}
-
 	function scrollToAnchor(anchor: string, options: { pushHistory?: boolean } = {}) {
 		let id = decodeLinkPath(anchor);
 		if (id.startsWith('^')) {
@@ -1035,10 +1030,9 @@ import { t } from './utils/i18n.js';
 	}
 
 	async function openRelativeMarkdownTarget(target: RelativeMarkdownTarget) {
-		const isAbsoluteTarget = isAbsoluteMarkdownPath(target.path);
-		if (!currentFile && !isAbsoluteTarget) return;
-		const resolved = isAbsoluteTarget ? target.path : resolvePath(currentFile, target.path);
-		if (normalizeComparableMarkdownPath(resolved) === normalizeComparableMarkdownPath(currentFile)) {
+		const resolved = resolveMarkdownTargetPath(currentFile, target);
+		if (!resolved) return;
+		if (normalizeComparableMarkdownPath(resolved, settings.osType) === normalizeComparableMarkdownPath(currentFile, settings.osType)) {
 			if (target.hash) {
 				await scrollToAnchorWhenReady(target.hash);
 			} else if (markdownBody) {
@@ -1049,6 +1043,17 @@ import { t } from './utils/i18n.js';
 		}
 		if (tabManager.activeTabId && !(await canCloseTab(tabManager.activeTabId))) return;
 		await loadMarkdown(resolved, { navigate: true });
+		if (target.hash) {
+			await scrollToAnchorWhenReady(target.hash, { pushHistory: false }, resolved);
+		}
+	}
+
+	async function openMarkdownTargetInNewTab(target: RelativeMarkdownTarget) {
+		const resolved = resolveMarkdownTargetPath(currentFile, target);
+		if (!resolved) return;
+
+		tabManager.addTab(resolved);
+		await loadMarkdown(resolved, { skipTabManagement: true, resetScrollHistory: true });
 		if (target.hash) {
 			await scrollToAnchorWhenReady(target.hash, { pushHistory: false }, resolved);
 		}
@@ -1224,18 +1229,6 @@ import { t } from './utils/i18n.js';
 		event.stopPropagation();
 		deleteRecentFile(path);
 		if (currentFile === path) tabManager.closeTab(tabManager.activeTabId!);
-	}
-
-	function resolvePath(basePath: string, relativePath: string) {
-		if (relativePath.match(/^[a-zA-Z]:/) || relativePath.startsWith('/')) return relativePath;
-		const parts = basePath.split(/[/\\]/);
-		parts.pop();
-		for (const p of relativePath.split(/[/\\]/)) {
-			if (p === '.') continue;
-			if (p === '..') parts.pop();
-			else parts.push(p);
-		}
-		return parts.join('/');
 	}
 
 	function isYoutubeLink(url: string) {
@@ -1756,6 +1749,15 @@ import { t } from './utils/i18n.js';
 		const selection = window.getSelection();
 		const hasSelection = selection ? selection.toString().length > 0 : false;
 		const isInsideEditor = (e.target as HTMLElement).closest('.editor-container');
+		const link = (e.target as HTMLElement).closest('a') as HTMLAnchorElement | null;
+		const linkTarget = link ? getRelativeMarkdownTarget(link.getAttribute('href') || '') : null;
+		const linkItems: ContextMenuItem[] =
+			linkTarget && resolveMarkdownTargetPath(currentFile, linkTarget)
+				? [
+						{ label: t('menu.openInNewTab', uiLanguage), onClick: () => openMarkdownTargetInNewTab(linkTarget) },
+						{ separator: true },
+					]
+				: [];
 
 		// detect heading for copy ref
 		const heading = (e.target as HTMLElement).closest('h1, h2, h3, h4, h5, h6');
@@ -1793,6 +1795,7 @@ import { t } from './utils/i18n.js';
 			x: e.clientX,
 			y: e.clientY,
 			items: [
+				...linkItems,
 				...copyRefItem,
 				...mediaItems,
 				...(isEditing && isInsideEditor
@@ -2088,6 +2091,14 @@ import { t } from './utils/i18n.js';
 			e.preventDefault();
 			tabManager.cycleTab('next');
 		}
+		if (e.altKey && !cmdOrCtrl && code === 'ArrowLeft') {
+			e.preventDefault();
+			navigateFileHistory('back');
+		}
+		if (e.altKey && !cmdOrCtrl && code === 'ArrowRight') {
+			e.preventDefault();
+			navigateFileHistory('forward');
+		}
 		if (cmdOrCtrl && (key === '=' || key === '+')) {
 			e.preventDefault();
 			zoomLevel = Math.min(zoomLevel + 10, 500);
@@ -2118,6 +2129,20 @@ import { t } from './utils/i18n.js';
 		}
 	}
 
+	async function navigateFileHistory(direction: 'back' | 'forward') {
+		const activeTabId = tabManager.activeTabId;
+		if (!activeTabId) return;
+		if (!(await canCloseTab(activeTabId))) return;
+
+		const path = direction === 'back'
+			? tabManager.goBack(activeTabId)
+			: tabManager.goForward(activeTabId);
+
+		if (path) {
+			await loadMarkdown(path, { skipTabManagement: true, resetScrollHistory: true });
+		}
+	}
+
 	function pushScrollHistory() {
 		if (markdownBody) {
 			scrollHistory.push(markdownBody.scrollTop);
@@ -2126,7 +2151,7 @@ import { t } from './utils/i18n.js';
 		}
 	}
 
-	function handleMouseUp(e: MouseEvent) {
+	async function handleMouseUp(e: MouseEvent) {
 		if (e.button === 3) {
 			// Back
 			e.preventDefault();
@@ -2136,11 +2161,8 @@ import { t } from './utils/i18n.js';
 				const pos = scrollHistory.pop()!;
 				isProgrammaticScroll = true;
 				markdownBody.scrollTo({ top: pos, behavior: 'smooth' });
-			} else if (tabManager.activeTabId) {
-				const path = tabManager.goBack(tabManager.activeTabId);
-				if (path) {
-					loadMarkdown(path, { skipTabManagement: true, resetScrollHistory: true });
-				}
+			} else {
+				await navigateFileHistory('back');
 			}
 		} else if (e.button === 4) {
 			// Forward
@@ -2150,11 +2172,8 @@ import { t } from './utils/i18n.js';
 				const pos = scrollFuture.pop()!;
 				isProgrammaticScroll = true;
 				markdownBody.scrollTo({ top: pos, behavior: 'smooth' });
-			} else if (tabManager.activeTabId) {
-				const path = tabManager.goForward(tabManager.activeTabId);
-				if (path) {
-					loadMarkdown(path, { skipTabManagement: true, resetScrollHistory: true });
-				}
+			} else {
+				await navigateFileHistory('forward');
 			}
 		}
 	}
@@ -2209,6 +2228,43 @@ import { t } from './utils/i18n.js';
 		window.addEventListener('mousemove', onMove);
 		window.addEventListener('mouseup', onUp);
 		document.body.style.cursor = 'col-resize';
+	}
+
+	function startTocResize(e: PointerEvent) {
+		e.preventDefault();
+		const target = e.currentTarget as HTMLElement;
+		target.setPointerCapture?.(e.pointerId);
+
+		const startX = e.clientX;
+		const startWidth = settings.tocWidth;
+		const side = settings.tocSide;
+		isTocResizing = true;
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+
+		const onMove = (moveEvent: PointerEvent) => {
+			const deltaX = moveEvent.clientX - startX;
+			const widthDelta = side === 'left' ? deltaX : -deltaX;
+			setTocWidth(startWidth + widthDelta);
+		};
+
+		const onUp = (upEvent: PointerEvent) => {
+			window.removeEventListener('pointermove', onMove);
+			window.removeEventListener('pointerup', onUp);
+			window.removeEventListener('pointercancel', onUp);
+			try {
+				target.releasePointerCapture?.(upEvent.pointerId);
+			} catch {
+				// Pointer capture may already be gone after a cancel path.
+			}
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			isTocResizing = false;
+		};
+
+		window.addEventListener('pointermove', onMove);
+		window.addEventListener('pointerup', onUp);
+		window.addEventListener('pointercancel', onUp);
 	}
 
 	function getSplitTransition(node: Element, { isEditing, side }: { isEditing: boolean; side: 'left' | 'right' }) {
@@ -2674,6 +2730,10 @@ import { t } from './utils/i18n.js';
 		onSetTheme={(t) => (theme = t)}
 		onopenSettings={() => (showSettings = true)}
 		onfind={triggerFindAction}
+		canGoBack={canGoBackInFileHistory}
+		canGoForward={canGoForwardInFileHistory}
+		onback={() => navigateFileHistory('back')}
+		onforward={() => navigateFileHistory('forward')}
 		oncloseTab={closeTabAndWindowIfLast} />
 
 	<Settings show={showSettings} {theme} onSetTheme={(t) => (theme = t)} onclose={() => (showSettings = false)} />
@@ -2689,7 +2749,9 @@ import { t } from './utils/i18n.js';
 					class:editing={isEditing} 
 					class:has-pinned-toc={isMarkdown && settings.pinnedToc && settings.showToc}
 					class:toc-on-left={isMarkdown && settings.tocSide === 'left'}
-					class:toc-on-right={isMarkdown && settings.tocSide === 'right'}>
+					class:toc-on-right={isMarkdown && settings.tocSide === 'right'}
+					class:toc-resizing={isTocResizing}
+					style="--toc-width: {settings.tocWidth}px;">
 					<!-- Editor Pane -->
 					<div bind:this={editorPaneEl} class="pane editor-pane" class:active={isEditing || isSplit} style="flex: {isSplit ? tabManager.activeTab.splitRatio : isEditing ? 1 : 0}">
 						{#if isEditing || isSplit}
@@ -2787,11 +2849,26 @@ import { t } from './utils/i18n.js';
 
 						{#if settings.showToc}
 							<div 
-								transition:fly={{ x: settings.tocSide === 'left' ? -240 : 240, duration: 300, opacity: 1, easing: cubicOut }}
+								transition:fly={{ x: settings.tocSide === 'left' ? -settings.tocWidth : settings.tocWidth, duration: 300, opacity: 1, easing: cubicOut }}
 								class="toc-overlay-wrapper" 
 								class:is-overhanging={isOverhanging} 
 								class:is-pinned={settings.pinnedToc}
+								class:is-resizing={isTocResizing}
 								class:on-right={settings.tocSide === 'right'}>
+								<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+								<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+								<div
+									class="toc-resize-handle"
+									class:on-right={settings.tocSide === 'right'}
+									role="separator"
+									aria-label="Resize table of contents"
+									aria-orientation="vertical"
+									aria-valuemin={TOC_MIN_WIDTH}
+									aria-valuemax={TOC_MAX_WIDTH}
+									aria-valuenow={settings.tocWidth}
+									tabindex="0"
+									onpointerdown={startTocResize}
+									onkeydown={handleTocResizeKeyDown}></div>
 								<Toc 
 										{markdownBody} 
 										htmlContent={sanitizedHtml}
@@ -3381,11 +3458,12 @@ import { t } from './utils/i18n.js';
 		bottom: 0;
 		z-index: 1000;
 		height: calc(100% - 36px);
+		width: var(--toc-width);
 		background-color: var(--color-canvas-default);
 		border-right: 1px solid transparent;
 		border-left: 1px solid transparent;
 		box-shadow: 10px 0 30px rgba(0, 0, 0, 0);
-		transition: box-shadow 0.3s ease, border-color 0.3s ease, left 0.3s ease, right 0.3s ease;
+		transition: box-shadow 0.3s ease, border-color 0.3s ease, left 0.3s ease, right 0.3s ease, width 0.2s ease;
 		order: -1;
 	}
 
@@ -3503,16 +3581,18 @@ import { t } from './utils/i18n.js';
 		transition: padding 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 	}
 
+	.layout-container.toc-resizing,
+	.layout-container.toc-resizing .toc-overlay-wrapper,
+	.layout-container.toc-resizing .toc-toggle-floating {
+		transition: none !important;
+	}
+
 	.layout-container.has-pinned-toc.toc-on-left {
-		padding-left: 240px;
+		padding-left: var(--toc-width);
 	}
 
 	.layout-container.has-pinned-toc.toc-on-right {
-		padding-right: 240px;
-	}
-
-	.toc-overlay-wrapper {
-		width: 240px;
+		padding-right: var(--toc-width);
 	}
 
 	.toc-overlay-wrapper.is-pinned {
@@ -3546,5 +3626,41 @@ import { t } from './utils/i18n.js';
 		opacity: 0.9;
 		backdrop-filter: blur(8px);
 		-webkit-backdrop-filter: blur(8px);
+	}
+
+	.toc-resize-handle {
+		position: absolute;
+		top: 0;
+		right: -5px;
+		bottom: 0;
+		width: 10px;
+		z-index: 80;
+		cursor: col-resize;
+		touch-action: none;
+		outline: none;
+	}
+
+	.toc-resize-handle.on-right {
+		right: auto;
+		left: -5px;
+	}
+
+	.toc-resize-handle::after {
+		content: '';
+		position: absolute;
+		top: 10px;
+		bottom: 10px;
+		left: 50%;
+		width: 1px;
+		transform: translateX(-50%);
+		background-color: var(--color-accent-fg);
+		opacity: 0;
+		transition: opacity 0.15s ease;
+	}
+
+	.toc-resize-handle:hover::after,
+	.toc-resize-handle:focus-visible::after,
+	.toc-overlay-wrapper.is-resizing .toc-resize-handle::after {
+		opacity: 0.85;
 	}
 </style>

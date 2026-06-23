@@ -1,9 +1,11 @@
 <script lang="ts">
 	import type { Tab } from '../stores/tabs.svelte.js';
 	import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
+	import { invoke } from '@tauri-apps/api/core';
 	import { emit } from '@tauri-apps/api/event';
 	import { t } from '../utils/i18n.js';
 	import { settings } from '../stores/settings.svelte.js';
+	import { getTabFileActions, hasRealFilePath } from '../utils/tabFileActions.js';
 
 	let { tab, isActive, isLast, onclick, onclose } = $props<{
 		tab: Tab;
@@ -38,11 +40,27 @@
 		}
 	}
 
+	function copyTabPath() {
+		if (!hasRealFilePath(tab.path)) return;
+		invoke('clipboard_write_text', { text: tab.path }).catch(console.error);
+	}
+
+	function openTabFileLocation() {
+		if (!hasRealFilePath(tab.path)) return;
+		invoke('open_file_folder', { path: tab.path }).catch(console.error);
+	}
+
 	function handleContextMenu(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
 
 		const currentLang = settings.language;
+		const fileActionItems: ContextMenuItem[] = getTabFileActions(tab.path).map((action) => ({
+			label: t(action.labelKey, currentLang),
+			disabled: action.disabled,
+			onClick: action.id === 'copy-path' ? copyTabPath : openTabFileLocation,
+		}));
+
 		tabContextMenu = {
 			show: true,
 			x: e.clientX,
@@ -52,15 +70,14 @@
 				{ label: t('menu.undoCloseTab', currentLang), shortcut: 'Ctrl+Shift+T', onClick: () => emit('menu-tab-undo') },
 				{ label: t('menu.rename', currentLang), onClick: () => emit('menu-tab-rename', tab.id) },
 				{ separator: true },
+				...fileActionItems,
+				{ separator: true },
 				{ label: t('menu.closeFile', currentLang), shortcut: 'Ctrl+W', onClick: () => emit('menu-tab-close', tab.id) },
 				{ label: t('menu.closeOtherTabs', currentLang), onClick: () => emit('menu-tab-close-others', tab.id) },
 				{ label: t('menu.closeTabsToRight', currentLang), onClick: () => emit('menu-tab-close-right', tab.id) },
 			],
 		};
 	}
-
-	// home tab has empty path
-	let isHomeTab = $derived(tab.path === '');
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->

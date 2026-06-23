@@ -151,6 +151,7 @@ export class SettingsStore {
 	editorMaxWidth = $state(80);
 	pinnedToc = $state(false);
 	tocSide = $state<'left' | 'right'>('left');
+	tocWidth = $state(240);
 	osType = $state<OSType>('unknown');
 	imageDirectory = $state('img');
 	macosImageScaling = $state(true);
@@ -192,6 +193,7 @@ export class SettingsStore {
 			const savedEditorMaxWidth = localStorage.getItem('editor.maxWidth');
 			const savedPinnedToc = localStorage.getItem('editor.pinnedToc');
 			const savedTocSide = localStorage.getItem('editor.tocSide');
+			const savedTocWidth = localStorage.getItem('editor.tocWidth');
 			const savedImageDirectory = localStorage.getItem('editor.imageDirectory');
 			const savedMacosImageScaling = localStorage.getItem('editor.macosImageScaling');
 			const savedLanguage = localStorage.getItem('editor.language');
@@ -235,6 +237,7 @@ export class SettingsStore {
 			if (savedEditorMaxWidth !== null) this.editorMaxWidth = parseFontSize(savedEditorMaxWidth, 80, 20, 500);
 			if (savedPinnedToc !== null) this.pinnedToc = savedPinnedToc === 'true';
 			if (savedTocSide !== null) this.tocSide = savedTocSide as 'left' | 'right';
+			if (savedTocWidth !== null) this.tocWidth = parseFontSize(savedTocWidth, 240, 180, 420);
 			if (savedImageDirectory !== null) this.imageDirectory = savedImageDirectory;
 			if (savedMacosImageScaling !== null) this.macosImageScaling = savedMacosImageScaling === 'true';
 			if (savedLanguage !== null) {
@@ -300,10 +303,11 @@ export class SettingsStore {
 					localStorage.setItem('editor.showRecentFiles', String(this.showRecentFiles));
 					localStorage.setItem('editor.maxWidth', String(this.editorMaxWidth));
 					localStorage.setItem('editor.pinnedToc', String(this.pinnedToc));
-				  localStorage.setItem('editor.tocSide', this.tocSide);
-				  localStorage.setItem('editor.imageDirectory', this.imageDirectory);
-				  localStorage.setItem('editor.macosImageScaling', String(this.macosImageScaling));
-				  localStorage.setItem('editor.language', this.language);
+					localStorage.setItem('editor.tocSide', this.tocSide);
+					localStorage.setItem('editor.tocWidth', String(this.tocWidth));
+					localStorage.setItem('editor.imageDirectory', this.imageDirectory);
+					localStorage.setItem('editor.macosImageScaling', String(this.macosImageScaling));
+					localStorage.setItem('editor.language', this.language);
 					localStorage.setItem('editor.font', this.editorFont);
 					localStorage.setItem('editor.fontSize', String(this.editorFontSize));
 					localStorage.setItem('preview.font', this.previewFont);
@@ -420,6 +424,10 @@ export class SettingsStore {
 
 	toggleTocSide() {
 		this.tocSide = this.tocSide === 'left' ? 'right' : 'left';
+	}
+
+	setTocWidth(width: number) {
+		this.tocWidth = Math.min(420, Math.max(180, Math.round(width)));
 	}
 
 	toggleMacosImageScaling() {

@@ -35,6 +35,10 @@
 		ontoggleHome,
 		ononpenFileLocation,
 		ontoggleLiveMode,
+		onback,
+		onforward,
+		canGoBack = false,
+		canGoForward = false,
 
 		ontoggleEdit,
 		ontoggleSplit,
@@ -71,6 +75,10 @@
 		ontoggleHome: () => void;
 		ononpenFileLocation: () => void;
 		ontoggleLiveMode: () => void;
+		onback?: () => void;
+		onforward?: () => void;
+		canGoBack?: boolean;
+		canGoForward?: boolean;
 
 		ontoggleEdit: () => void;
 		ontoggleSplit?: () => void;
@@ -183,12 +191,14 @@
 		}
 	});
 
-	const inlineIds = ['fullWidth', 'edit', 'split', 'sync', 'live'];
+	const inlineIds = ['back', 'forward', 'fullWidth', 'edit', 'split', 'sync', 'live'];
 
 	let visibleActionIds = $derived.by(() => {
 		const list: string[] = [];
 
 		if (tabManager.activeTab && !showHome) {
+			list.push('back');
+			list.push('forward');
 			if (currentFile) list.push('open_loc');
 
 			const ext = currentFile ? currentFile.split('.').pop()?.toLowerCase() || '' : 'md';
@@ -479,7 +489,47 @@
 
 	{#snippet actionItems(ids: string[])}
 			{#each ids as id (id)}
-				{#if id === 'settings'}
+				{#if id === 'back'}
+					<button
+						class="title-action-btn"
+						disabled={!canGoBack}
+						onclick={() => {
+							hideTooltip();
+							kebabMenuOpen = false;
+							onback?.();
+						}}
+						aria-label={t('tooltip.back', currentLanguage)}
+						onmouseenter={(e) => showTooltip(e, t('tooltip.back', currentLanguage))}
+						onmousedown={(e) => e.preventDefault()}
+						onmouseleave={hideTooltip}
+						transition:fly={{ x: 10, duration: 200 }}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<polyline points="15 18 9 12 15 6"></polyline>
+						</svg>
+						<span class="action-label">{t('menu.back', currentLanguage)}</span>
+						<span class="menu-shortcut">Alt+Left</span>
+					</button>
+				{:else if id === 'forward'}
+					<button
+						class="title-action-btn"
+						disabled={!canGoForward}
+						onclick={() => {
+							hideTooltip();
+							kebabMenuOpen = false;
+							onforward?.();
+						}}
+						aria-label={t('tooltip.forward', currentLanguage)}
+						onmouseenter={(e) => showTooltip(e, t('tooltip.forward', currentLanguage))}
+						onmousedown={(e) => e.preventDefault()}
+						onmouseleave={hideTooltip}
+						transition:fly={{ x: 10, duration: 200 }}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<polyline points="9 18 15 12 9 6"></polyline>
+						</svg>
+						<span class="action-label">{t('menu.forward', currentLanguage)}</span>
+						<span class="menu-shortcut">Alt+Right</span>
+					</button>
+				{:else if id === 'settings'}
 					<button
 						class="title-action-btn"
 						onclick={() => {
@@ -1005,6 +1055,16 @@
 	.title-action-btn:hover {
 		background: var(--color-canvas-subtle);
 		color: var(--color-fg-default);
+	}
+
+	.title-action-btn:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
+
+	.title-action-btn:disabled:hover {
+		background: transparent;
+		color: var(--color-fg-muted);
 	}
 
 	.window-icon {
