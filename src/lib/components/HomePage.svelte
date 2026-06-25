@@ -58,7 +58,6 @@
 		</button>
 	</div>
 
-	{#if settings.showRecentFiles}
 	<div class="recent-section">
 		<h3>{t('home.recentFiles', settings.language)}</h3>
 		{#if recentFiles.length > 0}
@@ -109,7 +108,6 @@
 			<p class="empty-recent">{t('home.noRecentFiles', settings.language)}</p>
 		{/if}
 	</div>
-	{/if}
 </div>
 <div class="version-tag">v{version}</div>
 
