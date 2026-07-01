@@ -142,7 +142,15 @@ mod setup;
 
 #[tauri::command]
 async fn show_window(window: tauri::Window) {
-    window.show().unwrap();
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+}
+
+fn bring_webview_window_to_front(window: &tauri::WebviewWindow) {
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
 }
 
 fn process_internal_embeds(content: &str) -> Cow<'_, str> {
@@ -919,6 +927,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             println!("Single Instance Args: {:?}", args);
+            let Some(window) = app.get_webview_window("main") else {
+                return;
+            };
 
             let path_str = args
                 .iter()
@@ -936,15 +947,9 @@ pub fn run() {
                     cwd_path.join(path).display().to_string()
                 };
 
-                let _ = app
-                    .get_webview_window("main")
-                    .expect("no main window")
-                    .emit("file-path", resolved_path);
+                let _ = window.emit("file-path", resolved_path);
             }
-            let _ = app
-                .get_webview_window("main")
-                .expect("no main window")
-                .set_focus();
+            bring_webview_window_to_front(&window);
         }))
         .plugin(tauri_plugin_prevent_default::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1144,6 +1149,7 @@ pub fn run() {
 
             if let Some(path) = file_path {
                 let _ = window.emit("file-path", path.as_str());
+                bring_webview_window_to_front(&window);
             }
 
             // If installer, force size (this will be saved to installer-state, not main-state)
@@ -1231,7 +1237,7 @@ pub fn run() {
 
                         if let Some(window) = _app_handle.get_webview_window("main") {
                             let _ = window.emit("file-path", path_str);
-                            let _ = window.set_focus();
+                            bring_webview_window_to_front(&window);
                         }
                     }
                 }
