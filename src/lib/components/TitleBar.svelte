@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { invoke } from '@tauri-apps/api/core';
+	import { openUrl } from '@tauri-apps/plugin-opener';
 	import { fly, slide } from 'svelte/transition';
 	import { flip } from 'svelte/animate';
 	import iconUrl from '../../assets/icon.png';
@@ -8,6 +9,7 @@
 	import { tabManager } from '../stores/tabs.svelte.js';
 	import { settings } from '../stores/settings.svelte.js';
 	import { t } from '../utils/i18n.js';
+	import { getConfiguredTitlebarToolbarIds } from '../utils/titlebarToolbar.js';
 	import { getVersion } from '@tauri-apps/api/app';
 
 	let currentLanguage = $state(settings.language);
@@ -29,6 +31,7 @@
 		onopenFile,
 		onsaveFile,
 		onsaveFileAs,
+		onreloadFromDisk,
 		onexportHtml,
 		onexportPdf,
 		onexit,
@@ -69,6 +72,7 @@
 		onopenFile?: () => void;
 		onsaveFile?: () => void;
 		onsaveFileAs?: () => void;
+		onreloadFromDisk?: () => void;
 		onexportHtml?: () => void;
 		onexportPdf?: () => void;
 		onexit?: () => void;
@@ -191,15 +195,13 @@
 		}
 	});
 
-	const inlineIds = ['back', 'forward', 'fullWidth', 'edit', 'split', 'sync', 'live'];
-
 	let visibleActionIds = $derived.by(() => {
 		const list: string[] = [];
 
 		if (tabManager.activeTab && !showHome) {
 			list.push('back');
 			list.push('forward');
-			if (currentFile) list.push('open_loc');
+			if (currentFile) list.push('reload');
 
 			const ext = currentFile ? currentFile.split('.').pop()?.toLowerCase() || '' : 'md';
 			const isMarkdown = ['md', 'markdown', 'mdown', 'mkd', 'txt'].includes(ext);
@@ -234,6 +236,15 @@
 
 		return list;
 	});
+
+	let configuredActionIds = $derived.by(() =>
+		getConfiguredTitlebarToolbarIds(
+			visibleActionIds,
+			settings.titlebarToolbarOrder,
+			settings.titlebarToolbarHidden,
+			settings.titlebarToolbarPlacement,
+		),
+	);
 
 	let themeMenuOpen = $state(false);
 	let kebabMenuOpen = $state(false);
@@ -325,7 +336,15 @@
 					style:filter={theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'none' : 'invert(0.7)'} />
 			</button>
 			{#if homeMenuOpen}
-				<div class="home-dropdown-menu" transition:fly={{ y: 5, duration: 150 }} onclick={(e) => e.stopPropagation()}>
+				<div
+					class="home-dropdown-menu"
+					role="menu"
+					tabindex="-1"
+					transition:fly={{ y: 5, duration: 150 }}
+					onclick={(e) => e.stopPropagation()}
+					onkeydown={(e) => {
+						if (e.key === 'Escape') homeMenuOpen = false;
+					}}>
 					<button
 				class="home-menu-item"
 				onclick={() => {
@@ -395,6 +414,19 @@
 						{t('menu.saveAs', currentLanguage)}
 						<span class="menu-shortcut">{modifier}+Shift+S</span>
 					</button>
+					{#if currentFile !== ''}
+						<button
+							class="home-menu-item"
+							onclick={() => {
+								homeMenuOpen = false;
+								onreloadFromDisk?.();
+							}}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15A9 9 0 1 1 18 5.64L23 10"></path></svg>
+							{t('menu.reloadFromDisk', currentLanguage)}
+							<span class="menu-shortcut">F5</span>
+						</button>
+					{/if}
 					{/if}
 					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.content)}
 						<div class="home-menu-divider"></div>
@@ -436,8 +468,7 @@
 						class="home-menu-footer"
 						onclick={() => {
 							homeMenuOpen = false;
-							import('@tauri-apps/plugin-opener')
-								.then((m) => m.openUrl('https://github.com/alecdotdev/Markpad'))
+							openUrl('https://github.com/alecdotdev/Markpad')
 								.catch(() => window.open('https://github.com/alecdotdev/Markpad', '_blank'));
 						}}>
 						v{appVersion}
@@ -693,6 +724,24 @@
 								d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm640-560H160v480h640v-480Zm-640 0v480-480Zm200 360v-240L240-480l120 120Zm360-120L600-600v240l120-120Z" /></svg>
 						<span class="action-label">{t('menu.fullWidth', currentLanguage)}</span>
 					</button>
+				{:else if id === 'reload'}
+					<button
+						class="title-action-btn"
+						onclick={() => {
+							hideTooltip();
+							kebabMenuOpen = false;
+							onreloadFromDisk?.();
+						}}
+						aria-label={t('tooltip.reloadFromDisk', currentLanguage)}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.reloadFromDisk', currentLanguage), 'F5')}
+						onmousedown={(e) => e.preventDefault()}
+						onmouseleave={hideTooltip}
+						transition:fly={{ x: 10, duration: 200 }}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15A9 9 0 1 1 18 5.64L23 10"></path></svg>
+						<span class="action-label">{t('menu.reloadFromDisk', currentLanguage)}</span>
+						<span class="menu-shortcut">F5</span>
+					</button>
 				{:else if id === 'live'}
 					<button
 						class="title-action-btn {liveMode ? 'active' : ''}"
@@ -759,7 +808,15 @@
 							<span class="action-label">{t('menu.changeTheme', currentLanguage)}</span>
 						</button>
 						{#if themeMenuOpen}
-							<div class="theme-menu" transition:fly={{ y: 5, duration: 150 }} onclick={(e) => e.stopPropagation()}>
+							<div
+								class="theme-menu"
+								role="menu"
+								tabindex="-1"
+								transition:fly={{ y: 5, duration: 150 }}
+								onclick={(e) => e.stopPropagation()}
+								onkeydown={(e) => {
+									if (e.key === 'Escape') themeMenuOpen = false;
+								}}>
 								<button class="theme-option {theme === 'system' ? 'selected' : ''}" onclick={() => handleSetTheme('system')}> {t('theme.followSystem', currentLanguage)} </button>
 								<button class="theme-option {theme === 'light' ? 'selected' : ''}" onclick={() => handleSetTheme('light')}> {t('theme.defaultLight', currentLanguage)} </button>
 								<button class="theme-option {theme === 'dark' ? 'selected' : ''}" onclick={() => handleSetTheme('dark')}> {t('theme.defaultDark', currentLanguage)} </button>
@@ -779,27 +836,42 @@
 		{/snippet}
 
 		{#if isCollapsed}
-			{#if visibleActionIds.length > 0}
+			{#if configuredActionIds.visibleIds.length > 0}
 				{@render kebabButton()}
 				{#if kebabMenuOpen}
-					<div class="title-actions show-dropdown" data-tauri-drag-region role="menu" transition:fly={{ y: 5, duration: 150 }} onclick={(e) => e.stopPropagation()}>
-						{@render actionItems(visibleActionIds)}
+					<div
+						class="title-actions show-dropdown"
+						data-tauri-drag-region
+						role="menu"
+						tabindex="-1"
+						transition:fly={{ y: 5, duration: 150 }}
+						onclick={(e) => e.stopPropagation()}
+						onkeydown={(e) => {
+							if (e.key === 'Escape') kebabMenuOpen = false;
+						}}>
+						{@render actionItems(configuredActionIds.visibleIds)}
 					</div>
 				{/if}
 			{/if}
 		{:else}
-			{@const activeInline = visibleActionIds.filter((id) => inlineIds.includes(id))}
-			{@const activeKebab = visibleActionIds.filter((id) => !inlineIds.includes(id))}
-
 			<div class="title-actions inline" data-tauri-drag-region>
-				{@render actionItems(activeInline)}
+				{@render actionItems(configuredActionIds.barIds)}
 			</div>
 
-			{#if activeKebab.length > 0}
+			{#if configuredActionIds.menuIds.length > 0}
 				{@render kebabButton()}
 				{#if kebabMenuOpen}
-					<div class="title-actions show-dropdown" data-tauri-drag-region role="menu" transition:fly={{ y: 5, duration: 150 }} onclick={(e) => e.stopPropagation()}>
-						{@render actionItems(activeKebab)}
+					<div
+						class="title-actions show-dropdown"
+						data-tauri-drag-region
+						role="menu"
+						tabindex="-1"
+						transition:fly={{ y: 5, duration: 150 }}
+						onclick={(e) => e.stopPropagation()}
+						onkeydown={(e) => {
+							if (e.key === 'Escape') kebabMenuOpen = false;
+						}}>
+						{@render actionItems(configuredActionIds.menuIds)}
 					</div>
 				{/if}
 			{/if}

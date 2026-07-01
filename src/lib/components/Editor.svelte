@@ -10,7 +10,6 @@
 	import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 	import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 	import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
-	import { initVimMode } from "monaco-vim";
 	import { openUrl } from "@tauri-apps/plugin-opener";
 	import { invoke } from "@tauri-apps/api/core";
 
@@ -433,6 +432,101 @@
 			}
 		};
 
+		const transformSelectedLines = (
+			source: string,
+			transform: (lines: string[]) => string[],
+		) => {
+			const selection = editor.getSelection();
+			const model = editor.getModel();
+			if (!selection || !model) return;
+
+			let endLine = selection.endLineNumber;
+			if (selection.endColumn === 1 && endLine > selection.startLineNumber) {
+				endLine -= 1;
+			}
+
+			const range = new monaco.Range(
+				selection.startLineNumber,
+				1,
+				endLine,
+				model.getLineMaxColumn(endLine),
+			);
+			const lines = model.getValueInRange(range).split(/\r?\n/);
+			editor.executeEdits(source, [
+				{
+					range,
+					text: transform(lines).join(model.getEOL()),
+					forceMoveMarkers: true,
+				},
+			]);
+		};
+
+		const toggleLinePrefix = (source: string, prefix: string, pattern: RegExp) => {
+			transformSelectedLines(source, (lines) => {
+				const contentLines = lines.filter((line) => line.trim().length > 0);
+				const shouldRemove = contentLines.length > 0 && contentLines.every((line) => pattern.test(line));
+				return lines.map((line) => {
+					if (!line.trim()) return line;
+					if (shouldRemove) return line.replace(pattern, "");
+					return `${prefix}${line}`;
+				});
+			});
+		};
+
+		const toggleHeading = (level: number) => {
+			const heading = "#".repeat(level);
+			transformSelectedLines(`fmt-heading-${level}`, (lines) => {
+				const pattern = new RegExp(`^${heading}\\s+`);
+				const contentLines = lines.filter((line) => line.trim().length > 0);
+				const shouldRemove = contentLines.length > 0 && contentLines.every((line) => pattern.test(line));
+				return lines.map((line) => {
+					if (!line.trim()) return line;
+					const withoutHeading = line.replace(/^#{1,6}\s+/, "");
+					return shouldRemove ? withoutHeading : `${heading} ${withoutHeading}`;
+				});
+			});
+		};
+
+		const toggleNumberedList = () => {
+			transformSelectedLines("fmt-numbered-list", (lines) => {
+				const contentLines = lines.filter((line) => line.trim().length > 0);
+				const shouldRemove = contentLines.length > 0 && contentLines.every((line) => /^\d+\.\s+/.test(line));
+				let itemIndex = 1;
+				return lines.map((line) => {
+					if (!line.trim()) return line;
+					if (shouldRemove) return line.replace(/^\d+\.\s+/, "");
+					return `${itemIndex++}. ${line.replace(/^(?:[-*+]|\d+\.)\s+/, "")}`;
+				});
+			});
+		};
+
+		const wrapAsCodeBlock = () => {
+			const selection = editor.getSelection();
+			const model = editor.getModel();
+			if (!selection || !model) return;
+
+			const text = model.getValueInRange(selection);
+			const block = text.startsWith("```\n") && text.endsWith("\n```")
+				? text.slice(4, -4).replace(/\n$/, "")
+				: `\`\`\`\n${text}\n\`\`\``;
+			editor.executeEdits("fmt-code-block", [
+				{ range: selection, text: block, forceMoveMarkers: true },
+			]);
+		};
+
+		const insertLink = () => {
+			const selection = editor.getSelection();
+			const model = editor.getModel();
+			if (!selection || !model) return;
+
+			const text = model.getValueInRange(selection);
+			const label = text || "link text";
+			const link = `[${label}](url)`;
+			editor.executeEdits("fmt-link", [
+				{ range: selection, text: link, forceMoveMarkers: true },
+			]);
+		};
+
 		editor.addAction({
 			id: "fmt-bold",
 			label: t('menu.bold', uiLanguage),
@@ -452,6 +546,66 @@
 			label: t('menu.underline', uiLanguage),
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyU],
 			run: () => toggleFormat("<u>|</u>", "tag"),
+		});
+
+		editor.addAction({
+			id: "fmt-inline-code",
+			label: "Inline Code",
+			run: () => toggleFormat("`"),
+		});
+
+		editor.addAction({
+			id: "fmt-code-block",
+			label: "Code Block",
+			run: () => wrapAsCodeBlock(),
+		});
+
+		editor.addAction({
+			id: "fmt-quote",
+			label: "Quote",
+			run: () => toggleLinePrefix("fmt-quote", "> ", /^>\s+/),
+		});
+
+		editor.addAction({
+			id: "fmt-heading-1",
+			label: "Heading 1",
+			run: () => toggleHeading(1),
+		});
+
+		editor.addAction({
+			id: "fmt-heading-2",
+			label: "Heading 2",
+			run: () => toggleHeading(2),
+		});
+
+		editor.addAction({
+			id: "fmt-heading-3",
+			label: "Heading 3",
+			run: () => toggleHeading(3),
+		});
+
+		editor.addAction({
+			id: "fmt-bullet-list",
+			label: "Bullet List",
+			run: () => toggleLinePrefix("fmt-bullet-list", "- ", /^[-*+]\s+/),
+		});
+
+		editor.addAction({
+			id: "fmt-numbered-list",
+			label: "Numbered List",
+			run: () => toggleNumberedList(),
+		});
+
+		editor.addAction({
+			id: "fmt-checklist",
+			label: "Checklist",
+			run: () => toggleLinePrefix("fmt-checklist", "- [ ] ", /^[-*+]\s+\[[ xX]\]\s+/),
+		});
+
+		editor.addAction({
+			id: "fmt-link",
+			label: "Link",
+			run: () => insertLink(),
 		});
 
 		editor.addAction({
@@ -995,9 +1149,17 @@
 
 	$effect(() => {
 		if (editor && settings.vimMode && vimStatusNode) {
-			const vim = initVimMode(editor, vimStatusNode);
+			let disposed = false;
+			let vim: { dispose: () => void } | null = null;
+			const currentEditor = editor;
+			const currentStatusNode = vimStatusNode;
+			import("monaco-vim").then(({ initVimMode }) => {
+				if (disposed) return;
+				vim = initVimMode(currentEditor, currentStatusNode);
+			});
 			return () => {
-				vim.dispose();
+				disposed = true;
+				vim?.dispose();
 			};
 		}
 	});
@@ -1122,6 +1284,12 @@
 		if (!editor) return;
 		editor.focus();
 		editor.getAction("actions.find")?.run();
+	}
+
+	export function runEditorAction(actionId: string) {
+		if (!editor) return;
+		editor.focus();
+		editor.getAction(actionId)?.run();
 	}
 
 	export const getValue = () => editor?.getValue() || "";

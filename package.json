@@ -8,6 +8,8 @@
 		"dev:installer": "tauri dev -- -- --install",
 		"build": "vite build",
 		"preview": "vite preview",
+		"test:frontmatter": "node --test --import tsx scripts/frontMatter.test.ts",
+		"test:workflows": "node --test --import tsx scripts/exportHtml.test.ts scripts/exportOpenPrompt.test.ts scripts/reloadOpenToolbar.test.ts scripts/editorToolbar.test.ts scripts/titlebarToolbar.test.ts scripts/toolbarCustomizationWiring.test.ts",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"tauri": "tauri"
@@ -28,7 +30,8 @@
 		"mermaid": "^11.12.2",
 		"monaco-editor": "^0.55.1",
 		"monaco-vim": "^0.4.4",
-		"node-stream-zip": "^1.15.0"
+		"node-stream-zip": "^1.15.0",
+		"yaml": "^2.9.0"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^3.0.6",
@@ -37,6 +40,7 @@
 		"@tauri-apps/cli": "^2",
 		"svelte": "^5.0.0",
 		"svelte-check": "^4.0.0",
+		"tsx": "^4.22.4",
 		"typescript": "~5.6.2",
 		"vite": "^6.0.3"
 	}

@@ -1,4 +1,23 @@
 import { invoke } from '@tauri-apps/api/core';
+import {
+	DEFAULT_EDITOR_TOOLBAR_ORDER,
+	applyEditorToolbarMove,
+	getEditorToolbarAdjacentMove,
+	getEditorToolbarReorderMove,
+	normalizeEditorToolbarHidden,
+	normalizeEditorToolbarOrder,
+} from '../utils/editorToolbar.js';
+import {
+	DEFAULT_TITLEBAR_TOOLBAR_ORDER,
+	DEFAULT_TITLEBAR_TOOLBAR_PLACEMENT,
+	applyTitlebarToolbarMove,
+	getTitlebarToolbarAdjacentMove,
+	getTitlebarToolbarReorderMove,
+	normalizeTitlebarToolbarHidden,
+	normalizeTitlebarToolbarOrder,
+	normalizeTitlebarToolbarPlacement,
+	type TitlebarToolbarPlacement,
+} from '../utils/titlebarToolbar.js';
 
 export type OSType = 'macos' | 'windows' | 'linux' | 'unknown';
 export type LanguageCode =
@@ -157,6 +176,11 @@ export class SettingsStore {
 	imageDirectory = $state('img');
 	macosImageScaling = $state(true);
 	language = $state<LanguageCode>('en');
+	editorToolbarOrder = $state<string[]>([...DEFAULT_EDITOR_TOOLBAR_ORDER]);
+	editorToolbarHidden = $state<string[]>([]);
+	titlebarToolbarOrder = $state<string[]>([...DEFAULT_TITLEBAR_TOOLBAR_ORDER]);
+	titlebarToolbarHidden = $state<string[]>([]);
+	titlebarToolbarPlacement = $state<Record<string, TitlebarToolbarPlacement>>({ ...DEFAULT_TITLEBAR_TOOLBAR_PLACEMENT });
 
 	editorFont = $state('Consolas');
 	editorFontSize = $state(14);
@@ -199,6 +223,11 @@ export class SettingsStore {
 			const savedImageDirectory = localStorage.getItem('editor.imageDirectory');
 			const savedMacosImageScaling = localStorage.getItem('editor.macosImageScaling');
 			const savedLanguage = localStorage.getItem('editor.language');
+			const savedEditorToolbarOrder = localStorage.getItem('editor.toolbarOrder');
+			const savedEditorToolbarHidden = localStorage.getItem('editor.toolbarHidden');
+			const savedTitlebarToolbarOrder = localStorage.getItem('titlebar.toolbarOrder');
+			const savedTitlebarToolbarHidden = localStorage.getItem('titlebar.toolbarHidden');
+			const savedTitlebarToolbarPlacement = localStorage.getItem('titlebar.toolbarPlacement');
 
 			const savedEditorFont = localStorage.getItem('editor.font');
 			const savedEditorFontSize = localStorage.getItem('editor.fontSize');
@@ -217,6 +246,24 @@ export class SettingsStore {
 				const parsed = Number.parseInt(value, 10);
 				if (!Number.isFinite(parsed)) return fallback;
 				return Math.min(max, Math.max(min, parsed));
+			};
+			const parseStringList = (value: string | null) => {
+				if (value === null) return null;
+				try {
+					const parsed = JSON.parse(value);
+					return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : null;
+				} catch {
+					return null;
+				}
+			};
+			const parseRecord = (value: string | null) => {
+				if (value === null) return null;
+				try {
+					const parsed = JSON.parse(value);
+					return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+				} catch {
+					return null;
+				}
 			};
 
 			if (savedMinimap !== null) this.minimap = savedMinimap === 'true';
@@ -243,6 +290,11 @@ export class SettingsStore {
 			if (savedTocWidth !== null) this.tocWidth = parseFontSize(savedTocWidth, 240, 180, 420);
 			if (savedImageDirectory !== null) this.imageDirectory = savedImageDirectory;
 			if (savedMacosImageScaling !== null) this.macosImageScaling = savedMacosImageScaling === 'true';
+			this.editorToolbarOrder = normalizeEditorToolbarOrder(parseStringList(savedEditorToolbarOrder));
+			this.editorToolbarHidden = normalizeEditorToolbarHidden(parseStringList(savedEditorToolbarHidden));
+			this.titlebarToolbarOrder = normalizeTitlebarToolbarOrder(parseStringList(savedTitlebarToolbarOrder));
+			this.titlebarToolbarHidden = normalizeTitlebarToolbarHidden(parseStringList(savedTitlebarToolbarHidden));
+			this.titlebarToolbarPlacement = normalizeTitlebarToolbarPlacement(parseRecord(savedTitlebarToolbarPlacement));
 			if (savedLanguage !== null) {
 				const lang = savedLanguage as LanguageCode;
 				const supportedCodes: LanguageCode[] = ['en', 'ja', 'zh-CN', 'zh-TW', 'ko', 'ru', 'es', 'fr', 'de', 'pt-BR', 'it', 'pl', 'nl', 'sv', 'vi', 'pt', 'ro', 'hu', 'cs', 'sk', 'el', 'fi', 'da', 'no', 'id', 'tr'];
@@ -312,6 +364,11 @@ export class SettingsStore {
 					localStorage.setItem('editor.imageDirectory', this.imageDirectory);
 					localStorage.setItem('editor.macosImageScaling', String(this.macosImageScaling));
 					localStorage.setItem('editor.language', this.language);
+					localStorage.setItem('editor.toolbarOrder', JSON.stringify(normalizeEditorToolbarOrder(this.editorToolbarOrder)));
+					localStorage.setItem('editor.toolbarHidden', JSON.stringify(normalizeEditorToolbarHidden(this.editorToolbarHidden)));
+					localStorage.setItem('titlebar.toolbarOrder', JSON.stringify(normalizeTitlebarToolbarOrder(this.titlebarToolbarOrder)));
+					localStorage.setItem('titlebar.toolbarHidden', JSON.stringify(normalizeTitlebarToolbarHidden(this.titlebarToolbarHidden)));
+					localStorage.setItem('titlebar.toolbarPlacement', JSON.stringify(normalizeTitlebarToolbarPlacement(this.titlebarToolbarPlacement)));
 					localStorage.setItem('editor.font', this.editorFont);
 					localStorage.setItem('editor.fontSize', String(this.editorFontSize));
 					localStorage.setItem('preview.font', this.previewFont);
@@ -452,6 +509,66 @@ export class SettingsStore {
 
 	setLanguage(lang: LanguageCode) {
 		this.language = lang;
+	}
+
+	setEditorToolbarToolVisible(id: string, visible: boolean) {
+		const hidden = normalizeEditorToolbarHidden(this.editorToolbarHidden);
+		if (visible) {
+			this.editorToolbarHidden = hidden.filter((hiddenId) => hiddenId !== id);
+		} else if (!hidden.includes(id)) {
+			this.editorToolbarHidden = normalizeEditorToolbarHidden([...hidden, id]);
+		}
+	}
+
+	moveEditorToolbarTool(id: string, direction: 'up' | 'down') {
+		const move = getEditorToolbarAdjacentMove(this.editorToolbarOrder, id, direction);
+		if (!move) return;
+		this.editorToolbarOrder = applyEditorToolbarMove(this.editorToolbarOrder, move);
+	}
+
+	reorderEditorToolbarTool(draggedId: string, targetId: string) {
+		const move = getEditorToolbarReorderMove(this.editorToolbarOrder, draggedId, targetId);
+		if (!move) return;
+		this.editorToolbarOrder = applyEditorToolbarMove(this.editorToolbarOrder, move);
+	}
+
+	resetEditorToolbar() {
+		this.editorToolbarOrder = [...DEFAULT_EDITOR_TOOLBAR_ORDER];
+		this.editorToolbarHidden = [];
+	}
+
+	setTitlebarToolbarActionVisible(id: string, visible: boolean) {
+		const hidden = normalizeTitlebarToolbarHidden(this.titlebarToolbarHidden);
+		if (visible) {
+			this.titlebarToolbarHidden = hidden.filter((hiddenId) => hiddenId !== id);
+		} else if (!hidden.includes(id)) {
+			this.titlebarToolbarHidden = normalizeTitlebarToolbarHidden([...hidden, id]);
+		}
+	}
+
+	setTitlebarToolbarActionPlacement(id: string, placement: TitlebarToolbarPlacement) {
+		this.titlebarToolbarPlacement = normalizeTitlebarToolbarPlacement({
+			...this.titlebarToolbarPlacement,
+			[id]: placement,
+		});
+	}
+
+	moveTitlebarToolbarAction(id: string, direction: 'up' | 'down') {
+		const move = getTitlebarToolbarAdjacentMove(this.titlebarToolbarOrder, id, direction);
+		if (!move) return;
+		this.titlebarToolbarOrder = applyTitlebarToolbarMove(this.titlebarToolbarOrder, move);
+	}
+
+	reorderTitlebarToolbarAction(draggedId: string, targetId: string) {
+		const move = getTitlebarToolbarReorderMove(this.titlebarToolbarOrder, draggedId, targetId);
+		if (!move) return;
+		this.titlebarToolbarOrder = applyTitlebarToolbarMove(this.titlebarToolbarOrder, move);
+	}
+
+	resetTitlebarToolbar() {
+		this.titlebarToolbarOrder = [...DEFAULT_TITLEBAR_TOOLBAR_ORDER];
+		this.titlebarToolbarHidden = [];
+		this.titlebarToolbarPlacement = { ...DEFAULT_TITLEBAR_TOOLBAR_PLACEMENT };
 	}
 
 	resetEditorMaxWidth() {
