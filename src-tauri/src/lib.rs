@@ -113,6 +113,27 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn export_data_url_uses_mime_from_extension_case_insensitively() {
+        assert_eq!(mime_type_for_export_path(Path::new("diagram.PNG")), "image/png");
+        assert_eq!(mime_type_for_export_path(Path::new("photo.JpEg")), "image/jpeg");
+        assert_eq!(mime_type_for_export_path(Path::new("vector.svg")), "image/svg+xml");
+        assert_eq!(mime_type_for_export_path(Path::new("unknown.bin")), "application/octet-stream");
+    }
+
+    #[test]
+    fn export_data_url_encodes_bytes_with_mime() {
+        assert_eq!(
+            file_bytes_to_data_url("image/png", b"Markpad"),
+            "data:image/png;base64,TWFya3BhZA==",
+        );
+    }
+}
+
 struct WatcherState {
     watcher: Mutex<Option<RecommendedWatcher>>,
 }
@@ -121,7 +142,15 @@ mod setup;
 
 #[tauri::command]
 async fn show_window(window: tauri::Window) {
-    window.show().unwrap();
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+}
+
+fn bring_webview_window_to_front(window: &tauri::WebviewWindow) {
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
 }
 
 fn process_internal_embeds(content: &str) -> Cow<'_, str> {
@@ -312,6 +341,41 @@ async fn render_markdown(content: String) -> Result<String, String> {
 #[tauri::command]
 fn read_file_content(path: String) -> Result<String, String> {
     fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+fn mime_type_for_export_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("bmp") => "image/bmp",
+        Some("ico") => "image/x-icon",
+        Some("avif") => "image/avif",
+        _ => "application/octet-stream",
+    }
+}
+
+fn file_bytes_to_data_url(mime_type: &str, bytes: &[u8]) -> String {
+    use base64::{engine::general_purpose, Engine as _};
+    format!(
+        "data:{};base64,{}",
+        mime_type,
+        general_purpose::STANDARD.encode(bytes)
+    )
+}
+
+#[tauri::command]
+fn read_file_as_data_url(path: String) -> Result<String, String> {
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let mime_type = mime_type_for_export_path(Path::new(&path));
+    Ok(file_bytes_to_data_url(mime_type, &bytes))
 }
 
 #[tauri::command]
@@ -632,6 +696,9 @@ fn clipboard_read_text() -> Result<String, String> {
 
 #[tauri::command]
 fn clipboard_read_image(macos_image_scaling: bool) -> Result<String, String> {
+    #[cfg(not(target_os = "macos"))]
+    let _ = macos_image_scaling;
+
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     let image = clipboard.get_image().map_err(|e| e.to_string())?;
 
@@ -860,6 +927,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             println!("Single Instance Args: {:?}", args);
+            let Some(window) = app.get_webview_window("main") else {
+                return;
+            };
 
             let path_str = args
                 .iter()
@@ -877,15 +947,9 @@ pub fn run() {
                     cwd_path.join(path).display().to_string()
                 };
 
-                let _ = app
-                    .get_webview_window("main")
-                    .expect("no main window")
-                    .emit("file-path", resolved_path);
+                let _ = window.emit("file-path", resolved_path);
             }
-            let _ = app
-                .get_webview_window("main")
-                .expect("no main window")
-                .set_focus();
+            bring_webview_window_to_front(&window);
         }))
         .plugin(tauri_plugin_prevent_default::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -994,6 +1058,11 @@ pub fn run() {
                             .build(app)?,
                     )
                     .item(
+                        &MenuItemBuilder::with_id("menu-file-reload", "Reload from Disk")
+                            .accelerator("F5")
+                            .build(app)?,
+                    )
+                    .item(
                         &MenuItemBuilder::with_id("menu-file-close", "Close")
                             .accelerator("CmdOrCtrl+W")
                             .build(app)?,
@@ -1080,6 +1149,7 @@ pub fn run() {
 
             if let Some(path) = file_path {
                 let _ = window.emit("file-path", path.as_str());
+                bring_webview_window_to_front(&window);
             }
 
             // If installer, force size (this will be saved to installer-state, not main-state)
@@ -1102,6 +1172,7 @@ pub fn run() {
             render_markdown,
             send_markdown_path,
             read_file_content,
+            read_file_as_data_url,
             save_file_content,
             save_file_binary,
             get_app_mode,
@@ -1166,7 +1237,7 @@ pub fn run() {
 
                         if let Some(window) = _app_handle.get_webview_window("main") {
                             let _ = window.emit("file-path", path_str);
-                            let _ = window.set_focus();
+                            bring_webview_window_to_front(&window);
                         }
                     }
                 }

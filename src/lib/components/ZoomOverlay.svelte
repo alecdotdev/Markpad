@@ -76,6 +76,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div 
 		class="zoom-content" 
+		role="presentation"
 		onclick={(e) => e.stopPropagation()} 
 		onwheel={handleWheel}
 		onmousedown={handleMouseDown}

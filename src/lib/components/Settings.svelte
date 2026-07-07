@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
 	import { getVersion } from '@tauri-apps/api/app';
+	import { openUrl } from '@tauri-apps/plugin-opener';
 	import { settings, DEFAULT_FONTS, type OSType } from '../stores/settings.svelte.js';
 	import { updateStore } from '../stores/update.svelte.js';
 	import { fade, scale, fly } from 'svelte/transition';
 	import { t, getSupportedLanguages } from '../utils/i18n.js';
 	import type { LanguageCode } from '../utils/i18n.js';
+	import { getEditorToolbarTools } from '../utils/editorToolbar.js';
+	import { getTitlebarToolbarActions, type TitlebarToolbarPlacement } from '../utils/titlebarToolbar.js';
 
 	let {
 		show = false,
@@ -14,7 +17,7 @@
 		onclose,
 	} = $props<{ show?: boolean; theme?: string; onSetTheme?: (t: string) => void; onclose: () => void }>();
 
-	let activeCategory = $state<'editor' | 'preview' | 'appearance' | 'files'>('editor');
+	let activeCategory = $state<'editor' | 'preview' | 'appearance' | 'toolbars' | 'files'>('editor');
 	let highlightMenuOpen = $state(false);
 	const highlightColors = [
 		{ value: 'default', color: 'var(--color-accent-fg)' },
@@ -37,6 +40,82 @@
 	let savedVscodeThemes = $state<string[]>([]);
 	let themeImportUrl = $state('');
 	let importingTheme = $state(false);
+	let editorToolbarDraggingId = $state<string | null>(null);
+	let editorToolbarDragOverId = $state<string | null>(null);
+	let titlebarToolbarDraggingId = $state<string | null>(null);
+	let titlebarToolbarDragOverId = $state<string | null>(null);
+	let editorToolbarSettingsTools = $derived(getEditorToolbarTools(settings.editorToolbarOrder));
+	let titlebarToolbarSettingsActions = $derived(getTitlebarToolbarActions(settings.titlebarToolbarOrder));
+
+	function isEditorToolbarToolVisible(id: string) {
+		return !settings.editorToolbarHidden.includes(id);
+	}
+
+	function isTitlebarToolbarActionVisible(id: string) {
+		return !settings.titlebarToolbarHidden.includes(id);
+	}
+
+	function getTitlebarToolbarActionPlacement(id: string): TitlebarToolbarPlacement {
+		return settings.titlebarToolbarPlacement[id] ?? 'menu';
+	}
+
+	function handleEditorToolbarDragStart(e: DragEvent, id: string) {
+		editorToolbarDraggingId = id;
+		editorToolbarDragOverId = null;
+		e.dataTransfer?.setData('text/plain', id);
+		if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+	}
+
+	function handleEditorToolbarDragOver(e: DragEvent, id: string) {
+		if (!editorToolbarDraggingId || editorToolbarDraggingId === id) return;
+		e.preventDefault();
+		editorToolbarDragOverId = id;
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+	}
+
+	function handleEditorToolbarItemDrop(e: DragEvent, id: string) {
+		e.preventDefault();
+		const draggedId = editorToolbarDraggingId || e.dataTransfer?.getData('text/plain');
+		if (draggedId && draggedId !== id) {
+			settings.reorderEditorToolbarTool(draggedId, id);
+		}
+		editorToolbarDraggingId = null;
+		editorToolbarDragOverId = null;
+	}
+
+	function clearEditorToolbarDragState() {
+		editorToolbarDraggingId = null;
+		editorToolbarDragOverId = null;
+	}
+
+	function handleTitlebarToolbarDragStart(e: DragEvent, id: string) {
+		titlebarToolbarDraggingId = id;
+		titlebarToolbarDragOverId = null;
+		e.dataTransfer?.setData('text/plain', id);
+		if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+	}
+
+	function handleTitlebarToolbarDragOver(e: DragEvent, id: string) {
+		if (!titlebarToolbarDraggingId || titlebarToolbarDraggingId === id) return;
+		e.preventDefault();
+		titlebarToolbarDragOverId = id;
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+	}
+
+	function handleTitlebarToolbarItemDrop(e: DragEvent, id: string) {
+		e.preventDefault();
+		const draggedId = titlebarToolbarDraggingId || e.dataTransfer?.getData('text/plain');
+		if (draggedId && draggedId !== id) {
+			settings.reorderTitlebarToolbarAction(draggedId, id);
+		}
+		titlebarToolbarDraggingId = null;
+		titlebarToolbarDragOverId = null;
+	}
+
+	function clearTitlebarToolbarDragState() {
+		titlebarToolbarDraggingId = null;
+		titlebarToolbarDragOverId = null;
+	}
 
 	async function loadVscodeThemes() {
 		try {
@@ -231,6 +310,24 @@
 							</svg>
 							{t('settings.appearance', settings.language)}
 					</button>
+					<button class="nav-item" class:active={activeCategory === 'toolbars'} onclick={() => (activeCategory = 'toolbars')}>
+						<svg
+								xmlns="http://www.w3.org/2000/svg"
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round">
+								<rect x="3" y="4" width="18" height="5" rx="1"></rect>
+								<rect x="3" y="15" width="18" height="5" rx="1"></rect>
+								<path d="M7 9v6"></path>
+								<path d="M17 9v6"></path>
+							</svg>
+							{t('settings.toolbars', settings.language)}
+					</button>
 					<button class="nav-item" class:active={activeCategory === 'files'} onclick={() => (activeCategory = 'files')}>
 						<svg
 								xmlns="http://www.w3.org/2000/svg"
@@ -273,8 +370,7 @@
 						<button
 							class="github-btn"
 							onclick={() =>
-								import('@tauri-apps/plugin-opener')
-									.then((m) => m.openUrl('https://github.com/alecdotdev/Markpad'))
+								openUrl('https://github.com/alecdotdev/Markpad')
 									.catch(() => window.open('https://github.com/alecdotdev/Markpad', '_blank'))}
 							aria-label="GitHub">
 							<svg viewBox="0 0 24 24" class="github-icon" fill="currentColor">
@@ -290,7 +386,7 @@
 					</div>
 				</nav>
 
-					<div class="settings-panel" onclick={() => { highlightMenuOpen = false; }}>
+					<div class="settings-panel" role="presentation" onclick={() => { highlightMenuOpen = false; }}>
 						{#if activeCategory === 'editor'}
 						<div class="settings-group">
 							<div class="settings-group-header">
@@ -420,7 +516,7 @@
 								</label>
 							</div>
 
-							<div class="setting-item">
+						<div class="setting-item">
 							<label for="editor-line-highlight">{t('settings.lineHighlight', settings.language)}</label>
 							<label class="toggle">
 								<input id="editor-line-highlight" type="checkbox" checked={settings.renderLineHighlight === 'line'} onchange={() => settings.toggleLineHighlight()} />
@@ -608,8 +704,7 @@
 									<button
 										class="reset-text-btn"
 										onclick={() =>
-											import('@tauri-apps/plugin-opener')
-												.then((m) => m.openUrl('https://vscodethemes.com/'))
+											openUrl('https://vscodethemes.com/')
 												.catch(() => window.open('https://vscodethemes.com/', '_blank'))}
 									>
 										{t('settings.browseThemes', settings.language)}
@@ -689,7 +784,15 @@
 										<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
 								</button>
 								{#if highlightMenuOpen}
-									<div class="custom-dropdown-menu" transition:fly={{ y: 5, duration: 150 }} onclick={(e) => e.stopPropagation()}>
+									<div
+										class="custom-dropdown-menu"
+										role="menu"
+										tabindex="-1"
+										transition:fly={{ y: 5, duration: 150 }}
+										onclick={(e) => e.stopPropagation()}
+										onkeydown={(e) => {
+											if (e.key === 'Escape') highlightMenuOpen = false;
+										}}>
 										{#each highlightColors as color, index}
 											{#if index === 1}
 												<div class="theme-menu-divider" style="height: 1px; background-color: var(--color-border-muted); margin: 4px 0; transform: scaleY(0.5);"></div>
@@ -717,6 +820,136 @@
 							<span class="toggle-slider"></span>
 						</label>
 					</div>
+					</div>
+					{:else if activeCategory === 'toolbars'}
+					<div class="settings-group">
+						<div class="settings-group-header">
+							<h2>{t('settings.toolbarsSettings', settings.language)}</h2>
+						</div>
+
+						<div class="toolbar-settings">
+							<div class="toolbar-settings-header">
+								<h3>{t('settings.applicationToolbar', settings.language)}</h3>
+								<button
+									type="button"
+									class="reset-text-btn"
+									onclick={() => settings.resetTitlebarToolbar()}>
+									{t('settings.resetToolbar', settings.language)}
+								</button>
+							</div>
+							<div class="toolbar-settings-list" role="list">
+								{#each titlebarToolbarSettingsActions as action, index (action.id)}
+									{@const actionName = t(action.labelKey, settings.language) === action.labelKey ? action.fallbackName : t(action.labelKey, settings.language)}
+									<div
+										class="toolbar-tool-row titlebar-toolbar-row"
+										class:drag-source={titlebarToolbarDraggingId === action.id}
+										class:drag-over={titlebarToolbarDragOverId === action.id}
+										role="listitem"
+										draggable="true"
+										ondragstart={(e) => handleTitlebarToolbarDragStart(e, action.id)}
+										ondragover={(e) => handleTitlebarToolbarDragOver(e, action.id)}
+										ondrop={(e) => handleTitlebarToolbarItemDrop(e, action.id)}
+										ondragend={clearTitlebarToolbarDragState}>
+										<span class="toolbar-drag-handle" aria-hidden="true">::</span>
+										<label class="toolbar-tool-toggle" for={`titlebar-toolbar-action-${action.id}`}>
+											<input
+												id={`titlebar-toolbar-action-${action.id}`}
+												type="checkbox"
+												checked={isTitlebarToolbarActionVisible(action.id)}
+												disabled={action.required}
+												onchange={(e) => settings.setTitlebarToolbarActionVisible(action.id, e.currentTarget.checked)}
+											/>
+											<span class="toolbar-tool-name">{actionName}</span>
+											<span class="toolbar-tool-sample">{action.sample}</span>
+										</label>
+										<div class="toolbar-placement-controls" role="group" aria-label={`${t('settings.toolbarPlacement', settings.language)}: ${actionName}`}>
+											<button
+												type="button"
+												class:active={getTitlebarToolbarActionPlacement(action.id) === 'bar'}
+												onclick={() => settings.setTitlebarToolbarActionPlacement(action.id, 'bar')}>
+												{t('settings.toolbarOnBar', settings.language)}
+											</button>
+											<button
+												type="button"
+												class:active={getTitlebarToolbarActionPlacement(action.id) === 'menu'}
+												onclick={() => settings.setTitlebarToolbarActionPlacement(action.id, 'menu')}>
+												{t('settings.toolbarInMenu', settings.language)}
+											</button>
+										</div>
+										<div class="toolbar-order-controls">
+											<button
+												type="button"
+												disabled={index === 0}
+												aria-label={`${t('settings.moveUp', settings.language)}: ${actionName}`}
+												onclick={() => settings.moveTitlebarToolbarAction(action.id, 'up')}>
+												Up
+											</button>
+											<button
+												type="button"
+												disabled={index === titlebarToolbarSettingsActions.length - 1}
+												aria-label={`${t('settings.moveDown', settings.language)}: ${actionName}`}
+												onclick={() => settings.moveTitlebarToolbarAction(action.id, 'down')}>
+												Down
+											</button>
+										</div>
+									</div>
+								{/each}
+							</div>
+						</div>
+
+						<div class="toolbar-settings">
+							<div class="toolbar-settings-header">
+								<h3>{t('settings.editorToolbar', settings.language)}</h3>
+								<button
+									type="button"
+									class="reset-text-btn"
+									onclick={() => settings.resetEditorToolbar()}>
+									{t('settings.resetToolbar', settings.language)}
+								</button>
+							</div>
+							<div class="toolbar-settings-list" role="list">
+								{#each editorToolbarSettingsTools as tool, index (tool.id)}
+									<div
+										class="toolbar-tool-row"
+										class:drag-source={editorToolbarDraggingId === tool.id}
+										class:drag-over={editorToolbarDragOverId === tool.id}
+										role="listitem"
+										draggable="true"
+										ondragstart={(e) => handleEditorToolbarDragStart(e, tool.id)}
+										ondragover={(e) => handleEditorToolbarDragOver(e, tool.id)}
+										ondrop={(e) => handleEditorToolbarItemDrop(e, tool.id)}
+										ondragend={clearEditorToolbarDragState}>
+										<span class="toolbar-drag-handle" aria-hidden="true">::</span>
+										<label class="toolbar-tool-toggle" for={`editor-toolbar-tool-${tool.id}`}>
+											<input
+												id={`editor-toolbar-tool-${tool.id}`}
+												type="checkbox"
+												checked={isEditorToolbarToolVisible(tool.id)}
+												onchange={(e) => settings.setEditorToolbarToolVisible(tool.id, e.currentTarget.checked)}
+											/>
+											<span class="toolbar-tool-name">{tool.name}</span>
+											<span class="toolbar-tool-sample">{tool.label}</span>
+										</label>
+										<div class="toolbar-order-controls">
+											<button
+												type="button"
+												disabled={index === 0}
+												aria-label={`${t('settings.moveUp', settings.language)}: ${tool.name}`}
+												onclick={() => settings.moveEditorToolbarTool(tool.id, 'up')}>
+												Up
+											</button>
+											<button
+												type="button"
+												disabled={index === editorToolbarSettingsTools.length - 1}
+												aria-label={`${t('settings.moveDown', settings.language)}: ${tool.name}`}
+												onclick={() => settings.moveEditorToolbarTool(tool.id, 'down')}>
+												Down
+											</button>
+										</div>
+									</div>
+								{/each}
+							</div>
+						</div>
 					</div>
 					{:else if activeCategory === 'files'}
 					<div class="settings-group">
@@ -762,18 +995,22 @@
 	}
 
 	.settings-modal {
-						background: var(--color-canvas-default);
-						border: 1px solid var(--color-border-default);
-						border-radius: 6px;
-						box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
-						width: 560px;
-						max-width: 90vw;
-						height: 420px;
-						display: flex;
-						flex-direction: column;
-						overflow: hidden;
-						font-family: var(--win-font);
-					}
+		background: var(--color-canvas-default);
+		border: 1px solid var(--color-border-default);
+		border-radius: 6px;
+		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+		width: min(560px, 90vw);
+		max-width: 90vw;
+		min-width: min(520px, 90vw);
+		height: 420px;
+		max-height: 90vh;
+		min-height: min(360px, 90vh);
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		resize: both;
+		font-family: var(--win-font);
+	}
 
 	.settings-header {
 		display: flex;
@@ -969,6 +1206,157 @@
 		height: 100%;
 	}
 
+	.toolbar-settings {
+		padding: 12px 0;
+		border-bottom: 1px solid var(--color-border-muted);
+	}
+
+	.toolbar-settings-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-bottom: 8px;
+	}
+
+	.toolbar-settings-header h3 {
+		margin: 0;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--color-fg-default);
+	}
+
+	.toolbar-settings-list {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.toolbar-tool-row {
+		display: grid;
+		grid-template-columns: 18px minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 8px;
+		min-height: 34px;
+		padding: 4px 6px;
+		border: 1px solid var(--color-border-muted);
+		border-radius: 6px;
+		background: var(--color-canvas-subtle);
+	}
+
+	.titlebar-toolbar-row {
+		grid-template-columns: 18px minmax(0, 1fr) auto auto;
+	}
+
+	.toolbar-tool-row.drag-source {
+		opacity: 0.55;
+	}
+
+	.toolbar-tool-row.drag-over {
+		border-color: var(--color-accent-fg);
+		background: var(--color-neutral-muted);
+	}
+
+	.toolbar-drag-handle {
+		color: var(--color-fg-muted);
+		cursor: grab;
+		font-size: 12px;
+		line-height: 1;
+		text-align: center;
+		user-select: none;
+	}
+
+	.toolbar-tool-toggle {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+		font-size: 13px;
+		color: var(--color-fg-default);
+	}
+
+	.toolbar-tool-toggle input {
+		flex: 0 0 auto;
+	}
+
+	.toolbar-tool-name {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.toolbar-tool-sample {
+		flex: 0 0 28px;
+		width: 28px;
+		height: 24px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border: 1px solid var(--color-border-muted);
+		border-radius: 4px;
+		color: var(--color-fg-muted);
+		background: var(--color-canvas-default);
+		font-size: 12px;
+		font-weight: 600;
+	}
+
+	.toolbar-order-controls {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.toolbar-placement-controls {
+		display: inline-flex;
+		align-items: center;
+		padding: 2px;
+		border: 1px solid var(--color-border-default);
+		border-radius: 5px;
+		background: var(--color-canvas-default);
+	}
+
+	.toolbar-placement-controls button {
+		height: 22px;
+		padding: 0 7px;
+		border: none;
+		border-radius: 3px;
+		background: transparent;
+		color: var(--color-fg-muted);
+		font-size: 11px;
+		cursor: pointer;
+	}
+
+	.toolbar-placement-controls button.active {
+		background: var(--color-accent-fg);
+		color: var(--color-btn-fg);
+	}
+
+	.toolbar-placement-controls button:not(.active):hover {
+		background: var(--color-neutral-muted);
+		color: var(--color-fg-default);
+	}
+
+	.toolbar-order-controls button {
+		height: 24px;
+		padding: 0 8px;
+		border: 1px solid var(--color-border-default);
+		border-radius: 4px;
+		background: var(--color-canvas-default);
+		color: var(--color-fg-default);
+		font-size: 11px;
+		cursor: pointer;
+	}
+
+	.toolbar-order-controls button:disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
+
+	.toolbar-order-controls button:not(:disabled):hover {
+		background: var(--color-neutral-muted);
+	}
+
 	.select-wrapper {
 		position: relative;
 		display: inline-flex;
@@ -1035,6 +1423,7 @@
 		font-family: inherit;
 		font-size: 13px;
 		text-align: right;
+		appearance: textfield;
 		-moz-appearance: textfield;
 		outline: none;
 	}
