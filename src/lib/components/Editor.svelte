@@ -33,6 +33,7 @@
 		onnextTab,
 		onprevTab,
 		onundoClose,
+		oncopyMarkdown,
 		onscrollsync,
 		zoomLevel = $bindable(100),
 		theme = "system",
@@ -51,6 +52,7 @@
 		onnextTab?: () => void;
 		onprevTab?: () => void;
 		onundoClose?: () => void;
+		oncopyMarkdown?: () => void;
 		onscrollsync?: (position: ScrollSyncPosition) => void;
 		zoomLevel?: number;
 		isSplit?: boolean;
@@ -742,6 +744,15 @@
 			run: (ed) => {
 				ed.trigger("keyboard", "editor.action.quickCommand", {});
 			},
+		});
+
+		editor.addAction({
+			id: "copy-markdown-document",
+			label: t('menu.copyMarkdown', uiLanguage),
+			keybindings: [
+				monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyC,
+			],
+			run: () => oncopyMarkdown?.(),
 		});
 
 		const wheelListener = (e: WheelEvent) => {

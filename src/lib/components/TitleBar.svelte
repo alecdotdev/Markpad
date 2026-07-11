@@ -59,6 +59,7 @@
 		onSetTheme,
 		onopenSettings,
 		onfind,
+		oncopyMarkdown,
 	} = $props<{
 		isFocused: boolean;
 		isScrolled: boolean;
@@ -102,6 +103,7 @@
 		onSetTheme?: (theme: string) => void;
 		onopenSettings?: () => void;
 		onfind?: () => void;
+		oncopyMarkdown?: () => void;
 	}>();
 
 	const appWindow = getCurrentWindow();
@@ -195,6 +197,11 @@
 		}
 	});
 
+	let isMarkdown = $derived.by(() => {
+		const ext = currentFile ? currentFile.split('.').pop()?.toLowerCase() || '' : 'md';
+		return ['md', 'markdown', 'mdown', 'mkd', 'txt'].includes(ext);
+	});
+
 	let visibleActionIds = $derived.by(() => {
 		const list: string[] = [];
 
@@ -202,9 +209,6 @@
 			list.push('back');
 			list.push('forward');
 			if (currentFile) list.push('reload');
-
-			const ext = currentFile ? currentFile.split('.').pop()?.toLowerCase() || '' : 'md';
-			const isMarkdown = ['md', 'markdown', 'mdown', 'mkd', 'txt'].includes(ext);
 
 			if (isMarkdown) {
 				list.push('toc');
@@ -430,6 +434,21 @@
 					{/if}
 					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.content)}
 						<div class="home-menu-divider"></div>
+						{#if isMarkdown}
+							<button
+								class="home-menu-item"
+								onclick={() => {
+									homeMenuOpen = false;
+									oncopyMarkdown?.();
+								}}>
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+									<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+								</svg>
+								{t('menu.copyMarkdown', currentLanguage)}
+								<span class="menu-shortcut">{modifier}+Shift+C</span>
+							</button>
+						{/if}
 						<button
 						class="home-menu-item"
 						onclick={() => {
@@ -437,7 +456,7 @@
 							onexportHtml?.();
 						}}>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-							><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+						><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
 						{t('menu.exportHtml', currentLanguage)}
 					</button>
 					<button
@@ -1467,7 +1486,7 @@
 		padding: 4px;
 		display: flex;
 		flex-direction: column;
-		width: 200px;
+		width: 250px;
 		z-index: 10006;
 		gap: 1px;
 	}
