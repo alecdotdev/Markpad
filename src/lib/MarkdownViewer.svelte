@@ -2579,34 +2579,23 @@ import { t } from './utils/i18n.js';
 					// hasUntitled: skip toast, just fall through to the modal.
 				}
 
-				const response = await askCustom(t('modal.youHaveUnsavedFiles', settings.language).replace('{{count}}', dirtyTabs.length.toString()), {
-											title: t('modal.unsavedChanges', settings.language),
-					kind: 'warning',
-					showSave: true,
-				});
-
-						if (response === 'save') {
-							// Attempt to save all dirty tabs
-							for (const tab of dirtyTabs) {
-								tabManager.setActive(tab.id);
-								await tick();
-								cancelPendingAutoSave(tab.id);
-								const saved = await saveContent(tab.id);
-								if (!saved) return; // Cancelled or failed
-							}
-							// If all saved successfully, close the app
-							appWindow.close();
-						} else if (response === 'discard') {
-							// Force close by removing this listener or skipping check?
-							// Since we are inside the event handler, we can't easily remove "this" listener specifically
-							// without refactoring how unlisteners are stored/accessed relative to this callback.
-							// However, if we just want to exit, we can use exit() from rust or just appWindow.destroy()?
-							// WebviewWindow.close() triggers this event again.
-							// Solution: invoke a command to exit forcefully or set a flag.
-							// The simplest might be to just clear the dirty flags and close.
-							tabManager.tabs.forEach((t) => (t.isDirty = false));
-							appWindow.close();
-						}
+					// Close the dirty tabs one at a time (issue #189): activate
+					// each tab and run the same localized unsaved-changes dialog
+					// a single tab close shows. Cancel stops the walk and keeps
+					// the window open with the remaining tabs. Re-find the next
+					// dirty tab every round — a save can leave a tab dirty again
+					// (TOCTOU) and tabs can change while a dialog is up.
+					while (true) {
+						const dirty = tabManager.tabs.find((t) => t.isDirty);
+						if (!dirty) break;
+						tabManager.setActive(dirty.id);
+						await tick();
+						if (!(await canCloseTab(dirty.id))) return;
+						tabManager.closeTab(dirty.id);
+					}
+					// Every dirty tab is resolved; this close re-enters the
+					// handler, finds nothing dirty, and proceeds.
+					appWindow.close();
 					}
 				}),
 			);
