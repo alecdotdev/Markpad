@@ -1301,9 +1301,12 @@ import { t } from './utils/i18n.js';
 		}
 
 		// Discard: drop pending save so we don't write what the user just
-		// threw away. The effect will re-arm a timer if the tab gets edited
-		// again.
+		// threw away, and revert to the last saved content so the tab is
+		// clean — callers either close it (tab close) or keep it open for the
+		// window-state snapshot (window close with restore enabled).
 		cancelPendingAutoSave(tabId);
+		tab.rawContent = tab.originalContent;
+		tab.isDirty = false;
 		return true;
 	}
 
@@ -2369,17 +2372,23 @@ import { t } from './utils/i18n.js';
 				const savedData = localStorage.getItem('savedTabsData');
 				if (savedData) {
 					tabManager.restoreState(savedData);
-					for (const tab of tabManager.tabs) {
-						if (!tab.content && tab.rawContent) {
-							invoke('render_markdown', { content: tab.rawContent })
-								.then((html) => {
-									const processed = processMarkdownHtml(html as string, tab.path, collapsedHeaders);
-									tabManager.updateTabContent(tab.id, processed);
-									if (tabManager.activeTabId === tab.id) {
-										tick().then(renderRichContent);
-									}
-								})
-								.catch(console.error);
+					// The snapshot carries window state only — content always
+					// comes from disk, so restored tabs show the file's real
+					// current bytes. A file that no longer exists drops its tab.
+					for (const tab of [...tabManager.tabs]) {
+						try {
+							const raw = (await invoke('read_file_content', { path: tab.path })) as string;
+							tab.rawContent = raw;
+							tab.originalContent = raw;
+							const html = await invoke('render_markdown', { content: raw });
+							const processed = processMarkdownHtml(html as string, tab.path, collapsedHeaders);
+							tabManager.updateTabContent(tab.id, processed);
+							if (tabManager.activeTabId === tab.id) {
+								tick().then(renderRichContent);
+							}
+						} catch (e) {
+							console.warn('Restore: dropping tab for unreadable file', tab.path, e);
+							tabManager.closeTab(tab.id);
 						}
 					}
 				}
@@ -2516,26 +2525,57 @@ import { t } from './utils/i18n.js';
 					console.log('onCloseRequested triggered');
 					if (isForceExiting) return;
 
-					// CRITICAL: before serializing tab state to localStorage
-					// (the restore-on-reopen path), make sure all pending
-					// auto-save edits are actually flushed to disk. Without
-					// this, closing the window with auto-save on but
-					// confirmBeforeSave off would silently put unsaved edits
-					// in localStorage only and never persist them to file.
-					if (settings.autoSave && !settings.confirmBeforeSave) {
-						const dirtyWithPath = tabManager.tabs.filter(
-							(t) => t.isDirty && t.path !== '',
-						);
-						for (const tab of dirtyWithPath) {
-							cancelPendingAutoSave(tab.id);
-							try {
-								await saveContent(tab.id);
-							} catch (e) {
-								console.error('Flush-on-close save failed for tab', tab.id, e);
+					// Unsaved content and session restore are separate concerns:
+					// dirty tabs are resolved FIRST through the per-tab dialogs,
+					// then the restore snapshot records window state only (open
+					// files, active tab, edit mode, split, scroll) — it never
+					// carries document content.
+					const dirtyTabs = tabManager.tabs.filter((t) => t.isDirty);
+					if (dirtyTabs.length > 0) {
+						event.preventDefault();
+
+						// Auto-save without confirmation: silently save every
+						// dirty tab that has a real path. Untitled tabs need a
+						// Save dialog, so the walk below handles them. A failed
+						// silent save is surfaced and its tab also goes to the
+						// walk. Timers are cancelled per tab right before its
+						// save to avoid duplicate writes.
+						if (settings.autoSave && !settings.confirmBeforeSave) {
+							for (const tab of dirtyTabs.filter((t) => t.path !== '')) {
+								cancelPendingAutoSave(tab.id);
+								const ok = await saveContent(tab.id);
+								if (!ok) {
+									addToast(t('toast.autoSaveFailed', settings.language), 'error');
+									break;
+								}
+							}
+						}
+
+						// Close review (issue #189): walk the remaining dirty
+						// tabs one at a time — activate each and run the same
+						// localized unsaved-changes dialog a single tab close
+						// shows. Cancel stops the walk and keeps the window
+						// open. Re-find the next dirty tab every round — a save
+						// can leave a tab dirty again (TOCTOU) and tabs can
+						// change while a dialog is up.
+						while (true) {
+							const dirty = tabManager.tabs.find((t) => t.isDirty);
+							if (!dirty) break;
+							tabManager.setActive(dirty.id);
+							await tick();
+							if (!(await canCloseTab(dirty.id))) return;
+							// Resolved tabs (saved, or reverted by Don't Save)
+							// stay open for the window-state snapshot when
+							// restore is enabled; untitled tabs have nothing to
+							// restore, and with restore off the red button
+							// closes tabs one by one.
+							if (!settings.restoreStateOnReopen || dirty.path === '') {
+								tabManager.closeTab(dirty.id);
 							}
 						}
 					}
 
+					// Session is clean now; record the window state for restore.
 					if (settings.restoreStateOnReopen) {
 						try {
 							const stateStr = tabManager.serializeState();
@@ -2543,60 +2583,12 @@ import { t } from './utils/i18n.js';
 						} catch (e) {
 							console.error('Failed to save state on close:', e);
 						}
-						return;
 					}
 
-					const dirtyTabs = tabManager.tabs.filter((t) => t.isDirty);
-					console.log('Dirty tabs:', dirtyTabs.length);
-					if (dirtyTabs.length > 0) {
-						console.log('Preventing default close');
-				event.preventDefault();
-
-				// Auto-save without confirmation: try silently saving every dirty
-				// tab that has a real path. If untitled tabs exist they need a
-				// Save dialog, so we just fall through to the modal — that is
-				// NOT a failure case and shouldn't show an error toast. We
-				// also DON'T clear pending timers up front: if the user picks
-				// Cancel in the modal below, we want the timers to keep
-				// running for tabs that are still dirty.
-				if (settings.autoSave && !settings.confirmBeforeSave) {
-					const tabsWithPath = dirtyTabs.filter((t) => t.path !== '');
-					const hasUntitled = dirtyTabs.some((t) => t.path === '');
-					if (!hasUntitled) {
-						let allOk = true;
-						for (const tab of tabsWithPath) {
-							cancelPendingAutoSave(tab.id);
-							const ok = await saveContent(tab.id);
-							if (!ok) { allOk = false; break; }
-						}
-						if (allOk) {
-							appWindow.close();
-							return;
-						}
-						// A real save failure happened — surface it.
-						addToast(t('toast.autoSaveFailed', settings.language), 'error');
-					}
-					// hasUntitled: skip toast, just fall through to the modal.
-				}
-
-					// Close the dirty tabs one at a time (issue #189): activate
-					// each tab and run the same localized unsaved-changes dialog
-					// a single tab close shows. Cancel stops the walk and keeps
-					// the window open with the remaining tabs. Re-find the next
-					// dirty tab every round — a save can leave a tab dirty again
-					// (TOCTOU) and tabs can change while a dialog is up.
-					while (true) {
-						const dirty = tabManager.tabs.find((t) => t.isDirty);
-						if (!dirty) break;
-						tabManager.setActive(dirty.id);
-						await tick();
-						if (!(await canCloseTab(dirty.id))) return;
-						tabManager.closeTab(dirty.id);
-					}
-					// Every dirty tab is resolved; this close re-enters the
-					// handler, finds nothing dirty, and proceeds.
-					appWindow.close();
-					}
+					// If we intercepted the close to run the review, re-trigger
+					// it: the handler re-enters, finds nothing dirty, and the
+					// close proceeds.
+					if (dirtyTabs.length > 0) appWindow.close();
 				}),
 			);
 
