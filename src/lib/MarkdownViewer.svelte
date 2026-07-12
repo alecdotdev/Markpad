@@ -1449,12 +1449,14 @@ import { t } from './utils/i18n.js';
 		let targetPath = tab.path;
 
 		if (!targetPath) {
-			// Special handling for new (untitled) files
+			// Special handling for new (untitled) files. Prefill the numbered
+			// tab title so the dialog itself names which tab is being saved.
 			const selected = await save({
 				filters: [
 					{ name: 'Markdown', extensions: ['md'] },
 					{ name: 'All Files', extensions: ['*'] },
 				],
+				defaultPath: tab.title,
 			});
 			if (selected) {
 				targetPath = selected;
@@ -2593,16 +2595,13 @@ import { t } from './utils/i18n.js';
 							// tabs one at a time — activate each and run the same
 							// localized unsaved-changes dialog a single tab close
 							// shows. Cancel stops the walk and keeps the window
-							// open. Prefer the tab the user is already looking at
-							// so the highlight only jumps when it has to, and
-							// re-find every round — a save can leave a tab dirty
-							// again (TOCTOU) and tabs can change while a dialog
-							// is up.
+							// open. Strict tab-strip order (left to right) so the
+							// sequence is predictable; numbered untitled titles
+							// let the dialog name each tab. Re-find every round —
+							// a save can leave a tab dirty again (TOCTOU) and
+							// tabs can change while a dialog is up.
 							while (true) {
-								const active = tabManager.activeTab;
-								const dirty = active?.isDirty
-									? active
-									: tabManager.tabs.find((t) => t.isDirty);
+								const dirty = tabManager.tabs.find((t) => t.isDirty);
 								if (!dirty) break;
 								tabManager.setActive(dirty.id);
 								await tick();

@@ -64,9 +64,18 @@ test('a second close request cannot start a competing walk', () => {
 	assert.match(handler, /finally \{\s*isCloseWalkActive = false;\s*\}/);
 });
 
-test('the walk starts from the tab the user is already looking at', () => {
+test('the walk proceeds in strict tab-strip order', () => {
 	const handler = closeHandler();
-	assert.match(handler, /active\?\.isDirty\s*\?\s*active\s*:\s*tabManager\.tabs\.find\(\(t\) => t\.isDirty\)/);
+	// Predictable left-to-right order: always the first dirty tab in the
+	// array; no active-first shortcut that made the sequence look random.
+	assert.match(handler, /const dirty = tabManager\.tabs\.find\(\(t\) => t\.isDirty\);/);
+	assert.doesNotMatch(handler, /active\?\.isDirty/);
+});
+
+test('the untitled save dialog prefills the numbered tab title', () => {
+	const fn = viewer.slice(viewer.indexOf('async function saveContent'));
+	const scope = fn.slice(0, fn.indexOf('async function saveContentAs'));
+	assert.match(scope, /defaultPath: tab\.title/);
 });
 
 test('the restore-on-reopen branch persists window state via the shared helper', () => {
