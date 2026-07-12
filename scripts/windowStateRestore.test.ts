@@ -43,7 +43,7 @@ test('restoreState rebuilds clean tabs and drops legacy untitled entries', () =>
 });
 
 test('startup restore reads content from disk, not from the snapshot', () => {
-	const init = slice(viewer, "localStorage.getItem('savedTabsData')", 'urlParams');
+	const init = slice(viewer, 'localStorage.getItem(WINDOW_STATE_KEY)', 'urlParams');
 	assert.match(init, /read_file_content/);
 	// a missing file drops its tab instead of restoring a ghost
 	assert.match(init, /closeTab\(/);
@@ -59,10 +59,31 @@ test('the close flow resolves dirty tabs before serializing window state', () =>
 	const handlerStart = viewer.indexOf('appWindow.onCloseRequested');
 	const handler = viewer.slice(handlerStart, viewer.indexOf('onDragDropEvent', handlerStart));
 	const walk = handler.indexOf('canCloseTab(dirty.id)');
-	const persist = handler.indexOf("localStorage.setItem('savedTabsData'");
+	const persist = handler.indexOf('persistWindowState()');
 	assert.ok(walk !== -1, 'per-tab walk not found');
 	assert.ok(persist !== -1, 'window-state serialization not found');
 	assert.ok(walk < persist, 'dirty tabs must be resolved before the snapshot is written');
+});
+
+test('v2 snapshots live under their own key, invisible to legacy builds', () => {
+	// An older build restoring a v2 snapshot ends up with undefined tab
+	// content; its editor then attributes a stale buffer to the wrong tab and
+	// auto-save writes it to disk. Separate keys keep the formats apart.
+	const helper = viewer.slice(viewer.indexOf('function persistWindowState'));
+	const scope = helper.slice(0, helper.indexOf('\n\t}'));
+	assert.match(scope, /setItem\(WINDOW_STATE_KEY/);
+	assert.match(scope, /removeItem\(LEGACY_STATE_KEY\)/);
+	assert.match(viewer, /const WINDOW_STATE_KEY = 'savedTabsDataV2';/);
+	// startup prefers the v2 key and falls back to legacy for migration
+	assert.match(
+		viewer,
+		/localStorage\.getItem\(WINDOW_STATE_KEY\) \?\? localStorage\.getItem\(LEGACY_STATE_KEY\)/,
+	);
+	// explicit exit clears both
+	const exitFn = viewer.slice(viewer.indexOf('async function appExit'));
+	const exitScope = exitFn.slice(0, exitFn.indexOf('\n\t}'));
+	assert.match(exitScope, /removeItem\(WINDOW_STATE_KEY\)/);
+	assert.match(exitScope, /removeItem\(LEGACY_STATE_KEY\)/);
 });
 
 test('with restore enabled resolved titled tabs stay open for the snapshot', () => {

@@ -343,6 +343,24 @@ import { t } from './utils/i18n.js';
 	// close request from starting a competing walk.
 	let isCloseWalkActive = false;
 
+	// v2 window-state snapshots live under their own key, and the legacy key
+	// is removed on every write: an older Markpad build restoring a v2
+	// snapshot it cannot understand ends up with undefined tab content, and
+	// its editor then attributes a stale buffer to the wrong tab — which
+	// auto-save happily writes to disk. Keeping the formats on separate keys
+	// makes old and new builds invisible to each other.
+	const WINDOW_STATE_KEY = 'savedTabsDataV2';
+	const LEGACY_STATE_KEY = 'savedTabsData';
+
+	function persistWindowState() {
+		try {
+			localStorage.setItem(WINDOW_STATE_KEY, tabManager.serializeState());
+			localStorage.removeItem(LEGACY_STATE_KEY);
+		} catch (e) {
+			console.error('Failed to save state on close:', e);
+		}
+	}
+
 	async function appExit() {
 		if (settings.restoreStateOnReopen) {
 			const hasUnsaved = tabManager.tabs.some((t) => t.isDirty || (t.path === '' && t.rawContent.trim() !== ''));
@@ -354,7 +372,8 @@ import { t } from './utils/i18n.js';
 				});
 				if (response !== 'discard') return;
 			}
-			localStorage.removeItem('savedTabsData');
+			localStorage.removeItem(WINDOW_STATE_KEY);
+			localStorage.removeItem(LEGACY_STATE_KEY);
 			isForceExiting = true;
 		}
 		appWindow.close();
@@ -1698,7 +1717,7 @@ import { t } from './utils/i18n.js';
 
 	async function destroyWindowAfterTabsClosed() {
 		if (settings.restoreStateOnReopen) {
-			localStorage.setItem('savedTabsData', tabManager.serializeState());
+			persistWindowState();
 		}
 
 		await appWindow.destroy();
@@ -2373,7 +2392,10 @@ import { t } from './utils/i18n.js';
 				const appMode = (await invoke('get_app_mode')) as any;
 
 			if (settings.restoreStateOnReopen) {
-				const savedData = localStorage.getItem('savedTabsData');
+				// v2 key first; the legacy key is only read for one-time
+				// migration of a snapshot written by an older build.
+				const savedData =
+					localStorage.getItem(WINDOW_STATE_KEY) ?? localStorage.getItem(LEGACY_STATE_KEY);
 				if (savedData) {
 					tabManager.restoreState(savedData);
 					// The snapshot carries window state only — content always
@@ -2601,12 +2623,7 @@ import { t } from './utils/i18n.js';
 
 					// Session is clean now; record the window state for restore.
 					if (settings.restoreStateOnReopen) {
-						try {
-							const stateStr = tabManager.serializeState();
-							localStorage.setItem('savedTabsData', stateStr);
-						} catch (e) {
-							console.error('Failed to save state on close:', e);
-						}
+						persistWindowState();
 					}
 
 					// If we intercepted the close to run the review, re-trigger

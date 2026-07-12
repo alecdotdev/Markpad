@@ -69,9 +69,9 @@ test('the walk starts from the tab the user is already looking at', () => {
 	assert.match(handler, /active\?\.isDirty\s*\?\s*active\s*:\s*tabManager\.tabs\.find\(\(t\) => t\.isDirty\)/);
 });
 
-test('the restore-on-reopen branch is untouched original behavior', () => {
+test('the restore-on-reopen branch persists window state via the shared helper', () => {
 	const handler = closeHandler();
-	assert.match(handler, /localStorage\.setItem\('savedTabsData', stateStr\);/);
+	assert.match(handler, /persistWindowState\(\);/);
 	// no durable-write experiment left behind
 	assert.doesNotMatch(viewer, /saveSessionState|sessionState\.js/);
 });
