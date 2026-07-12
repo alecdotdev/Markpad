@@ -1,4 +1,5 @@
 import { t } from '../utils/i18n.js';
+import { nextUntitledTitle } from '../utils/untitledTitle.js';
 import { settings } from './settings.svelte.js';
 import {
 	canGoBackInHistory,
@@ -132,7 +133,12 @@ class TabManager {
 
 	addTab(path: string, content: string = '') {
 		const id = crypto.randomUUID();
-		const filename = path.split('\\').pop()?.split('/').pop() || t('tabs.untitled', settings.language);
+		const filename =
+			path.split('\\').pop()?.split('/').pop() ||
+			nextUntitledTitle(
+				this.tabs.map((tab) => tab.title),
+				t('tabs.untitled', settings.language),
+			);
 		const fileHistory = createFileHistory(path, content);
 
 		this.tabs.push({
@@ -165,7 +171,10 @@ class TabManager {
 		this.tabs.push({
 			id,
 			path: '',
-			title: t('tabs.untitled', settings.language),
+			title: nextUntitledTitle(
+				this.tabs.map((tab) => tab.title),
+				t('tabs.untitled', settings.language),
+			),
 			content,
 			rawContent: content,
 			originalContent: content,
