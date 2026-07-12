@@ -22,6 +22,6 @@ test('fold wrapper animates an explicit measured height instead of a fractional 
 test('preview lifecycle starts and cleans up fold observation', () => {
 	const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 
-	assert.match(viewer, /observeFoldLayout\(markdownBody\)/);
+	assert.match(viewer, /observeFoldLayout\((?:markdownBody|body)\)/);
 	assert.match(viewer, /stopObservingFoldLayout\?\.\(\)/);
 });
