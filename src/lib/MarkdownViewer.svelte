@@ -338,6 +338,10 @@ import { t } from './utils/i18n.js';
 	}
 
 	let isForceExiting = $state(false);
+	// True while the window-close walk is showing per-tab dialogs; the native
+	// red button is not blocked by the dialog overlay, so this keeps a second
+	// close request from starting a competing walk.
+	let isCloseWalkActive = false;
 
 	async function appExit() {
 		if (settings.restoreStateOnReopen) {
@@ -2525,6 +2529,17 @@ import { t } from './utils/i18n.js';
 					console.log('onCloseRequested triggered');
 					if (isForceExiting) return;
 
+					// The red button is a native control, so it is NOT blocked
+					// by the in-app dialog overlay: a second click while the
+					// walk below is showing a dialog would re-enter this handler
+					// and start a competing walk whose setActive calls fight the
+					// first one — the highlighted tab stops matching the dialog.
+					// One walk at a time.
+					if (isCloseWalkActive) {
+						event.preventDefault();
+						return;
+					}
+
 					// Unsaved content and session restore are separate concerns:
 					// dirty tabs are resolved FIRST through the per-tab dialogs,
 					// then the restore snapshot records window state only (open
@@ -2533,45 +2548,54 @@ import { t } from './utils/i18n.js';
 					const dirtyTabs = tabManager.tabs.filter((t) => t.isDirty);
 					if (dirtyTabs.length > 0) {
 						event.preventDefault();
-
-						// Auto-save without confirmation: silently save every
-						// dirty tab that has a real path. Untitled tabs need a
-						// Save dialog, so the walk below handles them. A failed
-						// silent save is surfaced and its tab also goes to the
-						// walk. Timers are cancelled per tab right before its
-						// save to avoid duplicate writes.
-						if (settings.autoSave && !settings.confirmBeforeSave) {
-							for (const tab of dirtyTabs.filter((t) => t.path !== '')) {
-								cancelPendingAutoSave(tab.id);
-								const ok = await saveContent(tab.id);
-								if (!ok) {
-									addToast(t('toast.autoSaveFailed', settings.language), 'error');
-									break;
+						isCloseWalkActive = true;
+						try {
+							// Auto-save without confirmation: silently save every
+							// dirty tab that has a real path. Untitled tabs need a
+							// Save dialog, so the walk below handles them. A failed
+							// silent save is surfaced and its tab also goes to the
+							// walk. Timers are cancelled per tab right before its
+							// save to avoid duplicate writes.
+							if (settings.autoSave && !settings.confirmBeforeSave) {
+								for (const tab of dirtyTabs.filter((t) => t.path !== '')) {
+									cancelPendingAutoSave(tab.id);
+									const ok = await saveContent(tab.id);
+									if (!ok) {
+										addToast(t('toast.autoSaveFailed', settings.language), 'error');
+										break;
+									}
 								}
 							}
-						}
 
-						// Close review (issue #189): walk the remaining dirty
-						// tabs one at a time — activate each and run the same
-						// localized unsaved-changes dialog a single tab close
-						// shows. Cancel stops the walk and keeps the window
-						// open. Re-find the next dirty tab every round — a save
-						// can leave a tab dirty again (TOCTOU) and tabs can
-						// change while a dialog is up.
-						while (true) {
-							const dirty = tabManager.tabs.find((t) => t.isDirty);
-							if (!dirty) break;
-							tabManager.setActive(dirty.id);
-							await tick();
-							if (!(await canCloseTab(dirty.id))) return;
-							// Resolved tabs (saved, or reverted by Don't Save)
-							// stay open for the window-state snapshot when
-							// restore is enabled; untitled tabs have nothing to
-							// restore, and with restore off the red button
-							// closes tabs one by one.
-							if (!settings.restoreStateOnReopen || dirty.path === '') {
-								tabManager.closeTab(dirty.id);
+							// Close review (issue #189): walk the remaining dirty
+							// tabs one at a time — activate each and run the same
+							// localized unsaved-changes dialog a single tab close
+							// shows. Cancel stops the walk and keeps the window
+							// open. Prefer the tab the user is already looking at
+							// so the highlight only jumps when it has to, and
+							// re-find every round — a save can leave a tab dirty
+							// again (TOCTOU) and tabs can change while a dialog
+							// is up.
+							while (true) {
+								const active = tabManager.activeTab;
+								const dirty = active?.isDirty
+									? active
+									: tabManager.tabs.find((t) => t.isDirty);
+								if (!dirty) break;
+								tabManager.setActive(dirty.id);
+								await tick();
+								if (!(await canCloseTab(dirty.id))) return;
+								// Resolved tabs (saved, or reverted by Don't Save)
+								// stay open for the window-state snapshot when
+								// restore is enabled; untitled tabs have nothing to
+								// restore, and with restore off the red button
+								// closes tabs one by one.
+								if (!settings.restoreStateOnReopen || dirty.path === '') {
+									tabManager.closeTab(dirty.id);
+								}
 							}
+						} finally {
+							isCloseWalkActive = false;
 						}
 					}
 

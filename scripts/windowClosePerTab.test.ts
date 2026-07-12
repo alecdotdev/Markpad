@@ -54,6 +54,21 @@ test('the window closes only after every dirty tab is resolved', () => {
 	assert.ok(walk !== -1 && close !== -1 && walk < close);
 });
 
+test('a second close request cannot start a competing walk', () => {
+	const handler = closeHandler();
+	// The native red button bypasses the dialog overlay; re-entry must be
+	// swallowed while a walk is active, or two walks fight over setActive
+	// and the highlighted tab stops matching the dialog.
+	assert.match(handler, /if \(isCloseWalkActive\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/);
+	// and the flag is always released, even when the user cancels mid-walk
+	assert.match(handler, /finally \{\s*isCloseWalkActive = false;\s*\}/);
+});
+
+test('the walk starts from the tab the user is already looking at', () => {
+	const handler = closeHandler();
+	assert.match(handler, /active\?\.isDirty\s*\?\s*active\s*:\s*tabManager\.tabs\.find\(\(t\) => t\.isDirty\)/);
+});
+
 test('the restore-on-reopen branch is untouched original behavior', () => {
 	const handler = closeHandler();
 	assert.match(handler, /localStorage\.setItem\('savedTabsData', stateStr\);/);
