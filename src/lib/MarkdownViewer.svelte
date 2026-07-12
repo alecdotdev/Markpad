@@ -24,6 +24,7 @@
 	import { askToOpenExportedFile } from './utils/openExportedFile.js';
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
+import { observeFoldLayout } from './utils/foldLayout.js';
 import {
 	decodeLinkPath,
 	getMarkdownLinkTarget as getRelativeMarkdownTarget,
@@ -67,6 +68,7 @@ import { t } from './utils/i18n.js';
 	let markdownBody: HTMLElement | null = $state(null);
 	const renderDebounceMs = 50;
 	let renderTimeout: ReturnType<typeof setTimeout> | null = null;
+	let stopObservingFoldLayout: (() => void) | null = null;
 	
 	const highlightColorMap: Record<string, string> = {
 		default: 'color-mix(in srgb, var(--color-accent-fg) 40%, transparent)',
@@ -753,6 +755,25 @@ import { t } from './utils/i18n.js';
 
 	$effect(() => {
 		if (sanitizedHtml && markdownBody && !isEditing && hljs && renderMathInElement && mermaid) renderRichContent();
+	});
+
+	$effect(() => {
+		const html = sanitizedHtml;
+		const body = markdownBody;
+		if (!html || !body) return;
+
+		let cancelled = false;
+		tick().then(() => {
+			if (cancelled || body !== markdownBody) return;
+			stopObservingFoldLayout?.();
+			stopObservingFoldLayout = observeFoldLayout(body);
+		});
+
+		return () => {
+			cancelled = true;
+			stopObservingFoldLayout?.();
+			stopObservingFoldLayout = null;
+		};
 	});
 
 	// Re-apply find highlights after the preview HTML is replaced. The
