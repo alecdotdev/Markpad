@@ -116,6 +116,7 @@ export const translations: Record<LanguageCode, Translation> = {
             toolbarOnBar: 'Bar',
             toolbarInMenu: 'Menu',
             resetToolbar: 'Reset toolbar',
+            move: 'Move',
             moveUp: 'Move up',
             moveDown: 'Move down',
             default: 'Default',
@@ -2700,6 +2701,7 @@ export const translations: Record<LanguageCode, Translation> = {
             toolbarOnBar: 'Belka',
             toolbarInMenu: 'Menu',
             resetToolbar: 'Resetuj pasek',
+            move: 'Przenieś',
             moveUp: 'Przenieś wyżej',
             moveDown: 'Przenieś niżej',
             default: 'Domyślny',
@@ -5903,6 +5905,517 @@ export const translations: Record<LanguageCode, Translation> = {
         }
     }
 };
+
+type SupplementalTranslationSection = 'settings' | 'toc' | 'common';
+type SupplementalTranslations = Partial<Record<SupplementalTranslationSection, Record<string, string>>>;
+
+const interactiveLabelTranslations: Record<LanguageCode, SupplementalTranslations> = {
+    en: {
+        settings: {
+            toolbarPlacement: 'Toolbar placement',
+            toolbarOnBar: 'Bar',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Reset toolbar',
+            move: 'Move',
+            moveUp: 'Move up',
+            moveDown: 'Move down',
+            resizeWindow: 'Resize settings window'
+        },
+        toc: {
+            resizeTableOfContents: 'Resize table of contents'
+        },
+        common: {
+            decrease: 'Decrease',
+            increase: 'Increase'
+        }
+    },
+    ja: {
+        settings: {
+            toolbarPlacement: 'ツールバーの配置',
+            toolbarOnBar: 'バー',
+            toolbarInMenu: 'メニュー',
+            resetToolbar: 'ツールバーをリセット',
+            move: '移動',
+            moveUp: '上へ移動',
+            moveDown: '下へ移動',
+            resizeWindow: '設定ウィンドウのサイズを変更'
+        },
+        toc: {
+            resizeTableOfContents: '目次のサイズを変更'
+        },
+        common: {
+            decrease: '減らす',
+            increase: '増やす'
+        }
+    },
+    'zh-CN': {
+        settings: {
+            toolbarPlacement: '工具栏位置',
+            toolbarOnBar: '栏',
+            toolbarInMenu: '菜单',
+            resetToolbar: '重置工具栏',
+            move: '移动',
+            moveUp: '上移',
+            moveDown: '下移',
+            resizeWindow: '调整设置窗口大小'
+        },
+        toc: {
+            resizeTableOfContents: '调整目录大小'
+        },
+        common: {
+            decrease: '减少',
+            increase: '增加'
+        }
+    },
+    'zh-TW': {
+        settings: {
+            toolbarPlacement: '工具列位置',
+            toolbarOnBar: '工具列',
+            toolbarInMenu: '選單',
+            resetToolbar: '重設工具列',
+            move: '移動',
+            moveUp: '上移',
+            moveDown: '下移',
+            resizeWindow: '調整設定視窗大小'
+        },
+        toc: {
+            resizeTableOfContents: '調整目錄大小'
+        },
+        common: {
+            decrease: '減少',
+            increase: '增加'
+        }
+    },
+    ko: {
+        settings: {
+            toolbarPlacement: '도구 모음 위치',
+            toolbarOnBar: '막대',
+            toolbarInMenu: '메뉴',
+            resetToolbar: '도구 모음 초기화',
+            move: '이동',
+            moveUp: '위로 이동',
+            moveDown: '아래로 이동',
+            resizeWindow: '설정 창 크기 조정'
+        },
+        toc: {
+            resizeTableOfContents: '목차 크기 조정'
+        },
+        common: {
+            decrease: '줄이기',
+            increase: '늘리기'
+        }
+    },
+    ru: {
+        settings: {
+            toolbarPlacement: 'Расположение панели',
+            toolbarOnBar: 'Панель',
+            toolbarInMenu: 'Меню',
+            resetToolbar: 'Сбросить панель',
+            move: 'Переместить',
+            moveUp: 'Переместить вверх',
+            moveDown: 'Переместить вниз',
+            resizeWindow: 'Изменить размер окна настроек'
+        },
+        toc: {
+            resizeTableOfContents: 'Изменить размер оглавления'
+        },
+        common: {
+            decrease: 'Уменьшить',
+            increase: 'Увеличить'
+        }
+    },
+    es: {
+        settings: {
+            toolbarPlacement: 'Ubicación de la barra',
+            toolbarOnBar: 'Barra',
+            toolbarInMenu: 'Menú',
+            resetToolbar: 'Restablecer barra',
+            move: 'Mover',
+            moveUp: 'Mover arriba',
+            moveDown: 'Mover abajo',
+            resizeWindow: 'Cambiar tamaño de la ventana de ajustes'
+        },
+        toc: {
+            resizeTableOfContents: 'Cambiar tamaño de la tabla de contenido'
+        },
+        common: {
+            decrease: 'Disminuir',
+            increase: 'Aumentar'
+        }
+    },
+    fr: {
+        settings: {
+            toolbarPlacement: 'Emplacement de la barre',
+            toolbarOnBar: 'Barre',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Réinitialiser la barre',
+            move: 'Déplacer',
+            moveUp: 'Déplacer vers le haut',
+            moveDown: 'Déplacer vers le bas',
+            resizeWindow: 'Redimensionner la fenêtre des paramètres'
+        },
+        toc: {
+            resizeTableOfContents: 'Redimensionner la table des matières'
+        },
+        common: {
+            decrease: 'Diminuer',
+            increase: 'Augmenter'
+        }
+    },
+    de: {
+        settings: {
+            toolbarPlacement: 'Position der Symbolleiste',
+            toolbarOnBar: 'Leiste',
+            toolbarInMenu: 'Menü',
+            resetToolbar: 'Symbolleiste zurücksetzen',
+            move: 'Verschieben',
+            moveUp: 'Nach oben verschieben',
+            moveDown: 'Nach unten verschieben',
+            resizeWindow: 'Einstellungsfenster vergrößern oder verkleinern'
+        },
+        toc: {
+            resizeTableOfContents: 'Inhaltsverzeichnis vergrößern oder verkleinern'
+        },
+        common: {
+            decrease: 'Verringern',
+            increase: 'Erhöhen'
+        }
+    },
+    'pt-BR': {
+        settings: {
+            toolbarPlacement: 'Posição da barra',
+            toolbarOnBar: 'Barra',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Redefinir barra',
+            move: 'Mover',
+            moveUp: 'Mover para cima',
+            moveDown: 'Mover para baixo',
+            resizeWindow: 'Redimensionar janela de configurações'
+        },
+        toc: {
+            resizeTableOfContents: 'Redimensionar sumário'
+        },
+        common: {
+            decrease: 'Diminuir',
+            increase: 'Aumentar'
+        }
+    },
+    it: {
+        settings: {
+            toolbarPlacement: 'Posizione barra',
+            toolbarOnBar: 'Barra',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Reimposta barra',
+            move: 'Sposta',
+            moveUp: 'Sposta su',
+            moveDown: 'Sposta giù',
+            resizeWindow: 'Ridimensiona finestra impostazioni'
+        },
+        toc: {
+            resizeTableOfContents: 'Ridimensiona indice'
+        },
+        common: {
+            decrease: 'Diminuisci',
+            increase: 'Aumenta'
+        }
+    },
+    pl: {
+        settings: {
+            toolbarPlacement: 'Miejsce na pasku',
+            toolbarOnBar: 'Belka',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Resetuj pasek',
+            move: 'Przenieś',
+            moveUp: 'Przenieś wyżej',
+            moveDown: 'Przenieś niżej',
+            resizeWindow: 'Zmień rozmiar okna ustawień'
+        },
+        toc: {
+            resizeTableOfContents: 'Zmień rozmiar spisu treści'
+        },
+        common: {
+            decrease: 'Zmniejsz',
+            increase: 'Zwiększ'
+        }
+    },
+    nl: {
+        settings: {
+            toolbarPlacement: 'Werkbalkpositie',
+            toolbarOnBar: 'Balk',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Werkbalk resetten',
+            move: 'Verplaatsen',
+            moveUp: 'Omhoog verplaatsen',
+            moveDown: 'Omlaag verplaatsen',
+            resizeWindow: 'Instellingenvenster vergroten of verkleinen'
+        },
+        toc: {
+            resizeTableOfContents: 'Inhoudsopgave vergroten of verkleinen'
+        },
+        common: {
+            decrease: 'Verlagen',
+            increase: 'Verhogen'
+        }
+    },
+    sv: {
+        settings: {
+            toolbarPlacement: 'Verktygsfältets placering',
+            toolbarOnBar: 'Fält',
+            toolbarInMenu: 'Meny',
+            resetToolbar: 'Återställ verktygsfält',
+            move: 'Flytta',
+            moveUp: 'Flytta upp',
+            moveDown: 'Flytta ned',
+            resizeWindow: 'Ändra storlek på inställningsfönster'
+        },
+        toc: {
+            resizeTableOfContents: 'Ändra storlek på innehållsförteckning'
+        },
+        common: {
+            decrease: 'Minska',
+            increase: 'Öka'
+        }
+    },
+    vi: {
+        settings: {
+            toolbarPlacement: 'Vị trí thanh công cụ',
+            toolbarOnBar: 'Thanh',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Đặt lại thanh công cụ',
+            move: 'Di chuyển',
+            moveUp: 'Di chuyển lên',
+            moveDown: 'Di chuyển xuống',
+            resizeWindow: 'Đổi kích thước cửa sổ cài đặt'
+        },
+        toc: {
+            resizeTableOfContents: 'Đổi kích thước mục lục'
+        },
+        common: {
+            decrease: 'Giảm',
+            increase: 'Tăng'
+        }
+    },
+    pt: {
+        settings: {
+            toolbarPlacement: 'Posição da barra',
+            toolbarOnBar: 'Barra',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Repor barra',
+            move: 'Mover',
+            moveUp: 'Mover para cima',
+            moveDown: 'Mover para baixo',
+            resizeWindow: 'Redimensionar janela de definições'
+        },
+        toc: {
+            resizeTableOfContents: 'Redimensionar índice'
+        },
+        common: {
+            decrease: 'Diminuir',
+            increase: 'Aumentar'
+        }
+    },
+    ro: {
+        settings: {
+            toolbarPlacement: 'Poziția barei',
+            toolbarOnBar: 'Bară',
+            toolbarInMenu: 'Meniu',
+            resetToolbar: 'Resetează bara',
+            move: 'Mută',
+            moveUp: 'Mută în sus',
+            moveDown: 'Mută în jos',
+            resizeWindow: 'Redimensionează fereastra de setări'
+        },
+        toc: {
+            resizeTableOfContents: 'Redimensionează cuprinsul'
+        },
+        common: {
+            decrease: 'Micșorează',
+            increase: 'Mărește'
+        }
+    },
+    hu: {
+        settings: {
+            toolbarPlacement: 'Eszköztár helye',
+            toolbarOnBar: 'Sáv',
+            toolbarInMenu: 'Menü',
+            resetToolbar: 'Eszköztár visszaállítása',
+            move: 'Áthelyezés',
+            moveUp: 'Mozgatás felfelé',
+            moveDown: 'Mozgatás lefelé',
+            resizeWindow: 'Beállítások ablak átméretezése'
+        },
+        toc: {
+            resizeTableOfContents: 'Tartalomjegyzék átméretezése'
+        },
+        common: {
+            decrease: 'Csökkentés',
+            increase: 'Növelés'
+        }
+    },
+    cs: {
+        settings: {
+            toolbarPlacement: 'Umístění panelu',
+            toolbarOnBar: 'Panel',
+            toolbarInMenu: 'Nabídka',
+            resetToolbar: 'Obnovit panel',
+            move: 'Přesunout',
+            moveUp: 'Přesunout nahoru',
+            moveDown: 'Přesunout dolů',
+            resizeWindow: 'Změnit velikost okna nastavení'
+        },
+        toc: {
+            resizeTableOfContents: 'Změnit velikost obsahu'
+        },
+        common: {
+            decrease: 'Snížit',
+            increase: 'Zvýšit'
+        }
+    },
+    sk: {
+        settings: {
+            toolbarPlacement: 'Umiestnenie panela',
+            toolbarOnBar: 'Panel',
+            toolbarInMenu: 'Ponuka',
+            resetToolbar: 'Obnoviť panel',
+            move: 'Presunúť',
+            moveUp: 'Presunúť hore',
+            moveDown: 'Presunúť dole',
+            resizeWindow: 'Zmeniť veľkosť okna nastavení'
+        },
+        toc: {
+            resizeTableOfContents: 'Zmeniť veľkosť obsahu'
+        },
+        common: {
+            decrease: 'Znížiť',
+            increase: 'Zvýšiť'
+        }
+    },
+    el: {
+        settings: {
+            toolbarPlacement: 'Θέση γραμμής εργαλείων',
+            toolbarOnBar: 'Γραμμή',
+            toolbarInMenu: 'Μενού',
+            resetToolbar: 'Επαναφορά γραμμής εργαλείων',
+            move: 'Μετακίνηση',
+            moveUp: 'Μετακίνηση πάνω',
+            moveDown: 'Μετακίνηση κάτω',
+            resizeWindow: 'Αλλαγή μεγέθους παραθύρου ρυθμίσεων'
+        },
+        toc: {
+            resizeTableOfContents: 'Αλλαγή μεγέθους πίνακα περιεχομένων'
+        },
+        common: {
+            decrease: 'Μείωση',
+            increase: 'Αύξηση'
+        }
+    },
+    fi: {
+        settings: {
+            toolbarPlacement: 'Työkalupalkin sijainti',
+            toolbarOnBar: 'Palkki',
+            toolbarInMenu: 'Valikko',
+            resetToolbar: 'Nollaa työkalupalkki',
+            move: 'Siirrä',
+            moveUp: 'Siirrä ylös',
+            moveDown: 'Siirrä alas',
+            resizeWindow: 'Muuta asetusikkunan kokoa'
+        },
+        toc: {
+            resizeTableOfContents: 'Muuta sisällysluettelon kokoa'
+        },
+        common: {
+            decrease: 'Pienennä',
+            increase: 'Suurenna'
+        }
+    },
+    da: {
+        settings: {
+            toolbarPlacement: 'Værktøjslinjens placering',
+            toolbarOnBar: 'Linje',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Nulstil værktøjslinje',
+            move: 'Flyt',
+            moveUp: 'Flyt op',
+            moveDown: 'Flyt ned',
+            resizeWindow: 'Tilpas størrelsen på indstillingsvinduet'
+        },
+        toc: {
+            resizeTableOfContents: 'Tilpas størrelsen på indholdsfortegnelsen'
+        },
+        common: {
+            decrease: 'Formindsk',
+            increase: 'Forøg'
+        }
+    },
+    no: {
+        settings: {
+            toolbarPlacement: 'Verktøylinjens plassering',
+            toolbarOnBar: 'Linje',
+            toolbarInMenu: 'Meny',
+            resetToolbar: 'Tilbakestill verktøylinje',
+            move: 'Flytt',
+            moveUp: 'Flytt opp',
+            moveDown: 'Flytt ned',
+            resizeWindow: 'Endre størrelse på innstillingsvindu'
+        },
+        toc: {
+            resizeTableOfContents: 'Endre størrelse på innholdsfortegnelsen'
+        },
+        common: {
+            decrease: 'Reduser',
+            increase: 'Øk'
+        }
+    },
+    id: {
+        settings: {
+            toolbarPlacement: 'Posisi bilah alat',
+            toolbarOnBar: 'Bilah',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Atur ulang bilah alat',
+            move: 'Pindahkan',
+            moveUp: 'Pindahkan ke atas',
+            moveDown: 'Pindahkan ke bawah',
+            resizeWindow: 'Ubah ukuran jendela pengaturan'
+        },
+        toc: {
+            resizeTableOfContents: 'Ubah ukuran daftar isi'
+        },
+        common: {
+            decrease: 'Kurangi',
+            increase: 'Tambah'
+        }
+    },
+    tr: {
+        settings: {
+            toolbarPlacement: 'Araç çubuğu konumu',
+            toolbarOnBar: 'Çubuk',
+            toolbarInMenu: 'Menü',
+            resetToolbar: 'Araç çubuğunu sıfırla',
+            move: 'Taşı',
+            moveUp: 'Yukarı taşı',
+            moveDown: 'Aşağı taşı',
+            resizeWindow: 'Ayarlar penceresini yeniden boyutlandır'
+        },
+        toc: {
+            resizeTableOfContents: 'İçindekiler tablosunu yeniden boyutlandır'
+        },
+        common: {
+            decrease: 'Azalt',
+            increase: 'Artır'
+        }
+    }
+};
+
+for (const [language, sections] of Object.entries(interactiveLabelTranslations) as [LanguageCode, SupplementalTranslations][]) {
+    for (const [section, values] of Object.entries(sections) as [SupplementalTranslationSection, Record<string, string>][]) {
+        const currentSection = translations[language][section];
+        if (currentSection && typeof currentSection === 'object') {
+            Object.assign(currentSection, values);
+        } else {
+            translations[language][section] = { ...values };
+        }
+    }
+}
 
 export function t(key: string, lang: LanguageCode = 'en'): string {
     const keys = key.split('.');

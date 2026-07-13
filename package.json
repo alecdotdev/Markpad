@@ -11,6 +11,7 @@
 		"test:frontmatter": "node --test --import tsx scripts/frontMatter.test.ts scripts/frontMatterDisclosure.test.ts",
 		"test:frontmatter": "node --test --import tsx scripts/frontMatter.test.ts",
 		"test:workflows": "node --test --import tsx scripts/exportHtml.test.ts scripts/exportOpenPrompt.test.ts scripts/reloadOpenToolbar.test.ts scripts/editorToolbar.test.ts scripts/titlebarToolbar.test.ts scripts/toolbarCustomizationWiring.test.ts",
+		"test:settings-scroll": "node --test --import tsx scripts/previewScrollSync.test.ts scripts/toolbarCustomizationWiring.test.ts",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"tauri": "tauri"

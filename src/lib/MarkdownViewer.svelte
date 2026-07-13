@@ -90,8 +90,14 @@ import { t } from './utils/i18n.js';
 		cyan: 'rgba(43, 185, 178, 0.4)',
 		green: 'rgba(77, 177, 88, 0.4)',
 	};
+
+	type ScrollSyncPosition = {
+		section: 'frontmatter' | 'body';
+		ratio: number;
+	};
+
 	let editorPane = $state<{ 
-		syncScrollToLine: (line: number, ratio?: number) => void; 
+		syncScrollToPosition: (position: ScrollSyncPosition) => void;
 		handleDroppedFile: (path: string, x: number, y: number) => Promise<void>;
 		updateDragCaret: (x: number, y: number) => void;
 		hideDragCaret: () => void;
@@ -1056,76 +1062,134 @@ import { t } from './utils/i18n.js';
 		}
 	});
 
-	function scrollToLine(line: number, ratio: number = 0) {
+	function clampScrollRatio(value: number) {
+		if (!Number.isFinite(value)) return 0;
+		return Math.max(0, Math.min(1, value));
+	}
+
+	function getPreviewScrollMax(target: HTMLElement) {
+		return Math.max(0, target.scrollHeight - target.clientHeight);
+	}
+
+	function getScrollSyncPositionFromPixels(scrollTop: number, scrollMax: number, frontMatterEnd: number): ScrollSyncPosition {
+		const safeMax = Math.max(0, scrollMax);
+		const safeFrontMatterEnd = Math.max(0, Math.min(safeMax, frontMatterEnd));
+		const safeScrollTop = Math.max(0, Math.min(safeMax, scrollTop));
+
+		if (safeFrontMatterEnd > 0 && safeScrollTop < safeFrontMatterEnd) {
+			return {
+				section: 'frontmatter',
+				ratio: clampScrollRatio(safeScrollTop / safeFrontMatterEnd),
+			};
+		}
+
+		const bodyRange = Math.max(0, safeMax - safeFrontMatterEnd);
+		return {
+			section: 'body',
+			ratio: bodyRange > 0 ? clampScrollRatio((safeScrollTop - safeFrontMatterEnd) / bodyRange) : 0,
+		};
+	}
+
+	function getScrollTopForSyncPosition(position: ScrollSyncPosition, scrollMax: number, frontMatterEnd: number) {
+		const safeMax = Math.max(0, scrollMax);
+		const safeFrontMatterEnd = Math.max(0, Math.min(safeMax, frontMatterEnd));
+		const ratio = clampScrollRatio(position.ratio);
+
+		if (position.section === 'frontmatter') {
+			return safeFrontMatterEnd * ratio;
+		}
+
+		const bodyRange = Math.max(0, safeMax - safeFrontMatterEnd);
+		return safeFrontMatterEnd + bodyRange * ratio;
+	}
+
+	function getPreviewFrontMatterScrollEnd(target: HTMLElement) {
+		const panel = target.querySelector<HTMLElement>('.frontmatter' + '-panel');
+		if (!panel) return 0;
+
+		return Math.max(0, Math.min(getPreviewScrollMax(target), panel.offsetTop + panel.offsetHeight));
+	}
+
+	function getPreviewScrollSyncPosition(target: HTMLElement) {
+		return getScrollSyncPositionFromPixels(
+			target.scrollTop,
+			getPreviewScrollMax(target),
+			getPreviewFrontMatterScrollEnd(target),
+		);
+	}
+
+	function scrollPreviewToSyncPosition(position: ScrollSyncPosition) {
 		if (!markdownBody) return;
 
-		const children = Array.from(markdownBody.children) as HTMLElement[];
-		for (const el of children) {
-			const sourcepos = el.dataset.sourcepos;
-			if (sourcepos) {
-				const [start, end] = sourcepos.split('-');
-				const startLine = parseInt(start.split(':')[0]);
-				const endLine = parseInt(end.split(':')[0]);
+		const targetScroll = getScrollTopForSyncPosition(
+			position,
+			getPreviewScrollMax(markdownBody),
+			getPreviewFrontMatterScrollEnd(markdownBody),
+		);
 
-				if (!isNaN(startLine) && !isNaN(endLine)) {
-					if (line >= startLine && line <= endLine) {
-						const totalLines = endLine - startLine;
-						let lineRatio = 0;
-						if (totalLines > 0) {
-							lineRatio = (line - startLine) / totalLines;
-						}
-						lineRatio = Math.max(0, Math.min(1, lineRatio));
+		if (Math.abs(markdownBody.scrollTop - targetScroll) <= 5) return;
 
-						const elementTop = el.offsetTop + el.offsetHeight * lineRatio;
+		isProgrammaticScroll = true;
+		markdownBody.scrollTop = targetScroll;
+	}
 
-						const viewportHeight = markdownBody.clientHeight;
-						const targetScroll = elementTop - viewportHeight * ratio;
-
-						if (Math.abs(markdownBody.scrollTop - targetScroll) > 5) {
-							isProgrammaticScroll = true;
-							markdownBody.scrollTop = Math.max(0, targetScroll);
-						}
-						return;
-					}
-				}
-			}
+	function handleEditorScrollSync(position: ScrollSyncPosition) {
+		if (tabManager.activeTab?.isScrollSynced) {
+			scrollPreviewToSyncPosition(position);
 		}
 	}
 
-	function handleEditorScrollSync(line: number, ratio: number = 0) {
-		if (tabManager.activeTab?.isScrollSynced) {
-			scrollToLine(line, ratio);
+	type PreviewScrollAnchor = {
+		line: number;
+		ratio: number;
+	};
+
+	function parseSourceposLineRange(sourcepos: string | undefined) {
+		if (!sourcepos) return null;
+		const [start, end] = sourcepos.split('-');
+		const startLine = parseInt(start?.split(':')[0] ?? '', 10);
+		const endLine = parseInt(end?.split(':')[0] ?? '', 10);
+
+		if (Number.isNaN(startLine) || Number.isNaN(endLine)) return null;
+		return { startLine, endLine };
+	}
+
+	function getPreviewScrollAnchor(target: HTMLElement): PreviewScrollAnchor | null {
+		const anchorOffset = target.scrollTop + 60;
+		const viewportRatio = target.clientHeight > 0 ? Math.min(1, 60 / target.clientHeight) : 0;
+		const candidates = Array.from(target.querySelectorAll<HTMLElement>('[data-sourcepos]'));
+
+		let best: { el: HTMLElement; startLine: number; endLine: number; distance: number } | null = null;
+		for (const el of candidates) {
+			const range = parseSourceposLineRange(el.dataset.sourcepos);
+			if (!range) continue;
+
+			const top = el.offsetTop;
+			const bottom = top + el.offsetHeight;
+			const distance = anchorOffset < top ? top - anchorOffset : anchorOffset > bottom ? anchorOffset - bottom : 0;
+
+			if (!best || distance < best.distance) {
+				best = { el, startLine: range.startLine, endLine: range.endLine, distance };
+				if (distance === 0) break;
+			}
 		}
+
+		if (!best) return null;
+
+		const elementHeight = best.el.offsetHeight;
+		const relativeOffset = Math.max(0, Math.min(elementHeight, anchorOffset - best.el.offsetTop));
+		const elementRatio = elementHeight > 0 ? relativeOffset / elementHeight : 0;
+		const totalLines = best.endLine - best.startLine;
+		const line = best.startLine + Math.round(Math.max(0, totalLines) * elementRatio);
+
+		return { line, ratio: viewportRatio };
 	}
 
 	function syncEditorToPreviewScroll(target: HTMLElement) {
 		if (!tabManager.activeTab?.isScrollSynced || !editorPane) return;
 
-		const anchorOffset = target.scrollTop + 60;
-		const viewportRatio = target.clientHeight > 0 ? Math.min(1, 60 / target.clientHeight) : 0;
-		const children = Array.from(markdownBody?.children || []);
-
-		for (const child of children) {
-			const el = child as HTMLElement;
-			if (el.offsetTop <= anchorOffset && el.offsetTop + el.offsetHeight > anchorOffset) {
-				const sourcepos = el.dataset.sourcepos;
-				if (!sourcepos) break;
-
-				const [start, end] = sourcepos.split('-');
-				const startLine = parseInt(start.split(':')[0]);
-				const endLine = parseInt(end.split(':')[0]);
-
-				if (!isNaN(startLine) && !isNaN(endLine)) {
-					const relativeOffset = anchorOffset - el.offsetTop;
-					const elementRatio = el.offsetHeight > 0 ? relativeOffset / el.offsetHeight : 0;
-					const totalLines = endLine - startLine;
-					const estimatedLine = startLine + Math.round(totalLines * elementRatio);
-
-					editorPane.syncScrollToLine(estimatedLine, viewportRatio);
-				}
-				break;
-			}
-		}
+		const position = getPreviewScrollSyncPosition(target);
+		editorPane.syncScrollToPosition(position);
 	}
 
 	let isScrolling = $state(false);
@@ -1160,33 +1224,9 @@ import { t } from './utils/i18n.js';
 				tabManager.updateTabScrollPercentage(tabManager.activeTabId, percentage);
 			}
 
-			// Interpolated Anchor Calculation
-			const anchorOffset = target.scrollTop + 60;
-			const children = Array.from(markdownBody?.children || []);
-
-			for (const child of children) {
-				const el = child as HTMLElement;
-				// Check intersection
-				if (el.offsetTop <= anchorOffset && el.offsetTop + el.offsetHeight > anchorOffset) {
-					const sourcepos = el.dataset.sourcepos;
-					if (sourcepos) {
-						const [start, end] = sourcepos.split('-');
-						const startLine = parseInt(start.split(':')[0]);
-						const endLine = parseInt(end.split(':')[0]);
-
-						if (!isNaN(startLine) && !isNaN(endLine)) {
-							// Calculate relative position within element
-							const relativeOffset = anchorOffset - el.offsetTop;
-							const ratio = relativeOffset / el.offsetHeight;
-
-							const totalLines = endLine - startLine;
-							const estimatedLine = startLine + Math.round(totalLines * ratio);
-
-							tabManager.updateTabAnchorLine(tabManager.activeTabId, estimatedLine);
-						}
-					}
-					break;
-				}
+			const anchor = getPreviewScrollAnchor(target);
+			if (anchor) {
+				tabManager.updateTabAnchorLine(tabManager.activeTabId, anchor.line);
 			}
 		}
 
@@ -3240,7 +3280,7 @@ import { t } from './utils/i18n.js';
 									class="toc-resize-handle"
 									class:on-right={settings.tocSide === 'right'}
 									role="separator"
-									aria-label="Resize table of contents"
+									aria-label={t('toc.resizeTableOfContents', settings.language)}
 									aria-orientation="vertical"
 									aria-valuemin={TOC_MIN_WIDTH}
 									aria-valuemax={TOC_MAX_WIDTH}

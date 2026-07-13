@@ -13,6 +13,11 @@
 	import { openUrl } from "@tauri-apps/plugin-opener";
 	import { invoke } from "@tauri-apps/api/core";
 
+	type ScrollSyncPosition = {
+		section: 'frontmatter' | 'body';
+		ratio: number;
+	};
+
 	let {
 		value = $bindable(),
 		language = "markdown",
@@ -46,7 +51,7 @@
 		onnextTab?: () => void;
 		onprevTab?: () => void;
 		onundoClose?: () => void;
-		onscrollsync?: (line: number, ratio?: number) => void;
+		onscrollsync?: (position: ScrollSyncPosition) => void;
 		zoomLevel?: number;
 		isSplit?: boolean;
 		theme?: string;
@@ -1022,23 +1027,103 @@
 		};
 	});
 
-	export function syncScrollToLine(line: number, ratio: number = 0) {
-		if (!editor) return;
+	function clampScrollRatio(value: number) {
+		if (!Number.isFinite(value)) return 0;
+		return Math.max(0, Math.min(1, value));
+	}
+
+	function getScrollSyncPositionFromPixels(scrollTop: number, scrollMax: number, frontMatterEnd: number): ScrollSyncPosition {
+		const safeMax = Math.max(0, scrollMax);
+		const safeFrontMatterEnd = Math.max(0, Math.min(safeMax, frontMatterEnd));
+		const safeScrollTop = Math.max(0, Math.min(safeMax, scrollTop));
+
+		if (safeFrontMatterEnd > 0 && safeScrollTop < safeFrontMatterEnd) {
+			return {
+				section: 'frontmatter',
+				ratio: clampScrollRatio(safeScrollTop / safeFrontMatterEnd),
+			};
+		}
+
+		const bodyRange = Math.max(0, safeMax - safeFrontMatterEnd);
+		return {
+			section: 'body',
+			ratio: bodyRange > 0 ? clampScrollRatio((safeScrollTop - safeFrontMatterEnd) / bodyRange) : 0,
+		};
+	}
+
+	function getScrollTopForSyncPosition(position: ScrollSyncPosition, scrollMax: number, frontMatterEnd: number) {
+		const safeMax = Math.max(0, scrollMax);
+		const safeFrontMatterEnd = Math.max(0, Math.min(safeMax, frontMatterEnd));
+		const ratio = clampScrollRatio(position.ratio);
+
+		if (position.section === 'frontmatter') {
+			return safeFrontMatterEnd * ratio;
+		}
+
+		const bodyRange = Math.max(0, safeMax - safeFrontMatterEnd);
+		return safeFrontMatterEnd + bodyRange * ratio;
+	}
+
+	function getFrontMatterBodyStartLine(content: string) {
+		const lines = content.split(/\r\n|\n|\r/);
+		if (lines.length === 0 || lines[0].replace(/^\uFEFF/, '').trim() !== '---') return 1;
+
+		for (let index = 1; index < lines.length; index += 1) {
+			if (lines[index].trim() !== '---') continue;
+
+			let bodyStartLine = index + 2;
+			if (lines[bodyStartLine - 1]?.trim() === '') bodyStartLine += 1;
+			return bodyStartLine;
+		}
+
+		return 1;
+	}
+
+	function getEditorScrollMax() {
+		if (!editor) return 0;
+
+		const layout = editor.getLayoutInfo();
+		return Math.max(0, editor.getScrollHeight() - layout.height);
+	}
+
+	function getEditorFrontMatterScrollEnd() {
+		if (!editor) return 0;
 
 		const model = editor.getModel();
-		if (!model) return;
+		if (!model) return 0;
 
-		const safeLine = Math.max(1, Math.min(model.getLineCount(), line));
-		const layout = editor.getLayoutInfo();
-		const targetScroll = Math.max(
-			0,
-			editor.getTopForLineNumber(safeLine) - layout.height * ratio,
+		const bodyStartLine = getFrontMatterBodyStartLine(model.getValue());
+		if (bodyStartLine <= 1) return 0;
+
+		const safeBodyStartLine = Math.max(1, Math.min(model.getLineCount(), bodyStartLine));
+		return Math.max(0, Math.min(getEditorScrollMax(), editor.getTopForLineNumber(safeBodyStartLine)));
+	}
+
+	function getEditorScrollSyncPosition() {
+		if (!editor) {
+			return { section: 'body', ratio: 0 } satisfies ScrollSyncPosition;
+		}
+
+		return getScrollSyncPositionFromPixels(
+			editor.getScrollTop(),
+			getEditorScrollMax(),
+			getEditorFrontMatterScrollEnd(),
+		);
+	}
+
+	export function syncScrollToPosition(position: ScrollSyncPosition) {
+		if (!editor) return;
+
+		const targetScroll = getScrollTopForSyncPosition(
+			position,
+			getEditorScrollMax(),
+			getEditorFrontMatterScrollEnd(),
 		);
 
 		if (Math.abs(editor.getScrollTop() - targetScroll) <= 5) return;
 
 		isApplyingExternalScroll = true;
-		editor.setScrollTop(targetScroll, monaco.editor.ScrollType.Smooth);
+		editor.setScrollTop(targetScroll, monaco.editor.ScrollType.Immediate);
 
 		requestAnimationFrame(() => {
 			isApplyingExternalScroll = false;
@@ -1050,14 +1135,7 @@
 			const emitSync = () => {
 				if (isApplyingExternalScroll) return;
 
-				const position = editor.getPosition();
-				if (position) {
-					const top = editor.getTopForLineNumber(position.lineNumber);
-					const scrollTop = editor.getScrollTop();
-					const layout = editor.getLayoutInfo();
-					const ratio = (top - scrollTop) / layout.height;
-					onscrollsync?.(position.lineNumber, ratio);
-				}
+				onscrollsync?.(getEditorScrollSyncPosition());
 			};
 
 			const d1 = editor.onDidChangeCursorPosition((e) => {
