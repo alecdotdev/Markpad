@@ -2465,13 +2465,17 @@ import { t } from './utils/i18n.js';
 				const appMode = (await invoke('get_app_mode')) as any;
 
 			if (isMainWindow && settings.restoreStateOnReopen) {
-				// Rust-side file first; the localStorage keys are only read
-				// for one-time migration of a snapshot written by an older
-				// build (v2 key, then the legacy key).
+				// localStorage first, Rust file as fallback. Startup always
+				// deletes the localStorage keys after migrating, so their
+				// presence means an OLDER build wrote them since our last
+				// run (fresh install upgrade, or a downgrade period) — in
+				// either case they are newer than the Rust file. Reading the
+				// file first would resurrect a pre-downgrade snapshot over
+				// the one the older build just wrote.
 				const savedData =
-					((await invoke('load_window_state').catch(() => null)) as string | null) ??
 					localStorage.getItem(WINDOW_STATE_KEY) ??
-					localStorage.getItem(LEGACY_STATE_KEY);
+					localStorage.getItem(LEGACY_STATE_KEY) ??
+					((await invoke('load_window_state').catch(() => null)) as string | null);
 				if (savedData) {
 					tabManager.restoreState(savedData);
 					// The snapshot carries window state only — content always
