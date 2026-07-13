@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for all Markpad windows",
   "windows": [
     "main",
-    "installer"
+    "installer",
+    "window-*"
   ],
   "permissions": [
     "core:default",
