@@ -2799,9 +2799,7 @@ import { t } from './utils/i18n.js';
 						const id = tabManager.insertTransferredTab(snap);
 						const transferred = tabManager.tabs.find((t) => t.id === id);
 						if (transferred) {
-							const processed = await renderMarkdownPreview(transferred.rawContent, transferred.path);
-							tabManager.updateTabContent(id, processed);
-							tick().then(renderRichContent);
+							await renderTabPreviewFromRaw(transferred);
 						}
 					} else {
 						console.warn('Tab transfer claim failed or payload invalid; opening empty window');
