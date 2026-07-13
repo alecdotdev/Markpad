@@ -789,14 +789,28 @@ body {
 	display: none !important;
 }
 
-.foldable-content-wrapper, .markdown-alert-content {
+.foldable-content-wrapper {
+	height: var(--fold-content-height, auto);
+	transition: height 0.25s ease, opacity 0.25s ease;
+	opacity: 1;
+	overflow: visible; /* show carets in the gutter when expanded */
+}
+
+.foldable-content-wrapper.is-collapsed {
+	height: 0;
+	opacity: 0;
+	overflow: hidden; /* must hide when collapsed */
+}
+
+.markdown-alert-content {
 	display: grid;
 	grid-template-rows: 1fr;
 	transition: grid-template-rows 0.25s ease, opacity 0.25s ease;
 	opacity: 1;
-	overflow: visible; /* show carets in the gutter when expanded */
+	overflow: visible;
 }
-.foldable-content-wrapper.is-collapsed, .markdown-alert-content.is-collapsed {
+
+.markdown-alert-content.is-collapsed {
 	grid-template-rows: 0fr;
 	opacity: 0;
 	overflow: hidden; /* must hide when collapsed */
