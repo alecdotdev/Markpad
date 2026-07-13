@@ -24,6 +24,18 @@
 	import { askToOpenExportedFile } from './utils/openExportedFile.js';
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
+import { observeFoldLayout } from './utils/foldLayout.js';
+import {
+	addFrontMatterListItems,
+	getMarkdownBodyWithoutFrontMatter,
+	getFrontMatterListItems,
+	parseFrontMatter,
+	parseFrontMatterEditableValue,
+	removeFrontMatterListItem,
+	updateFrontMatterListItem,
+	updateFrontMatterField,
+	type FrontMatterField,
+} from './utils/frontMatter.js';
 import {
 	decodeLinkPath,
 	getMarkdownLinkTarget as getRelativeMarkdownTarget,
@@ -67,6 +79,7 @@ import { t } from './utils/i18n.js';
 	let markdownBody: HTMLElement | null = $state(null);
 	const renderDebounceMs = 50;
 	let renderTimeout: ReturnType<typeof setTimeout> | null = null;
+	let stopObservingFoldLayout: (() => void) | null = null;
 	
 	const highlightColorMap: Record<string, string> = {
 		default: 'color-mix(in srgb, var(--color-accent-fg) 40%, transparent)',
@@ -79,8 +92,14 @@ import { t } from './utils/i18n.js';
 		cyan: 'rgba(43, 185, 178, 0.4)',
 		green: 'rgba(77, 177, 88, 0.4)',
 	};
+
+	type ScrollSyncPosition = {
+		section: 'frontmatter' | 'body';
+		ratio: number;
+	};
+
 	let editorPane = $state<{ 
-		syncScrollToLine: (line: number, ratio?: number) => void; 
+		syncScrollToPosition: (position: ScrollSyncPosition) => void;
 		handleDroppedFile: (path: string, x: number, y: number) => Promise<void>;
 		updateDragCaret: (x: number, y: number) => void;
 		hideDragCaret: () => void;
@@ -161,9 +180,17 @@ import { t } from './utils/i18n.js';
 	let isEditing = $derived(activeTab?.isEditing ?? false);
 	let rawContent = $derived(activeTab?.rawContent ?? '');
 	let isSplit = $derived(activeTab?.isSplit ?? false);
+	let frontMatterInfo = $derived(parseFrontMatter(rawContent));
 
 	// derived from tab manager
 	let currentFile = $derived(tabManager.activeTab?.path ?? '');
+	let frontMatterPanelKey = $derived(currentFile || tabManager.activeTabId || 'untitled');
+	let frontMatterCollapsedByKey = $state<Record<string, boolean>>({});
+	let frontMatterEditErrors = $state<Record<string, string>>({});
+	let frontMatterTagDrafts = $state<Record<string, string>>({});
+	let frontMatterTagEditIndexes = $state<Record<string, number | null>>({});
+	let frontMatterTagEditDrafts = $state<Record<string, string>>({});
+	let isFrontMatterCollapsed = $derived(frontMatterCollapsedByKey[frontMatterPanelKey] ?? true);
 	const markdownLinkExtensions = ['.md', '.markdown', '.mdown', '.mkd', '.txt'];
 	let isMarkdown = $derived(hasMarkdownLinkExtension(currentFile));
 	let editorLanguage = $derived(getLanguage(currentFile));
@@ -524,6 +551,210 @@ import { t } from './utils/i18n.js';
 		}
 	}
 
+	async function renderMarkdownPreview(raw: string, filePath: string) {
+		const body = getMarkdownBodyWithoutFrontMatter(raw);
+		const html = (await invoke('render_markdown', { content: body })) as string;
+		return processMarkdownHtml(html, filePath, collapsedHeaders);
+	}
+
+	async function renderTabPreviewFromRaw(tab: { id: string; path: string; rawContent: string; [key: string]: any }) {
+		const processed = await renderMarkdownPreview(tab.rawContent, tab.path);
+		tabManager.updateTabContent(tab.id, processed);
+		tab._lastRenderedRawContent = tab.rawContent;
+		await tick();
+		renderRichContent();
+	}
+
+	function frontMatterFieldId(key: string) {
+		return `frontmatter-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+	}
+
+	function frontMatterFieldStateKey(field: FrontMatterField) {
+		return `${frontMatterPanelKey}:${field.key}`;
+	}
+
+	function tagsEqual(left: string[], right: string[]) {
+		return left.length === right.length && left.every((value, index) => value === right[index]);
+	}
+
+	function focusAndSelect(node: HTMLInputElement) {
+		requestAnimationFrame(() => {
+			node.focus();
+			node.select();
+		});
+	}
+
+	function setFrontMatterCollapsed(collapsed: boolean) {
+		frontMatterCollapsedByKey = {
+			...frontMatterCollapsedByKey,
+			[frontMatterPanelKey]: collapsed,
+		};
+	}
+
+	function clearFrontMatterEditError(key: string) {
+		if (!frontMatterEditErrors[key]) return;
+		const next = { ...frontMatterEditErrors };
+		delete next[key];
+		frontMatterEditErrors = next;
+	}
+
+	async function handleFrontMatterEdit(field: FrontMatterField, value: string) {
+		const tab = tabManager.activeTab;
+		if (!tab) return;
+
+		try {
+			const nextValue = parseFrontMatterEditableValue(field, value);
+			const nextRaw = updateFrontMatterField(tab.rawContent, field.key, nextValue);
+			tabManager.updateTabRawContent(tab.id, nextRaw);
+			clearFrontMatterEditError(field.key);
+			await renderTabPreviewFromRaw(tab);
+		} catch (error) {
+			frontMatterEditErrors = {
+				...frontMatterEditErrors,
+				[field.key]: String(error),
+			};
+		}
+	}
+
+	function getFrontMatterTagDraft(field: FrontMatterField) {
+		return frontMatterTagDrafts[frontMatterFieldStateKey(field)] ?? '';
+	}
+
+	function setFrontMatterTagDraft(field: FrontMatterField, value: string) {
+		frontMatterTagDrafts = {
+			...frontMatterTagDrafts,
+			[frontMatterFieldStateKey(field)]: value,
+		};
+		clearFrontMatterEditError(field.key);
+	}
+
+	function clearFrontMatterTagDraft(field: FrontMatterField) {
+		const key = frontMatterFieldStateKey(field);
+		if (!frontMatterTagDrafts[key]) return;
+
+		const next = { ...frontMatterTagDrafts };
+		delete next[key];
+		frontMatterTagDrafts = next;
+	}
+
+	function getFrontMatterTagEditIndex(field: FrontMatterField) {
+		return frontMatterTagEditIndexes[frontMatterFieldStateKey(field)] ?? null;
+	}
+
+	function getFrontMatterTagEditDraft(field: FrontMatterField, fallback: string) {
+		return frontMatterTagEditDrafts[frontMatterFieldStateKey(field)] ?? fallback;
+	}
+
+	function setFrontMatterTagEditDraft(field: FrontMatterField, value: string) {
+		frontMatterTagEditDrafts = {
+			...frontMatterTagEditDrafts,
+			[frontMatterFieldStateKey(field)]: value,
+		};
+		clearFrontMatterEditError(field.key);
+	}
+
+	function startFrontMatterTagEdit(field: FrontMatterField, index: number, value: string) {
+		const key = frontMatterFieldStateKey(field);
+		frontMatterTagEditIndexes = {
+			...frontMatterTagEditIndexes,
+			[key]: index,
+		};
+		frontMatterTagEditDrafts = {
+			...frontMatterTagEditDrafts,
+			[key]: value,
+		};
+		clearFrontMatterEditError(field.key);
+	}
+
+	function clearFrontMatterTagEdit(field: FrontMatterField) {
+		const key = frontMatterFieldStateKey(field);
+		const nextIndexes = { ...frontMatterTagEditIndexes };
+		const nextDrafts = { ...frontMatterTagEditDrafts };
+		delete nextIndexes[key];
+		delete nextDrafts[key];
+		frontMatterTagEditIndexes = nextIndexes;
+		frontMatterTagEditDrafts = nextDrafts;
+	}
+
+	async function handleFrontMatterListChange(field: FrontMatterField, nextItems: string[]) {
+		const tab = tabManager.activeTab;
+		if (!tab) return;
+
+		try {
+			const nextRaw = updateFrontMatterField(tab.rawContent, field.key, nextItems);
+			tabManager.updateTabRawContent(tab.id, nextRaw);
+			clearFrontMatterEditError(field.key);
+			await renderTabPreviewFromRaw(tab);
+		} catch (error) {
+			frontMatterEditErrors = {
+				...frontMatterEditErrors,
+				[field.key]: String(error),
+			};
+		}
+	}
+
+	async function commitFrontMatterTagAdd(field: FrontMatterField) {
+		const draft = getFrontMatterTagDraft(field);
+		if (!draft.trim()) return;
+
+		const currentItems = getFrontMatterListItems(field);
+		const nextItems = addFrontMatterListItems(currentItems, [draft]);
+		if (tagsEqual(currentItems, nextItems)) {
+			clearFrontMatterTagDraft(field);
+			return;
+		}
+
+		await handleFrontMatterListChange(field, nextItems);
+		clearFrontMatterTagDraft(field);
+	}
+
+	async function removeFrontMatterTag(field: FrontMatterField, index: number) {
+		const currentItems = getFrontMatterListItems(field);
+		const nextItems = removeFrontMatterListItem(currentItems, index);
+		if (tagsEqual(currentItems, nextItems)) return;
+
+		await handleFrontMatterListChange(field, nextItems);
+	}
+
+	async function commitFrontMatterTagEdit(field: FrontMatterField, index: number) {
+		if (getFrontMatterTagEditIndex(field) !== index) return;
+
+		const draft = getFrontMatterTagEditDraft(field, '');
+		const currentItems = getFrontMatterListItems(field);
+		const nextItems = updateFrontMatterListItem(currentItems, index, draft);
+
+		clearFrontMatterTagEdit(field);
+		if (tagsEqual(currentItems, nextItems)) return;
+
+		await handleFrontMatterListChange(field, nextItems);
+	}
+
+	function handleFrontMatterTagAddKeydown(event: KeyboardEvent, field: FrontMatterField) {
+		if (event.key === 'Enter' || event.key === ',') {
+			event.preventDefault();
+			void commitFrontMatterTagAdd(field);
+			return;
+		}
+
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			clearFrontMatterTagDraft(field);
+		}
+	}
+
+	function handleFrontMatterTagEditKeydown(event: KeyboardEvent, field: FrontMatterField, index: number) {
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			void commitFrontMatterTagEdit(field, index);
+			return;
+		}
+
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			clearFrontMatterTagEdit(field);
+		}
+	}
+
 	type LoadMarkdownOptions = {
 		navigate?: boolean;
 		skipTabManagement?: boolean;
@@ -563,11 +794,11 @@ import { t } from './utils/i18n.js';
 				if (tab && !options.preserveEditState && !existing) {
 					tab.isEditing = settings.startInEditor;
 				}
-				const [html, content, isFull] = await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 }) as [string, string, boolean];
+				const [, content, isFull] = await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 }) as [string, string, boolean];
 				if (pendingNavigateTabId) {
 					tabManager.navigate(pendingNavigateTabId, filePath);
 				}
-				const processedInfo = processMarkdownHtml(html, filePath, collapsedHeaders);
+				const processedInfo = await renderMarkdownPreview(content, filePath);
 				tabManager.updateTabContent(activeId, processedInfo);
 				tabManager.setTabRawContent(activeId, content);
 
@@ -576,10 +807,7 @@ import { t } from './utils/i18n.js';
 					tick().then(() => {
 						if (markdownBody) isAtBottom = markdownBody.scrollHeight <= markdownBody.clientHeight + 100;
 					});
-					Promise.all([
-						invoke('open_markdown', { path: filePath }) as Promise<string>,
-						invoke('read_file_content', { path: filePath }) as Promise<string>
-					]).then(([fullHtml, fullContent]) => {
+					(invoke('read_file_content', { path: filePath }) as Promise<string>).then((fullContent) => {
 						const applyFull = () => {
 							try {
 								if (isScrolling) {
@@ -587,15 +815,22 @@ import { t } from './utils/i18n.js';
 									return;
 								}
 								if (tabManager.tabs.find((t) => t.id === activeId)?.path === filePath) {
-									const fullProcessed = processMarkdownHtml(fullHtml, filePath, collapsedHeaders);
-									tabManager.updateTabContent(activeId, fullProcessed);
-									tabManager.setTabRawContent(activeId, fullContent);
-									loadingTabs = loadingTabs.filter((id) => id !== activeId);
-									if (tabManager.activeTabId === activeId) {
-										tick().then(() => {
-											setTimeout(renderRichContent, 10);
+									renderMarkdownPreview(fullContent, filePath)
+										.then((fullProcessed) => {
+											tabManager.updateTabContent(activeId, fullProcessed);
+											tabManager.setTabRawContent(activeId, fullContent);
+											loadingTabs = loadingTabs.filter((id) => id !== activeId);
+											if (tabManager.activeTabId === activeId) {
+												tick().then(() => {
+													setTimeout(renderRichContent, 10);
+												});
+											}
+										})
+										.catch((renderErr) => {
+											console.error("render full markdown error:", renderErr);
+											addToast('Error processing full markdown: ' + String(renderErr), 'error');
+											loadingTabs = loadingTabs.filter((id) => id !== activeId);
 										});
-									}
 								} else {
 									loadingTabs = loadingTabs.filter((id) => id !== activeId);
 								}
@@ -612,7 +847,7 @@ import { t } from './utils/i18n.js';
 							setTimeout(applyFull, 100);
 						}
 					}).catch((e) => {
-						console.error("Promise.all error:", e);
+						console.error("read full markdown error:", e);
 						addToast('Backend Error loading full markdown: ' + String(e), 'error');
 						loadingTabs = loadingTabs.filter((id) => id !== activeId);
 					});
@@ -778,6 +1013,25 @@ import { t } from './utils/i18n.js';
 		if (sanitizedHtml && markdownBody && !isEditing && hljs && renderMathInElement && mermaid) renderRichContent();
 	});
 
+	$effect(() => {
+		const html = sanitizedHtml;
+		const body = markdownBody;
+		if (!html || !body) return;
+
+		let cancelled = false;
+		tick().then(() => {
+			if (cancelled || body !== markdownBody) return;
+			stopObservingFoldLayout?.();
+			stopObservingFoldLayout = observeFoldLayout(body);
+		});
+
+		return () => {
+			cancelled = true;
+			stopObservingFoldLayout?.();
+			stopObservingFoldLayout = null;
+		};
+	});
+
 	// Re-apply find highlights after the preview HTML is replaced. The
 	// `bind:innerHTML={sanitizedHtml}` on the article wipes the DOM on every
 	// edit/render pass; without this, highlights vanish until the user
@@ -852,76 +1106,134 @@ import { t } from './utils/i18n.js';
 		}
 	});
 
-	function scrollToLine(line: number, ratio: number = 0) {
+	function clampScrollRatio(value: number) {
+		if (!Number.isFinite(value)) return 0;
+		return Math.max(0, Math.min(1, value));
+	}
+
+	function getPreviewScrollMax(target: HTMLElement) {
+		return Math.max(0, target.scrollHeight - target.clientHeight);
+	}
+
+	function getScrollSyncPositionFromPixels(scrollTop: number, scrollMax: number, frontMatterEnd: number): ScrollSyncPosition {
+		const safeMax = Math.max(0, scrollMax);
+		const safeFrontMatterEnd = Math.max(0, Math.min(safeMax, frontMatterEnd));
+		const safeScrollTop = Math.max(0, Math.min(safeMax, scrollTop));
+
+		if (safeFrontMatterEnd > 0 && safeScrollTop < safeFrontMatterEnd) {
+			return {
+				section: 'frontmatter',
+				ratio: clampScrollRatio(safeScrollTop / safeFrontMatterEnd),
+			};
+		}
+
+		const bodyRange = Math.max(0, safeMax - safeFrontMatterEnd);
+		return {
+			section: 'body',
+			ratio: bodyRange > 0 ? clampScrollRatio((safeScrollTop - safeFrontMatterEnd) / bodyRange) : 0,
+		};
+	}
+
+	function getScrollTopForSyncPosition(position: ScrollSyncPosition, scrollMax: number, frontMatterEnd: number) {
+		const safeMax = Math.max(0, scrollMax);
+		const safeFrontMatterEnd = Math.max(0, Math.min(safeMax, frontMatterEnd));
+		const ratio = clampScrollRatio(position.ratio);
+
+		if (position.section === 'frontmatter') {
+			return safeFrontMatterEnd * ratio;
+		}
+
+		const bodyRange = Math.max(0, safeMax - safeFrontMatterEnd);
+		return safeFrontMatterEnd + bodyRange * ratio;
+	}
+
+	function getPreviewFrontMatterScrollEnd(target: HTMLElement) {
+		const panel = target.querySelector<HTMLElement>('.frontmatter' + '-panel');
+		if (!panel) return 0;
+
+		return Math.max(0, Math.min(getPreviewScrollMax(target), panel.offsetTop + panel.offsetHeight));
+	}
+
+	function getPreviewScrollSyncPosition(target: HTMLElement) {
+		return getScrollSyncPositionFromPixels(
+			target.scrollTop,
+			getPreviewScrollMax(target),
+			getPreviewFrontMatterScrollEnd(target),
+		);
+	}
+
+	function scrollPreviewToSyncPosition(position: ScrollSyncPosition) {
 		if (!markdownBody) return;
 
-		const children = Array.from(markdownBody.children) as HTMLElement[];
-		for (const el of children) {
-			const sourcepos = el.dataset.sourcepos;
-			if (sourcepos) {
-				const [start, end] = sourcepos.split('-');
-				const startLine = parseInt(start.split(':')[0]);
-				const endLine = parseInt(end.split(':')[0]);
+		const targetScroll = getScrollTopForSyncPosition(
+			position,
+			getPreviewScrollMax(markdownBody),
+			getPreviewFrontMatterScrollEnd(markdownBody),
+		);
 
-				if (!isNaN(startLine) && !isNaN(endLine)) {
-					if (line >= startLine && line <= endLine) {
-						const totalLines = endLine - startLine;
-						let lineRatio = 0;
-						if (totalLines > 0) {
-							lineRatio = (line - startLine) / totalLines;
-						}
-						lineRatio = Math.max(0, Math.min(1, lineRatio));
+		if (Math.abs(markdownBody.scrollTop - targetScroll) <= 5) return;
 
-						const elementTop = el.offsetTop + el.offsetHeight * lineRatio;
+		isProgrammaticScroll = true;
+		markdownBody.scrollTop = targetScroll;
+	}
 
-						const viewportHeight = markdownBody.clientHeight;
-						const targetScroll = elementTop - viewportHeight * ratio;
-
-						if (Math.abs(markdownBody.scrollTop - targetScroll) > 5) {
-							isProgrammaticScroll = true;
-							markdownBody.scrollTop = Math.max(0, targetScroll);
-						}
-						return;
-					}
-				}
-			}
+	function handleEditorScrollSync(position: ScrollSyncPosition) {
+		if (tabManager.activeTab?.isScrollSynced) {
+			scrollPreviewToSyncPosition(position);
 		}
 	}
 
-	function handleEditorScrollSync(line: number, ratio: number = 0) {
-		if (tabManager.activeTab?.isScrollSynced) {
-			scrollToLine(line, ratio);
+	type PreviewScrollAnchor = {
+		line: number;
+		ratio: number;
+	};
+
+	function parseSourceposLineRange(sourcepos: string | undefined) {
+		if (!sourcepos) return null;
+		const [start, end] = sourcepos.split('-');
+		const startLine = parseInt(start?.split(':')[0] ?? '', 10);
+		const endLine = parseInt(end?.split(':')[0] ?? '', 10);
+
+		if (Number.isNaN(startLine) || Number.isNaN(endLine)) return null;
+		return { startLine, endLine };
+	}
+
+	function getPreviewScrollAnchor(target: HTMLElement): PreviewScrollAnchor | null {
+		const anchorOffset = target.scrollTop + 60;
+		const viewportRatio = target.clientHeight > 0 ? Math.min(1, 60 / target.clientHeight) : 0;
+		const candidates = Array.from(target.querySelectorAll<HTMLElement>('[data-sourcepos]'));
+
+		let best: { el: HTMLElement; startLine: number; endLine: number; distance: number } | null = null;
+		for (const el of candidates) {
+			const range = parseSourceposLineRange(el.dataset.sourcepos);
+			if (!range) continue;
+
+			const top = el.offsetTop;
+			const bottom = top + el.offsetHeight;
+			const distance = anchorOffset < top ? top - anchorOffset : anchorOffset > bottom ? anchorOffset - bottom : 0;
+
+			if (!best || distance < best.distance) {
+				best = { el, startLine: range.startLine, endLine: range.endLine, distance };
+				if (distance === 0) break;
+			}
 		}
+
+		if (!best) return null;
+
+		const elementHeight = best.el.offsetHeight;
+		const relativeOffset = Math.max(0, Math.min(elementHeight, anchorOffset - best.el.offsetTop));
+		const elementRatio = elementHeight > 0 ? relativeOffset / elementHeight : 0;
+		const totalLines = best.endLine - best.startLine;
+		const line = best.startLine + Math.round(Math.max(0, totalLines) * elementRatio);
+
+		return { line, ratio: viewportRatio };
 	}
 
 	function syncEditorToPreviewScroll(target: HTMLElement) {
 		if (!tabManager.activeTab?.isScrollSynced || !editorPane) return;
 
-		const anchorOffset = target.scrollTop + 60;
-		const viewportRatio = target.clientHeight > 0 ? Math.min(1, 60 / target.clientHeight) : 0;
-		const children = Array.from(markdownBody?.children || []);
-
-		for (const child of children) {
-			const el = child as HTMLElement;
-			if (el.offsetTop <= anchorOffset && el.offsetTop + el.offsetHeight > anchorOffset) {
-				const sourcepos = el.dataset.sourcepos;
-				if (!sourcepos) break;
-
-				const [start, end] = sourcepos.split('-');
-				const startLine = parseInt(start.split(':')[0]);
-				const endLine = parseInt(end.split(':')[0]);
-
-				if (!isNaN(startLine) && !isNaN(endLine)) {
-					const relativeOffset = anchorOffset - el.offsetTop;
-					const elementRatio = el.offsetHeight > 0 ? relativeOffset / el.offsetHeight : 0;
-					const totalLines = endLine - startLine;
-					const estimatedLine = startLine + Math.round(totalLines * elementRatio);
-
-					editorPane.syncScrollToLine(estimatedLine, viewportRatio);
-				}
-				break;
-			}
-		}
+		const position = getPreviewScrollSyncPosition(target);
+		editorPane.syncScrollToPosition(position);
 	}
 
 	let isScrolling = $state(false);
@@ -956,33 +1268,9 @@ import { t } from './utils/i18n.js';
 				tabManager.updateTabScrollPercentage(tabManager.activeTabId, percentage);
 			}
 
-			// Interpolated Anchor Calculation
-			const anchorOffset = target.scrollTop + 60;
-			const children = Array.from(markdownBody?.children || []);
-
-			for (const child of children) {
-				const el = child as HTMLElement;
-				// Check intersection
-				if (el.offsetTop <= anchorOffset && el.offsetTop + el.offsetHeight > anchorOffset) {
-					const sourcepos = el.dataset.sourcepos;
-					if (sourcepos) {
-						const [start, end] = sourcepos.split('-');
-						const startLine = parseInt(start.split(':')[0]);
-						const endLine = parseInt(end.split(':')[0]);
-
-						if (!isNaN(startLine) && !isNaN(endLine)) {
-							// Calculate relative position within element
-							const relativeOffset = anchorOffset - el.offsetTop;
-							const ratio = relativeOffset / el.offsetHeight;
-
-							const totalLines = endLine - startLine;
-							const estimatedLine = startLine + Math.round(totalLines * ratio);
-
-							tabManager.updateTabAnchorLine(tabManager.activeTabId, estimatedLine);
-						}
-					}
-					break;
-				}
+			const anchor = getPreviewScrollAnchor(target);
+			if (anchor) {
+				tabManager.updateTabAnchorLine(tabManager.activeTabId, anchor.line);
 			}
 		}
 
@@ -1386,16 +1674,15 @@ import { t } from './utils/i18n.js';
 			tab.isEditing = false;
 			if (tab.path !== '') {
 				await loadMarkdown(tab.path, { preserveEditState: true });
-			} else {
-				// Untitled: render the in-memory buffer for the preview.
-				try {
-					const html = (await invoke('render_markdown', { content: tab.rawContent })) as string;
-					const processedInfo = processMarkdownHtml(html, '', collapsedHeaders);
-					tabManager.updateTabContent(tab.id, processedInfo);
-				} catch (e) {
-					console.error('Failed to render markdown', e);
+				} else {
+					// Untitled: render the in-memory buffer for the preview.
+					try {
+						const processedInfo = await renderMarkdownPreview(tab.rawContent, '');
+						tabManager.updateTabContent(tab.id, processedInfo);
+					} catch (e) {
+						console.error('Failed to render markdown', e);
+					}
 				}
-			}
 		} else {
 			// Switch to edit
 			if (tab.path !== '') {
@@ -1998,9 +2285,8 @@ import { t } from './utils/i18n.js';
 
 			clearTimeout(debounceTimer);
 			debounceTimer = setTimeout(() => {
-				invoke('render_markdown', { content: tab.rawContent })
-					.then((html) => {
-						const processed = processMarkdownHtml(html as string, tab.path, collapsedHeaders);
+				renderMarkdownPreview(tab.rawContent, tab.path)
+					.then((processed) => {
 						tabManager.updateTabContent(tab.id, processed);
 						(tab as any)._lastRenderedRawContent = tab.rawContent;
 						tick().then(renderRichContent);
@@ -2408,8 +2694,7 @@ import { t } from './utils/i18n.js';
 							const raw = (await invoke('read_file_content', { path: tab.path })) as string;
 							tab.rawContent = raw;
 							tab.originalContent = raw;
-							const html = await invoke('render_markdown', { content: raw });
-							const processed = processMarkdownHtml(html as string, tab.path, collapsedHeaders);
+							const processed = await renderMarkdownPreview(raw, tab.path);
 							tabManager.updateTabContent(tab.id, processed);
 							if (tabManager.activeTabId === tab.id) {
 								tick().then(renderRichContent);
@@ -2869,19 +3154,124 @@ import { t } from './utils/i18n.js';
 							{markdownBody}
 							language={settings.language} />
 
-						<div class="viewer-content">
-							<article
-								bind:this={markdownBody}
-								contenteditable="false"
-								class="markdown-body {isFullWidth ? 'full-width' : ''} {settings.showToc ? 'toc-active' : ''}"
-								bind:innerHTML={sanitizedHtml}
-								onscroll={handleScroll}
-								onclick={handleLinkClick}
-								onkeydown={(e) => { if(e.key === 'Enter' || e.key === ' ') handleLinkClick(e as unknown as MouseEvent); }}
-								tabindex="-1"
-								style="outline: none; font-family: {settings.previewFont}, sans-serif; font-size: {settings.previewFontSize}px; flex: 1;">
-							</article>
-							{#if tabManager.activeTabId && loadingTabs.includes(tabManager.activeTabId) && isAtBottom}
+							<div class="viewer-content">
+								<article
+									bind:this={markdownBody}
+									contenteditable="false"
+									class="markdown-body {isFullWidth ? 'full-width' : ''} {settings.showToc ? 'toc-active' : ''}"
+									onscroll={handleScroll}
+									onclick={handleLinkClick}
+									onkeydown={(e) => {
+										const target = e.target as HTMLElement;
+										if (target.closest('.frontmatter-panel')) return;
+										if(e.key === 'Enter' || e.key === ' ') handleLinkClick(e as unknown as MouseEvent);
+									}}
+									tabindex="-1"
+									style="outline: none; font-family: {settings.previewFont}, sans-serif; font-size: {settings.previewFontSize}px; flex: 1;">
+									{#if frontMatterInfo.exists}
+										<details
+											class="frontmatter-panel"
+											class:is-collapsed={isFrontMatterCollapsed}
+											open={!isFrontMatterCollapsed}
+											ontoggle={(e) => setFrontMatterCollapsed(!(e.currentTarget as HTMLDetailsElement).open)}>
+											<summary class="frontmatter-summary">
+												<span class="frontmatter-chevron" aria-hidden="true">›</span>
+												<span class="frontmatter-title">Properties</span>
+												<span class="frontmatter-count">{frontMatterInfo.valid ? frontMatterInfo.fields.length : 0}</span>
+											</summary>
+
+											{#if frontMatterInfo.valid}
+												<div class="frontmatter-grid">
+													{#each frontMatterInfo.fields as field (field.key)}
+														<label class="frontmatter-key" for={frontMatterFieldId(field.key)}>{field.key}</label>
+														<div class="frontmatter-value">
+															{#if field.editable}
+																{#if field.kind === 'boolean'}
+																	<select
+																		id={frontMatterFieldId(field.key)}
+																		value={String(field.value)}
+																		onchange={(e) => handleFrontMatterEdit(field, (e.currentTarget as HTMLSelectElement).value)}>
+																		<option value="true">true</option>
+																		<option value="false">false</option>
+																	</select>
+																{:else if field.kind === 'list'}
+																	<div class="frontmatter-tags">
+																		<div class="frontmatter-tag-list" role="list" aria-label={`${field.key} tags`}>
+																			{#each getFrontMatterListItems(field) as tag, index (`${tag}-${index}`)}
+																				<span class="frontmatter-tag" role="listitem">
+																					{#if getFrontMatterTagEditIndex(field) === index}
+																						<input
+																							class="frontmatter-tag-edit-input"
+																							type="text"
+																							value={getFrontMatterTagEditDraft(field, tag)}
+																							aria-label={`Edit ${field.key} tag ${tag}`}
+																							use:focusAndSelect
+																							oninput={(e) => setFrontMatterTagEditDraft(field, (e.currentTarget as HTMLInputElement).value)}
+																							onkeydown={(e) => handleFrontMatterTagEditKeydown(e, field, index)}
+																							onblur={() => commitFrontMatterTagEdit(field, index)} />
+																					{:else}
+																						<button
+																							class="frontmatter-tag-text"
+																							type="button"
+																							aria-label={`Edit ${field.key} tag ${tag}`}
+																							onclick={() => startFrontMatterTagEdit(field, index, tag)}>
+																							{tag}
+																						</button>
+																						<button
+																							class="frontmatter-tag-remove"
+																							type="button"
+																							aria-label={`Remove ${tag} from ${field.key}`}
+																							onclick={() => removeFrontMatterTag(field, index)}>
+																							×
+																						</button>
+																					{/if}
+																				</span>
+																			{/each}
+																		</div>
+																		<div class="frontmatter-tag-add">
+																			<input
+																				id={frontMatterFieldId(field.key)}
+																				type="text"
+																				value={getFrontMatterTagDraft(field)}
+																				placeholder="Add tag"
+																				autocomplete="off"
+																				enterkeyhint="done"
+																				oninput={(e) => setFrontMatterTagDraft(field, (e.currentTarget as HTMLInputElement).value)}
+																				onkeydown={(e) => handleFrontMatterTagAddKeydown(e, field)} />
+																			<button
+																				class="frontmatter-tag-add-button"
+																				type="button"
+																				aria-label={`Add ${field.key} tag`}
+																				onclick={() => commitFrontMatterTagAdd(field)}>
+																				+
+																			</button>
+																		</div>
+																	</div>
+																{:else}
+																	<input
+																		id={frontMatterFieldId(field.key)}
+																		type={field.kind === 'number' ? 'number' : 'text'}
+																		value={field.editableValue}
+																		onchange={(e) => handleFrontMatterEdit(field, (e.currentTarget as HTMLInputElement).value)} />
+																{/if}
+															{:else}
+																<code>{field.displayValue}</code>
+															{/if}
+															{#if frontMatterEditErrors[field.key]}
+																<div class="frontmatter-field-error" role="status">{frontMatterEditErrors[field.key]}</div>
+															{/if}
+														</div>
+													{/each}
+												</div>
+											{:else}
+												<div class="frontmatter-error" role="status">{frontMatterInfo.error}</div>
+											{/if}
+
+										</details>
+									{/if}
+									{@html sanitizedHtml}
+								</article>
+								{#if tabManager.activeTabId && loadingTabs.includes(tabManager.activeTabId) && isAtBottom}
 								<div class="loading-chip" transition:fly={{ y: 20, duration: 300, easing: cubicOut }}>
 									<div class="loading-spinner"></div>
 									<span>{t('common.loadingFullDocument', settings.language)}</span>
@@ -2932,7 +3322,7 @@ import { t } from './utils/i18n.js';
 									class="toc-resize-handle"
 									class:on-right={settings.tocSide === 'right'}
 									role="separator"
-									aria-label="Resize table of contents"
+									aria-label={t('toc.resizeTableOfContents', settings.language)}
 									aria-orientation="vertical"
 									aria-valuemin={TOC_MIN_WIDTH}
 									aria-valuemax={TOC_MAX_WIDTH}
