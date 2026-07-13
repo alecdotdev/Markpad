@@ -1,6 +1,7 @@
 import { t } from '../utils/i18n.js';
 import { nextUntitledTitle } from '../utils/untitledTitle.js';
 import { settings } from './settings.svelte.js';
+import { buildTransferredTab, type TransferableTab } from '../utils/tabTransfer.js';
 import {
 	canGoBackInHistory,
 	canGoForwardInHistory,
@@ -223,6 +224,24 @@ class TabManager {
 		});
 
 		this.activeTabId = id;
+	}
+
+	/**
+	 * Insert a tab that arrived from another window (cross-window transfer).
+	 * The snapshot carries the unsaved buffer — see tabTransfer.ts. Rendered
+	 * content starts empty (the caller re-renders); untitled arrivals are
+	 * re-numbered against THIS window's tabs. Independent of serializeState/
+	 * restoreState, which persist window shape only.
+	 */
+	insertTransferredTab(snap: TransferableTab): string {
+		const tab = buildTransferredTab(
+			snap,
+			this.tabs.map((tab) => tab.title),
+			t('tabs.untitled', settings.language),
+		);
+		this.tabs.push(tab);
+		this.activeTabId = tab.id;
+		return tab.id;
 	}
 
 	closeTab(id: string) {
