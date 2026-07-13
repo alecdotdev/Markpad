@@ -2495,6 +2495,20 @@ import { t } from './utils/i18n.js';
 					}
 				}
 			}
+			if (isMainWindow) {
+				// Hand the snapshot over to the Rust file NOW, then drop the
+				// localStorage keys: write-through first so a crash between
+				// the two steps can never lose the snapshot, and delete at
+				// startup rather than at close so the stale copy cannot
+				// outlive the migration (the close-time removal never runs
+				// for users who disabled restore-on-reopen, which would
+				// leave the old snapshot on disk forever).
+				if (settings.restoreStateOnReopen && tabManager.tabs.length > 0) {
+					await persistWindowState();
+				}
+				localStorage.removeItem(WINDOW_STATE_KEY);
+				localStorage.removeItem(LEGACY_STATE_KEY);
+			}
 
 			const urlParams = new URLSearchParams(window.location.search);
 
