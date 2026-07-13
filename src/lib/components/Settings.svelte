@@ -30,6 +30,49 @@
 		{ value: 'cyan', color: '#2bb9b2' },
 		{ value: 'green', color: '#4db158' }
 	];
+
+	type SettingsModalFrame = {
+		width: number;
+		height: number;
+		left: number | null;
+		top: number | null;
+	};
+
+	type ConcreteSettingsModalFrame = {
+		width: number;
+		height: number;
+		left: number;
+		top: number;
+	};
+
+	type SettingsModalDragState = {
+		pointerId: number;
+		clientX: number;
+		clientY: number;
+		left: number;
+		top: number;
+		width: number;
+		height: number;
+	};
+
+	type SettingsResizeEdge = 'top' | 'right' | 'bottom' | 'left';
+
+	type SettingsResizeHandle = {
+		className: string;
+		edges: SettingsResizeEdge[];
+	};
+
+	const settingsResizeHandles: SettingsResizeHandle[] = [
+		{ className: 'resize-n', edges: ['top'] },
+		{ className: 'resize-ne', edges: ['top', 'right'] },
+		{ className: 'resize-e', edges: ['right'] },
+		{ className: 'resize-se', edges: ['bottom', 'right'] },
+		{ className: 'resize-s', edges: ['bottom'] },
+		{ className: 'resize-sw', edges: ['bottom', 'left'] },
+		{ className: 'resize-w', edges: ['left'] },
+		{ className: 'resize-nw', edges: ['top', 'left'] },
+	];
+
 	let systemFonts = $state<string[]>([]);
 	let loaded = $state(false);
 	let settingsModal = $state<HTMLDivElement>();
@@ -42,10 +85,49 @@
 	let importingTheme = $state(false);
 	let editorToolbarDraggingId = $state<string | null>(null);
 	let editorToolbarDragOverId = $state<string | null>(null);
+	let editorToolbarDragState = $state<ToolbarSettingsDragState | null>(null);
 	let titlebarToolbarDraggingId = $state<string | null>(null);
 	let titlebarToolbarDragOverId = $state<string | null>(null);
+	let titlebarToolbarDragState = $state<ToolbarSettingsDragState | null>(null);
+	let settingsModalFrame = $state<SettingsModalFrame>({
+		width: 560,
+		height: 420,
+		left: null,
+		top: null,
+	});
+	let settingsModalDragStart = $state<SettingsModalDragState | null>(null);
+	let settingsResizeStart = $state<{
+		pointerId: number;
+		clientX: number;
+		clientY: number;
+		width: number;
+		height: number;
+		left: number;
+		top: number;
+		edges: SettingsResizeEdge[];
+	} | null>(null);
+	let settingsModalIsDragging = $state(false);
+	let settingsModalIsResizing = $state(false);
 	let editorToolbarSettingsTools = $derived(getEditorToolbarTools(settings.editorToolbarOrder));
 	let titlebarToolbarSettingsActions = $derived(getTitlebarToolbarActions(settings.titlebarToolbarOrder));
+	let settingsModalFrameStyle = $derived.by(() => {
+		if (settingsModalFrame.left === null || settingsModalFrame.top === null) return '';
+		return [
+			'position: absolute',
+			`left: ${settingsModalFrame.left}px`,
+			`top: ${settingsModalFrame.top}px`,
+			`width: ${settingsModalFrame.width}px`,
+			`height: ${settingsModalFrame.height}px`,
+		].join('; ');
+	});
+
+	type ToolbarSettingsDragState = {
+		id: string;
+		startY: number;
+		pointerId: number;
+		isDragging: boolean;
+		lastTargetId: string | null;
+	};
 
 	function isEditorToolbarToolVisible(id: string) {
 		return !settings.editorToolbarHidden.includes(id);
@@ -59,62 +141,320 @@
 		return settings.titlebarToolbarPlacement[id] ?? 'menu';
 	}
 
-	function handleEditorToolbarDragStart(e: DragEvent, id: string) {
-		editorToolbarDraggingId = id;
-		editorToolbarDragOverId = null;
-		e.dataTransfer?.setData('text/plain', id);
-		if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+	function getToolbarDragTargetId(e: PointerEvent, selector: string, attributeName: string) {
+		const target = document.elementFromPoint(e.clientX, e.clientY);
+		const row = target instanceof HTMLElement ? target.closest<HTMLElement>(selector) : null;
+		return row?.getAttribute(attributeName) ?? null;
 	}
 
-	function handleEditorToolbarDragOver(e: DragEvent, id: string) {
-		if (!editorToolbarDraggingId || editorToolbarDraggingId === id) return;
+	function createToolbarDragState(e: PointerEvent, id: string): ToolbarSettingsDragState | null {
+		if (e.button !== 0) return null;
 		e.preventDefault();
-		editorToolbarDragOverId = id;
-		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		e.stopPropagation();
+		return {
+			id,
+			startY: e.clientY,
+			pointerId: e.pointerId,
+			isDragging: false,
+			lastTargetId: null,
+		};
 	}
 
-	function handleEditorToolbarItemDrop(e: DragEvent, id: string) {
+	function handleEditorToolbarDragPointerDown(e: PointerEvent, id: string) {
+		const dragState = createToolbarDragState(e, id);
+		if (!dragState) return;
+		editorToolbarDragState = dragState;
+		window.addEventListener('pointermove', handleEditorToolbarWindowPointerMove);
+		window.addEventListener('pointerup', handleEditorToolbarWindowPointerUp);
+		window.addEventListener('pointercancel', handleEditorToolbarWindowPointerCancel);
+	}
+
+	function handleEditorToolbarWindowPointerMove(e: PointerEvent) {
+		if (!editorToolbarDragState || e.pointerId !== editorToolbarDragState.pointerId) return;
 		e.preventDefault();
-		const draggedId = editorToolbarDraggingId || e.dataTransfer?.getData('text/plain');
-		if (draggedId && draggedId !== id) {
-			settings.reorderEditorToolbarTool(draggedId, id);
+
+		if (!editorToolbarDragState.isDragging) {
+			if (Math.abs(e.clientY - editorToolbarDragState.startY) <= 4) return;
+			editorToolbarDragState.isDragging = true;
+			editorToolbarDraggingId = editorToolbarDragState.id;
 		}
-		editorToolbarDraggingId = null;
-		editorToolbarDragOverId = null;
+
+		const targetId = getToolbarDragTargetId(e, '[data-editor-toolbar-tool-id]', 'data-editor-toolbar-tool-id');
+		if (!targetId || targetId === editorToolbarDragState.id) {
+			editorToolbarDragOverId = null;
+			editorToolbarDragState.lastTargetId = null;
+			return;
+		}
+
+		editorToolbarDragOverId = targetId;
+		if (targetId === editorToolbarDragState.lastTargetId) return;
+		editorToolbarDragState.lastTargetId = targetId;
+		settings.reorderEditorToolbarTool(editorToolbarDragState.id, targetId);
 	}
 
 	function clearEditorToolbarDragState() {
 		editorToolbarDraggingId = null;
 		editorToolbarDragOverId = null;
+		editorToolbarDragState = null;
+		window.removeEventListener('pointermove', handleEditorToolbarWindowPointerMove);
+		window.removeEventListener('pointerup', handleEditorToolbarWindowPointerUp);
+		window.removeEventListener('pointercancel', handleEditorToolbarWindowPointerCancel);
 	}
 
-	function handleTitlebarToolbarDragStart(e: DragEvent, id: string) {
-		titlebarToolbarDraggingId = id;
-		titlebarToolbarDragOverId = null;
-		e.dataTransfer?.setData('text/plain', id);
-		if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+	function handleEditorToolbarWindowPointerUp(e: PointerEvent) {
+		if (!editorToolbarDragState || e.pointerId !== editorToolbarDragState.pointerId) return;
+		if (editorToolbarDragState.isDragging) e.preventDefault();
+		clearEditorToolbarDragState();
 	}
 
-	function handleTitlebarToolbarDragOver(e: DragEvent, id: string) {
-		if (!titlebarToolbarDraggingId || titlebarToolbarDraggingId === id) return;
+	function handleEditorToolbarWindowPointerCancel(e: PointerEvent) {
+		if (!editorToolbarDragState || e.pointerId !== editorToolbarDragState.pointerId) return;
+		clearEditorToolbarDragState();
+	}
+
+	function handleTitlebarToolbarDragPointerDown(e: PointerEvent, id: string) {
+		const dragState = createToolbarDragState(e, id);
+		if (!dragState) return;
+		titlebarToolbarDragState = dragState;
+		window.addEventListener('pointermove', handleTitlebarToolbarWindowPointerMove);
+		window.addEventListener('pointerup', handleTitlebarToolbarWindowPointerUp);
+		window.addEventListener('pointercancel', handleTitlebarToolbarWindowPointerCancel);
+	}
+
+	function handleTitlebarToolbarWindowPointerMove(e: PointerEvent) {
+		if (!titlebarToolbarDragState || e.pointerId !== titlebarToolbarDragState.pointerId) return;
 		e.preventDefault();
-		titlebarToolbarDragOverId = id;
-		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-	}
 
-	function handleTitlebarToolbarItemDrop(e: DragEvent, id: string) {
-		e.preventDefault();
-		const draggedId = titlebarToolbarDraggingId || e.dataTransfer?.getData('text/plain');
-		if (draggedId && draggedId !== id) {
-			settings.reorderTitlebarToolbarAction(draggedId, id);
+		if (!titlebarToolbarDragState.isDragging) {
+			if (Math.abs(e.clientY - titlebarToolbarDragState.startY) <= 4) return;
+			titlebarToolbarDragState.isDragging = true;
+			titlebarToolbarDraggingId = titlebarToolbarDragState.id;
 		}
-		titlebarToolbarDraggingId = null;
-		titlebarToolbarDragOverId = null;
+
+		const targetId = getToolbarDragTargetId(e, '[data-titlebar-toolbar-action-id]', 'data-titlebar-toolbar-action-id');
+		if (!targetId || targetId === titlebarToolbarDragState.id) {
+			titlebarToolbarDragOverId = null;
+			titlebarToolbarDragState.lastTargetId = null;
+			return;
+		}
+
+		titlebarToolbarDragOverId = targetId;
+		if (targetId === titlebarToolbarDragState.lastTargetId) return;
+		titlebarToolbarDragState.lastTargetId = targetId;
+		settings.reorderTitlebarToolbarAction(titlebarToolbarDragState.id, targetId);
 	}
 
 	function clearTitlebarToolbarDragState() {
 		titlebarToolbarDraggingId = null;
 		titlebarToolbarDragOverId = null;
+		titlebarToolbarDragState = null;
+		window.removeEventListener('pointermove', handleTitlebarToolbarWindowPointerMove);
+		window.removeEventListener('pointerup', handleTitlebarToolbarWindowPointerUp);
+		window.removeEventListener('pointercancel', handleTitlebarToolbarWindowPointerCancel);
+	}
+
+	function handleTitlebarToolbarWindowPointerUp(e: PointerEvent) {
+		if (!titlebarToolbarDragState || e.pointerId !== titlebarToolbarDragState.pointerId) return;
+		if (titlebarToolbarDragState.isDragging) e.preventDefault();
+		clearTitlebarToolbarDragState();
+	}
+
+	function handleTitlebarToolbarWindowPointerCancel(e: PointerEvent) {
+		if (!titlebarToolbarDragState || e.pointerId !== titlebarToolbarDragState.pointerId) return;
+		clearTitlebarToolbarDragState();
+	}
+
+	function clampNumber(value: number, min: number, max: number) {
+		return Math.min(max, Math.max(min, value));
+	}
+
+	function getSettingsModalLimits() {
+		const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
+		const viewportHeight = typeof window === 'undefined' ? 768 : window.innerHeight;
+		return {
+			viewportWidth,
+			viewportHeight,
+			minWidth: Math.min(520, viewportWidth * 0.9),
+			maxWidth: viewportWidth * 0.9,
+			minHeight: Math.min(360, viewportHeight * 0.9),
+			maxHeight: viewportHeight * 0.9,
+		};
+	}
+
+	function getCurrentSettingsModalFrame(): ConcreteSettingsModalFrame | null {
+		if (!settingsModal) return null;
+		const rect = settingsModal.getBoundingClientRect();
+		const limits = getSettingsModalLimits();
+		const width = clampNumber(rect.width, limits.minWidth, limits.maxWidth);
+		const height = clampNumber(rect.height, limits.minHeight, limits.maxHeight);
+		return {
+			width,
+			height,
+			left: clampNumber(rect.left, 0, Math.max(0, limits.viewportWidth - width)),
+			top: clampNumber(rect.top, 0, Math.max(0, limits.viewportHeight - height)),
+		};
+	}
+
+	function clampSettingsModalFrame(frame: ConcreteSettingsModalFrame): ConcreteSettingsModalFrame {
+		const limits = getSettingsModalLimits();
+		const width = clampNumber(frame.width, limits.minWidth, limits.maxWidth);
+		const height = clampNumber(frame.height, limits.minHeight, limits.maxHeight);
+		return {
+			width,
+			height,
+			left: clampNumber(frame.left, 0, Math.max(0, limits.viewportWidth - width)),
+			top: clampNumber(frame.top, 0, Math.max(0, limits.viewportHeight - height)),
+		};
+	}
+
+	function isSettingsHeaderInteractiveTarget(target: EventTarget | null) {
+		if (!(target instanceof HTMLElement)) return false;
+		return Boolean(target.closest('button, a, input, select, textarea, [role="button"]'));
+	}
+
+	function handleSettingsModalDragPointerDown(e: PointerEvent) {
+		if (e.button !== 0 || isSettingsHeaderInteractiveTarget(e.target)) return;
+		const frame = getCurrentSettingsModalFrame();
+		if (!frame) return;
+
+		e.preventDefault();
+		e.stopPropagation();
+		settingsModalFrame = frame;
+		settingsModalDragStart = {
+			pointerId: e.pointerId,
+			clientX: e.clientX,
+			clientY: e.clientY,
+			left: frame.left,
+			top: frame.top,
+			width: frame.width,
+			height: frame.height,
+		};
+		settingsModalIsDragging = true;
+		window.addEventListener('pointermove', handleSettingsModalDragWindowPointerMove);
+		window.addEventListener('pointerup', handleSettingsModalDragWindowPointerUp);
+		window.addEventListener('pointercancel', handleSettingsModalDragWindowPointerCancel);
+	}
+
+	function handleSettingsModalDragWindowPointerMove(e: PointerEvent) {
+		if (!settingsModalDragStart || e.pointerId !== settingsModalDragStart.pointerId) return;
+		e.preventDefault();
+		const left = settingsModalDragStart.left + e.clientX - settingsModalDragStart.clientX;
+		const top = settingsModalDragStart.top + e.clientY - settingsModalDragStart.clientY;
+		settingsModalFrame = clampSettingsModalFrame({
+			width: settingsModalDragStart.width,
+			height: settingsModalDragStart.height,
+			left,
+			top,
+		});
+	}
+
+	function completeSettingsModalDrag(e?: PointerEvent) {
+		if (!settingsModalDragStart) return;
+		e?.preventDefault();
+		e?.stopPropagation();
+		settingsModalDragStart = null;
+		settingsModalIsDragging = false;
+		window.removeEventListener('pointermove', handleSettingsModalDragWindowPointerMove);
+		window.removeEventListener('pointerup', handleSettingsModalDragWindowPointerUp);
+		window.removeEventListener('pointercancel', handleSettingsModalDragWindowPointerCancel);
+	}
+
+	function handleSettingsModalDragWindowPointerUp(e: PointerEvent) {
+		if (!settingsModalDragStart || e.pointerId !== settingsModalDragStart.pointerId) return;
+		completeSettingsModalDrag(e);
+	}
+
+	function handleSettingsModalDragWindowPointerCancel(e: PointerEvent) {
+		if (!settingsModalDragStart || e.pointerId !== settingsModalDragStart.pointerId) return;
+		completeSettingsModalDrag(e);
+	}
+
+	function completeSettingsResize(e?: PointerEvent) {
+		if (!settingsResizeStart) return;
+		e?.preventDefault();
+		e?.stopPropagation();
+		settingsResizeStart = null;
+		settingsModalIsResizing = false;
+		window.removeEventListener('pointermove', handleSettingsResizeWindowPointerMove);
+		window.removeEventListener('pointerup', handleSettingsResizeWindowPointerUp);
+		window.removeEventListener('pointercancel', handleSettingsResizeWindowPointerCancel);
+	}
+
+	function handleSettingsResizePointerDown(e: PointerEvent, edges: SettingsResizeEdge[]) {
+		const frame = getCurrentSettingsModalFrame();
+		if (!frame) return;
+
+		e.preventDefault();
+		e.stopPropagation();
+		settingsResizeStart = {
+			pointerId: e.pointerId,
+			clientX: e.clientX,
+			clientY: e.clientY,
+			width: frame.width,
+			height: frame.height,
+			left: frame.left,
+			top: frame.top,
+			edges,
+		};
+		settingsModalFrame = frame;
+		settingsModalIsResizing = true;
+		window.addEventListener('pointermove', handleSettingsResizeWindowPointerMove);
+		window.addEventListener('pointerup', handleSettingsResizeWindowPointerUp);
+		window.addEventListener('pointercancel', handleSettingsResizeWindowPointerCancel);
+	}
+
+	function handleSettingsResizeWindowPointerMove(e: PointerEvent) {
+		if (!settingsResizeStart || e.pointerId !== settingsResizeStart.pointerId) return;
+		e.preventDefault();
+		e.stopPropagation();
+
+		const deltaX = e.clientX - settingsResizeStart.clientX;
+		const deltaY = e.clientY - settingsResizeStart.clientY;
+		let width = settingsResizeStart.width;
+		let height = settingsResizeStart.height;
+		let left = settingsResizeStart.left;
+		let top = settingsResizeStart.top;
+
+		if (settingsResizeStart.edges.includes('right')) {
+			width = settingsResizeStart.width + deltaX;
+		}
+		if (settingsResizeStart.edges.includes('bottom')) {
+			height = settingsResizeStart.height + deltaY;
+		}
+		if (settingsResizeStart.edges.includes('left')) {
+			width = settingsResizeStart.width - deltaX;
+			left = settingsResizeStart.left + deltaX;
+		}
+		if (settingsResizeStart.edges.includes('top')) {
+			height = settingsResizeStart.height - deltaY;
+			top = settingsResizeStart.top + deltaY;
+		}
+
+		const limits = getSettingsModalLimits();
+		if (width < limits.minWidth && settingsResizeStart.edges.includes('left')) {
+			left = settingsResizeStart.left + settingsResizeStart.width - limits.minWidth;
+		}
+		if (width > limits.maxWidth && settingsResizeStart.edges.includes('left')) {
+			left = settingsResizeStart.left + settingsResizeStart.width - limits.maxWidth;
+		}
+		if (height < limits.minHeight && settingsResizeStart.edges.includes('top')) {
+			top = settingsResizeStart.top + settingsResizeStart.height - limits.minHeight;
+		}
+		if (height > limits.maxHeight && settingsResizeStart.edges.includes('top')) {
+			top = settingsResizeStart.top + settingsResizeStart.height - limits.maxHeight;
+		}
+
+		settingsModalFrame = clampSettingsModalFrame({ width, height, left, top });
+	}
+
+	function handleSettingsResizeWindowPointerUp(e: PointerEvent) {
+		if (!settingsResizeStart || e.pointerId !== settingsResizeStart.pointerId) return;
+		completeSettingsResize(e);
+	}
+
+	function handleSettingsResizeWindowPointerCancel(e: PointerEvent) {
+		if (!settingsResizeStart || e.pointerId !== settingsResizeStart.pointerId) return;
+		completeSettingsResize(e);
 	}
 
 	async function loadVscodeThemes() {
@@ -170,12 +510,6 @@
 		}
 	});
 
-	function handleBackdropClick(e: MouseEvent) {
-		if (e.target === e.currentTarget) {
-			onclose();
-		}
-	}
-
 	function handleModalKeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape') {
 			e.preventDefault();
@@ -229,19 +563,22 @@
 </script>
 
 {#if show}
-	<div class="settings-backdrop" transition:fade={{ duration: 150 }} onclick={handleBackdropClick} role="presentation">
+	<div class="settings-backdrop" transition:fade={{ duration: 150 }} role="presentation">
 		<div
 			class="settings-modal"
+			class:dragging={settingsModalIsDragging}
+			class:resizing={settingsModalIsResizing}
 			bind:this={settingsModal}
+			style={settingsModalFrameStyle}
 			transition:scale={{ duration: 200, start: 0.95 }}
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="settings-title"
 			tabindex="-1"
 			onkeydown={handleModalKeydown}>
-			<div class="settings-header">
+			<div class="settings-header" onpointerdown={handleSettingsModalDragPointerDown}>
 				<h1 id="settings-title">{t('settings.title', settings.language)}</h1>
-				<button class="close-btn" onclick={onclose} aria-label="Close">
+				<button class="close-btn" onclick={onclose} aria-label={t('common.close', settings.language)}>
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
 						width="16"
@@ -424,12 +761,12 @@
 								<label for="editor-font-size">{t('settings.fontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
-										<button class="spin-btn minus" onclick={() => (settings.editorFontSize = Math.max(10, settings.editorFontSize - 1))} aria-label="Decrease">
+										<button class="spin-btn minus" onclick={() => (settings.editorFontSize = Math.max(10, settings.editorFontSize - 1))} aria-label={t('common.decrease', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 										<input type="number" id="editor-font-size" min="10" max="48" bind:value={settings.editorFontSize} class="number-input" />
-										<button class="spin-btn plus" onclick={() => (settings.editorFontSize = Math.min(48, settings.editorFontSize + 1))} aria-label="Increase">
+										<button class="spin-btn plus" onclick={() => (settings.editorFontSize = Math.min(48, settings.editorFontSize + 1))} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
@@ -442,12 +779,12 @@
 								<label for="editor-max-width">{t('settings.wrapColumn', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
-										<button class="spin-btn minus" onclick={() => (settings.editorMaxWidth = Math.max(20, settings.editorMaxWidth - 10))} aria-label="Decrease">
+										<button class="spin-btn minus" onclick={() => (settings.editorMaxWidth = Math.max(20, settings.editorMaxWidth - 10))} aria-label={t('common.decrease', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 										<input type="number" id="editor-max-width" min="20" max="500" step="10" bind:value={settings.editorMaxWidth} class="number-input" style="width: 50px" />
-										<button class="spin-btn plus" onclick={() => (settings.editorMaxWidth = Math.min(500, settings.editorMaxWidth + 10))} aria-label="Increase">
+										<button class="spin-btn plus" onclick={() => (settings.editorMaxWidth = Math.min(500, settings.editorMaxWidth + 10))} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
@@ -585,12 +922,12 @@
 								<label for="preview-font-size">{t('settings.fontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
-										<button class="spin-btn minus" onclick={() => (settings.previewFontSize = Math.max(12, settings.previewFontSize - 1))} aria-label="Decrease">
+										<button class="spin-btn minus" onclick={() => (settings.previewFontSize = Math.max(12, settings.previewFontSize - 1))} aria-label={t('common.decrease', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 										<input type="number" id="preview-font-size" min="12" max="48" bind:value={settings.previewFontSize} class="number-input" />
-										<button class="spin-btn plus" onclick={() => (settings.previewFontSize = Math.min(48, settings.previewFontSize + 1))} aria-label="Increase">
+										<button class="spin-btn plus" onclick={() => (settings.previewFontSize = Math.min(48, settings.previewFontSize + 1))} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
@@ -624,12 +961,12 @@
 								<label for="code-font-size">{t('settings.fontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
-										<button class="spin-btn minus" onclick={() => (settings.codeFontSize = Math.max(10, settings.codeFontSize - 1))} aria-label="Decrease">
+										<button class="spin-btn minus" onclick={() => (settings.codeFontSize = Math.max(10, settings.codeFontSize - 1))} aria-label={t('common.decrease', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 										<input type="number" id="code-font-size" min="10" max="48" bind:value={settings.codeFontSize} class="number-input" />
-										<button class="spin-btn plus" onclick={() => (settings.codeFontSize = Math.min(48, settings.codeFontSize + 1))} aria-label="Increase">
+										<button class="spin-btn plus" onclick={() => (settings.codeFontSize = Math.min(48, settings.codeFontSize + 1))} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
@@ -827,129 +1164,143 @@
 							<h2>{t('settings.toolbarsSettings', settings.language)}</h2>
 						</div>
 
-						<div class="toolbar-settings">
-							<div class="toolbar-settings-header">
-								<h3>{t('settings.applicationToolbar', settings.language)}</h3>
-								<button
-									type="button"
-									class="reset-text-btn"
-									onclick={() => settings.resetTitlebarToolbar()}>
-									{t('settings.resetToolbar', settings.language)}
-								</button>
-							</div>
-							<div class="toolbar-settings-list" role="list">
-								{#each titlebarToolbarSettingsActions as action, index (action.id)}
-									{@const actionName = t(action.labelKey, settings.language) === action.labelKey ? action.fallbackName : t(action.labelKey, settings.language)}
-									<div
-										class="toolbar-tool-row titlebar-toolbar-row"
-										class:drag-source={titlebarToolbarDraggingId === action.id}
-										class:drag-over={titlebarToolbarDragOverId === action.id}
-										role="listitem"
-										draggable="true"
-										ondragstart={(e) => handleTitlebarToolbarDragStart(e, action.id)}
-										ondragover={(e) => handleTitlebarToolbarDragOver(e, action.id)}
-										ondrop={(e) => handleTitlebarToolbarItemDrop(e, action.id)}
-										ondragend={clearTitlebarToolbarDragState}>
-										<span class="toolbar-drag-handle" aria-hidden="true">::</span>
-										<label class="toolbar-tool-toggle" for={`titlebar-toolbar-action-${action.id}`}>
-											<input
-												id={`titlebar-toolbar-action-${action.id}`}
-												type="checkbox"
-												checked={isTitlebarToolbarActionVisible(action.id)}
-												disabled={action.required}
-												onchange={(e) => settings.setTitlebarToolbarActionVisible(action.id, e.currentTarget.checked)}
-											/>
-											<span class="toolbar-tool-name">{actionName}</span>
-											<span class="toolbar-tool-sample">{action.sample}</span>
-										</label>
-										<div class="toolbar-placement-controls" role="group" aria-label={`${t('settings.toolbarPlacement', settings.language)}: ${actionName}`}>
+						<details class="toolbar-settings toolbar-settings-accordion">
+							<summary class="toolbar-settings-summary">
+								<span class="toolbar-settings-chevron" aria-hidden="true"></span>
+								<span>{t('settings.applicationToolbar', settings.language)}</span>
+							</summary>
+							<div class="toolbar-settings-body">
+								<div class="toolbar-settings-header">
+									<button
+										type="button"
+										class="reset-text-btn"
+										onclick={() => settings.resetTitlebarToolbar()}>
+										{t('settings.resetToolbar', settings.language)}
+									</button>
+								</div>
+								<div class="toolbar-settings-list" role="list">
+									{#each titlebarToolbarSettingsActions as action, index (action.id)}
+										{@const actionName = t(action.labelKey, settings.language) === action.labelKey ? action.fallbackName : t(action.labelKey, settings.language)}
+										<div
+											class="toolbar-tool-row titlebar-toolbar-row"
+											class:drag-source={titlebarToolbarDraggingId === action.id}
+											class:drag-over={titlebarToolbarDragOverId === action.id}
+											role="listitem"
+											data-titlebar-toolbar-action-id={action.id}>
 											<button
 												type="button"
-												class:active={getTitlebarToolbarActionPlacement(action.id) === 'bar'}
-												onclick={() => settings.setTitlebarToolbarActionPlacement(action.id, 'bar')}>
-												{t('settings.toolbarOnBar', settings.language)}
+												class="toolbar-drag-handle"
+												aria-label={`${t('settings.move', settings.language)}: ${actionName}`}
+												onpointerdown={(e) => handleTitlebarToolbarDragPointerDown(e, action.id)}>
+												::
 											</button>
-											<button
-												type="button"
-												class:active={getTitlebarToolbarActionPlacement(action.id) === 'menu'}
-												onclick={() => settings.setTitlebarToolbarActionPlacement(action.id, 'menu')}>
-												{t('settings.toolbarInMenu', settings.language)}
-											</button>
+											<label class="toolbar-tool-toggle" for={`titlebar-toolbar-action-${action.id}`}>
+												<input
+													id={`titlebar-toolbar-action-${action.id}`}
+													type="checkbox"
+													checked={isTitlebarToolbarActionVisible(action.id)}
+													disabled={action.required}
+													onchange={(e) => settings.setTitlebarToolbarActionVisible(action.id, e.currentTarget.checked)}
+												/>
+												<span class="toolbar-tool-name">{actionName}</span>
+												<span class="toolbar-tool-sample">{action.sample}</span>
+											</label>
+											<div class="toolbar-placement-controls" role="group" aria-label={`${t('settings.toolbarPlacement', settings.language)}: ${actionName}`}>
+												<button
+													type="button"
+													class:active={getTitlebarToolbarActionPlacement(action.id) === 'bar'}
+													onclick={() => settings.setTitlebarToolbarActionPlacement(action.id, 'bar')}>
+													{t('settings.toolbarOnBar', settings.language)}
+												</button>
+												<button
+													type="button"
+													class:active={getTitlebarToolbarActionPlacement(action.id) === 'menu'}
+													onclick={() => settings.setTitlebarToolbarActionPlacement(action.id, 'menu')}>
+													{t('settings.toolbarInMenu', settings.language)}
+												</button>
+											</div>
+											<div class="toolbar-order-controls">
+												<button
+													type="button"
+													disabled={index === 0}
+													aria-label={`${t('settings.moveUp', settings.language)}: ${actionName}`}
+													onclick={() => settings.moveTitlebarToolbarAction(action.id, 'up')}>
+													{t('settings.moveUp', settings.language)}
+												</button>
+												<button
+													type="button"
+													disabled={index === titlebarToolbarSettingsActions.length - 1}
+													aria-label={`${t('settings.moveDown', settings.language)}: ${actionName}`}
+													onclick={() => settings.moveTitlebarToolbarAction(action.id, 'down')}>
+													{t('settings.moveDown', settings.language)}
+												</button>
+											</div>
 										</div>
-										<div class="toolbar-order-controls">
-											<button
-												type="button"
-												disabled={index === 0}
-												aria-label={`${t('settings.moveUp', settings.language)}: ${actionName}`}
-												onclick={() => settings.moveTitlebarToolbarAction(action.id, 'up')}>
-												Up
-											</button>
-											<button
-												type="button"
-												disabled={index === titlebarToolbarSettingsActions.length - 1}
-												aria-label={`${t('settings.moveDown', settings.language)}: ${actionName}`}
-												onclick={() => settings.moveTitlebarToolbarAction(action.id, 'down')}>
-												Down
-											</button>
-										</div>
-									</div>
-								{/each}
+									{/each}
+								</div>
 							</div>
-						</div>
+						</details>
 
-						<div class="toolbar-settings">
-							<div class="toolbar-settings-header">
-								<h3>{t('settings.editorToolbar', settings.language)}</h3>
-								<button
-									type="button"
-									class="reset-text-btn"
-									onclick={() => settings.resetEditorToolbar()}>
-									{t('settings.resetToolbar', settings.language)}
-								</button>
-							</div>
-							<div class="toolbar-settings-list" role="list">
-								{#each editorToolbarSettingsTools as tool, index (tool.id)}
-									<div
-										class="toolbar-tool-row"
-										class:drag-source={editorToolbarDraggingId === tool.id}
-										class:drag-over={editorToolbarDragOverId === tool.id}
-										role="listitem"
-										draggable="true"
-										ondragstart={(e) => handleEditorToolbarDragStart(e, tool.id)}
-										ondragover={(e) => handleEditorToolbarDragOver(e, tool.id)}
-										ondrop={(e) => handleEditorToolbarItemDrop(e, tool.id)}
-										ondragend={clearEditorToolbarDragState}>
-										<span class="toolbar-drag-handle" aria-hidden="true">::</span>
-										<label class="toolbar-tool-toggle" for={`editor-toolbar-tool-${tool.id}`}>
-											<input
-												id={`editor-toolbar-tool-${tool.id}`}
-												type="checkbox"
-												checked={isEditorToolbarToolVisible(tool.id)}
-												onchange={(e) => settings.setEditorToolbarToolVisible(tool.id, e.currentTarget.checked)}
-											/>
-											<span class="toolbar-tool-name">{tool.name}</span>
-											<span class="toolbar-tool-sample">{tool.label}</span>
-										</label>
-										<div class="toolbar-order-controls">
+						<details class="toolbar-settings toolbar-settings-accordion">
+							<summary class="toolbar-settings-summary">
+								<span class="toolbar-settings-chevron" aria-hidden="true"></span>
+								<span>{t('settings.editorToolbar', settings.language)}</span>
+							</summary>
+							<div class="toolbar-settings-body">
+								<div class="toolbar-settings-header">
+									<button
+										type="button"
+										class="reset-text-btn"
+										onclick={() => settings.resetEditorToolbar()}>
+										{t('settings.resetToolbar', settings.language)}
+									</button>
+								</div>
+								<div class="toolbar-settings-list" role="list">
+									{#each editorToolbarSettingsTools as tool, index (tool.id)}
+										<div
+											class="toolbar-tool-row"
+											class:drag-source={editorToolbarDraggingId === tool.id}
+											class:drag-over={editorToolbarDragOverId === tool.id}
+											role="listitem"
+											data-editor-toolbar-tool-id={tool.id}>
 											<button
 												type="button"
-												disabled={index === 0}
-												aria-label={`${t('settings.moveUp', settings.language)}: ${tool.name}`}
-												onclick={() => settings.moveEditorToolbarTool(tool.id, 'up')}>
-												Up
+												class="toolbar-drag-handle"
+												aria-label={`${t('settings.move', settings.language)}: ${tool.name}`}
+												onpointerdown={(e) => handleEditorToolbarDragPointerDown(e, tool.id)}>
+												::
 											</button>
-											<button
-												type="button"
-												disabled={index === editorToolbarSettingsTools.length - 1}
-												aria-label={`${t('settings.moveDown', settings.language)}: ${tool.name}`}
-												onclick={() => settings.moveEditorToolbarTool(tool.id, 'down')}>
-												Down
-											</button>
+											<label class="toolbar-tool-toggle" for={`editor-toolbar-tool-${tool.id}`}>
+												<input
+													id={`editor-toolbar-tool-${tool.id}`}
+													type="checkbox"
+													checked={isEditorToolbarToolVisible(tool.id)}
+													onchange={(e) => settings.setEditorToolbarToolVisible(tool.id, e.currentTarget.checked)}
+												/>
+												<span class="toolbar-tool-name">{tool.name}</span>
+												<span class="toolbar-tool-sample">{tool.label}</span>
+											</label>
+											<div class="toolbar-order-controls">
+												<button
+													type="button"
+													disabled={index === 0}
+													aria-label={`${t('settings.moveUp', settings.language)}: ${tool.name}`}
+													onclick={() => settings.moveEditorToolbarTool(tool.id, 'up')}>
+													{t('settings.moveUp', settings.language)}
+												</button>
+												<button
+													type="button"
+													disabled={index === editorToolbarSettingsTools.length - 1}
+													aria-label={`${t('settings.moveDown', settings.language)}: ${tool.name}`}
+													onclick={() => settings.moveEditorToolbarTool(tool.id, 'down')}>
+													{t('settings.moveDown', settings.language)}
+												</button>
+											</div>
 										</div>
-									</div>
-								{/each}
+									{/each}
+								</div>
 							</div>
-						</div>
+						</details>
 					</div>
 					{:else if activeCategory === 'files'}
 					<div class="settings-group">
@@ -976,6 +1327,15 @@
 					{/if}
 				</div>
 			</div>
+			{#each settingsResizeHandles as handle}
+				<button
+					type="button"
+					tabindex="-1"
+					class="settings-resize-handle {handle.className}"
+					aria-label={t('settings.resizeWindow', settings.language)}
+					onclick={(e) => e.stopPropagation()}
+					onpointerdown={(e) => handleSettingsResizePointerDown(e, handle.edges)}></button>
+			{/each}
 		</div>
 	</div>
 {/if}
@@ -1008,8 +1368,114 @@
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
-		resize: both;
+		position: relative;
 		font-family: var(--win-font);
+	}
+
+	.settings-modal.dragging,
+	.settings-modal.resizing {
+		user-select: none;
+	}
+
+	.settings-resize-handle {
+		position: absolute;
+		padding: 0;
+		border: none;
+		background: transparent;
+		color: var(--color-fg-muted);
+		z-index: 2;
+	}
+
+	.settings-resize-handle.resize-n,
+	.settings-resize-handle.resize-s {
+		left: 12px;
+		right: 12px;
+		height: 6px;
+		cursor: ns-resize;
+	}
+
+	.settings-resize-handle.resize-n {
+		top: -2px;
+	}
+
+	.settings-resize-handle.resize-s {
+		bottom: -2px;
+	}
+
+	.settings-resize-handle.resize-e,
+	.settings-resize-handle.resize-w {
+		top: 12px;
+		bottom: 12px;
+		width: 6px;
+		cursor: ew-resize;
+	}
+
+	.settings-resize-handle.resize-e {
+		right: -2px;
+	}
+
+	.settings-resize-handle.resize-w {
+		left: -2px;
+	}
+
+	.settings-resize-handle.resize-ne,
+	.settings-resize-handle.resize-se,
+	.settings-resize-handle.resize-sw,
+	.settings-resize-handle.resize-nw {
+		width: 18px;
+		height: 18px;
+	}
+
+	.settings-resize-handle.resize-ne {
+		top: -2px;
+		right: -2px;
+		cursor: nesw-resize;
+	}
+
+	.settings-resize-handle.resize-se {
+		right: -2px;
+		bottom: -2px;
+		cursor: nwse-resize;
+	}
+
+	.settings-resize-handle.resize-sw {
+		left: -2px;
+		bottom: -2px;
+		cursor: nesw-resize;
+	}
+
+	.settings-resize-handle.resize-nw {
+		top: -2px;
+		left: -2px;
+		cursor: nwse-resize;
+	}
+
+	.settings-resize-handle.resize-se::before {
+		content: '';
+		position: absolute;
+		right: 4px;
+		bottom: 4px;
+		width: 9px;
+		height: 9px;
+		border-right: 1px solid currentColor;
+		border-bottom: 1px solid currentColor;
+		opacity: 0.7;
+	}
+
+	.settings-resize-handle.resize-se::after {
+		content: '';
+		position: absolute;
+		right: 8px;
+		bottom: 8px;
+		width: 5px;
+		height: 5px;
+		border-right: 1px solid currentColor;
+		border-bottom: 1px solid currentColor;
+		opacity: 0.55;
+	}
+
+	.settings-resize-handle:hover {
+		color: var(--color-fg-default);
 	}
 
 	.settings-header {
@@ -1018,6 +1484,12 @@
 		justify-content: space-between;
 		padding: 16px 20px;
 		border-bottom: 1px solid var(--color-border-default);
+		cursor: grab;
+		user-select: none;
+	}
+
+	.settings-modal.dragging .settings-header {
+		cursor: grabbing;
 	}
 
 	.settings-header h1 {
@@ -1207,23 +1679,54 @@
 	}
 
 	.toolbar-settings {
-		padding: 12px 0;
+		padding: 0;
 		border-bottom: 1px solid var(--color-border-muted);
+	}
+
+	.toolbar-settings-summary {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 12px 0;
+		list-style: none;
+		color: var(--color-fg-default);
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+		user-select: none;
+	}
+
+	.toolbar-settings-summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.toolbar-settings-summary::marker {
+		content: '';
+	}
+
+	.toolbar-settings-chevron {
+		width: 7px;
+		height: 7px;
+		border-right: 1.5px solid var(--color-fg-muted);
+		border-bottom: 1.5px solid var(--color-fg-muted);
+		transform: rotate(-45deg);
+		transition: transform 0.12s ease;
+	}
+
+	.toolbar-settings[open] .toolbar-settings-chevron {
+		transform: rotate(45deg);
+	}
+
+	.toolbar-settings-body {
+		padding-bottom: 12px;
 	}
 
 	.toolbar-settings-header {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		justify-content: flex-end;
 		gap: 12px;
 		margin-bottom: 8px;
-	}
-
-	.toolbar-settings-header h3 {
-		margin: 0;
-		font-size: 13px;
-		font-weight: 600;
-		color: var(--color-fg-default);
 	}
 
 	.toolbar-settings-list {
@@ -1258,12 +1761,26 @@
 	}
 
 	.toolbar-drag-handle {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 18px;
+		height: 26px;
+		padding: 0;
+		border: none;
+		background: transparent;
 		color: var(--color-fg-muted);
 		cursor: grab;
+		font-family: inherit;
 		font-size: 12px;
 		line-height: 1;
 		text-align: center;
 		user-select: none;
+	}
+
+	.toolbar-drag-handle:active,
+	.toolbar-tool-row.drag-source .toolbar-drag-handle {
+		cursor: grabbing;
 	}
 
 	.toolbar-tool-toggle {

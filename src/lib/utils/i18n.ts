@@ -116,6 +116,7 @@ export const translations: Record<LanguageCode, Translation> = {
             toolbarOnBar: 'Bar',
             toolbarInMenu: 'Menu',
             resetToolbar: 'Reset toolbar',
+            move: 'Move',
             moveUp: 'Move up',
             moveDown: 'Move down',
             default: 'Default',
@@ -1155,9 +1156,11 @@ export const translations: Record<LanguageCode, Translation> = {
             editor: '편집기',
             preview: '미리보기',
             appearance: '외관',
+            toolbars: '툴바',
             editorSettings: '편집기 설정',
             previewSettings: '미리보기 설정',
             appearanceSettings: '외관 설정',
+            toolbarsSettings: '툴바 설정',
             resetEditorSettings: '편집기 설정 초기화',
             resetFontSettings: '글꼴 설정 초기화',
             font: '글꼴',
@@ -1198,6 +1201,15 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: '기본 밝게',
             themeDefaultDark: '기본 어둡게',
             themeFollowSystem: '시스템 따르기',
+            toolbar: '툴바',
+            editorToolbar: '편집기 툴바',
+            applicationToolbar: '애플리케이션 툴바',
+            toolbarPlacement: '툴바 위치',
+            toolbarOnBar: '표시줄',
+            toolbarInMenu: '메뉴',
+            resetToolbar: '툴바 초기화',
+            moveUp: '위로 이동',
+            moveDown: '아래로 이동',
             colors: {
                 default: '기본',
                 yellow: '노란색',
@@ -1214,6 +1226,17 @@ export const translations: Record<LanguageCode, Translation> = {
             autoSave: '편집 내용 자동 저장',
             confirmBeforeSave: '저장 전 확인'
         },
+        colors: {
+            default: '기본',
+            yellow: '노란색',
+            orange: '주황색',
+            red: '빨간색',
+            pink: '분홍색',
+            purple: '보라색',
+            blue: '파란색',
+            cyan: '청록색',
+            green: '초록색'
+        },
         menu: {
             file: '파일',
             edit: '편집',
@@ -1223,6 +1246,7 @@ export const translations: Record<LanguageCode, Translation> = {
             openFile: '파일 열기',
             save: '저장',
             saveAs: '다른 이름으로 저장',
+            reloadFromDisk: '디스크에서 다시 로드',
             closeFile: '파일 닫기',
             closeWindow: '창 닫기',
             moveToNewWindow: '새 창으로 이동',
@@ -1242,6 +1266,7 @@ export const translations: Record<LanguageCode, Translation> = {
             resetZoom: '확대/축소 초기화',
             settings: '설정',
             about: '정보',
+            checkForUpdates: '업데이트 확인…',
             github: 'GitHub',
             documentation: '문서',
             home: '홈',
@@ -1250,7 +1275,12 @@ export const translations: Record<LanguageCode, Translation> = {
             exit: '종료',
             zenMode: '禅 모드',
             tabs: '탭 {{action}}',
+            back: '뒤로',
+            forward: '앞으로',
             openLocation: '위치 열기',
+            openFileLocation: '파일 위치 열기',
+            openInNewTab: '새 탭에서 열기',
+            copyFullPath: '전체 경로 복사',
             splitView: '분할 보기',
             syncScroll: '스크롤 동기화',
             fullWidth: '전체 너비',
@@ -1285,7 +1315,18 @@ export const translations: Record<LanguageCode, Translation> = {
             saveDiagramAsSvg: '다이어그램을 SVG로 저장...',
             wordWrapOff: '끄기',
             wordWrapOn: '창',
-            wordWrapColumn: '열'
+            wordWrapColumn: '열',
+            find: '찾기…'
+        },
+        find: {
+            placeholder: '찾기',
+            next: '다음 일치 항목',
+            previous: '이전 일치 항목',
+            close: '닫기',
+            matchCount: '{{current}} / {{total}}',
+            noMatches: '결과 없음',
+            caseSensitive: '대소문자 구분',
+            wholeWord: '단어 단위로 찾기'
         },
         toast: {
             imageSavedSuccessfully: '이미지가 저장되었습니다',
@@ -1296,7 +1337,8 @@ export const translations: Record<LanguageCode, Translation> = {
             failedToCopyCode: '코드 복사 실패',
             unsupportedFile: '지원되지 않는 파일 형식: {{filename}}',
             autoSaveFailed: '자동 저장 실패 — 저장되지 않은 변경 사항은 메모리에 남아 있습니다',
-            savedNewerEdits: '저장됨 — 새로운 편집이 있어 편집 모드를 유지합니다'
+            savedNewerEdits: '저장됨 — 새로운 편집이 있어 편집 모드를 유지합니다',
+            openExportedFileFailed: '내보낸 파일을 열 수 없습니다'
         },
         modal: {
             confirmExit: '종료 확인',
@@ -1305,7 +1347,36 @@ export const translations: Record<LanguageCode, Translation> = {
             youHaveUnsavedChanges: '"{title}"에 저장되지 않은 변경 사항이 있습니다. 닫기 전에 저장하시겠습니까?',
             youHaveUnsavedChangesBeforeReturning: '저장되지 않은 변경 사항이 있습니다. 보기 모드로 돌아가기 전에 저장하시겠습니까?',
             youHaveUnsavedChangesBeforeClosingSplitView: '저장되지 않은 변경 사항이 있습니다. 분할 보기를 닫기 전에 저장하시겠습니까?',
-            youHaveUnsavedFiles: '저장되지 않은 {{count}}개 파일이 있습니다. 변경 사항을 저장하시겠습니까?'
+            youHaveUnsavedFiles: '저장되지 않은 {{count}}개 파일이 있습니다. 변경 사항을 저장하시겠습니까?',
+            openExportedFileTitle: '내보낸 파일을 여시겠습니까?',
+            openExportedHtmlMessage: 'HTML 내보내기가 저장되었습니다. 지금 여시겠습니까?'
+        },
+        update: {
+            checkingHeader: '업데이트 확인 중…',
+            checkingBody: 'Markpad의 최신 버전을 찾는 중…',
+            upToDateHeader: '최신 버전입니다',
+            upToDateBody: '현재 Markpad 최신 버전(v{{version}})을 사용 중입니다.',
+            upToDateBodyNoVersion: '현재 Markpad 최신 버전을 사용 중입니다.',
+            availableHeader: '업데이트 사용 가능',
+            availableBody: 'Markpad v{{latest}}을(를) 사용할 수 있습니다. 현재 버전은 v{{current}}입니다.',
+            releaseNotes: '릴리스 노트',
+            downloadingHeader: '업데이트 다운로드 중…',
+            downloadingBody: 'Markpad v{{version}} 다운로드 중…',
+            downloadingProgress: '{{total}}MB 중 {{downloaded}}MB ({{pct}}%)',
+            downloadingProgressUnknown: '{{downloaded}}MB 다운로드됨',
+            downloadingHint: '업데이트 준비가 완료되면 Markpad가 자동으로 다시 시작됩니다.',
+            errorCheckHeader: '업데이트 확인 실패',
+            errorCheckBody: '업데이트를 확인할 수 없습니다.',
+            errorDownloadHeader: '업데이트 다운로드 실패',
+            errorDownloadBody: '업데이트를 다운로드하거나 설치할 수 없습니다.',
+            errorInstallHeader: '다시 시작 실패',
+            errorInstallBody: '업데이트는 다운로드되었지만 Markpad를 자동으로 다시 시작할 수 없습니다. 설치를 완료하려면 Markpad를 종료했다가 다시 여세요.',
+            notConfiguredHint: '이 빌드에는 아직 업데이트가 구성되지 않았습니다.',
+            cancel: '취소',
+            ok: '확인',
+            downloadInstall: '다운로드 및 설치',
+            close: '닫기',
+            retry: '재시도'
         },
         home: {
             welcomeToMarkpad: 'Markpad에 오신 것을 환영합니다',
@@ -1318,7 +1389,11 @@ export const translations: Record<LanguageCode, Translation> = {
         editor: {
             status: {
                 lineCol: '줄 {{line}}, 열 {{col}}',
+                selected: '{{count}}개 선택됨',
+                selections: '{{count}}개 선택 영역',
                 words: '{{count}}개 단어',
+                crlf: 'CRLF',
+                utf8: 'UTF-8',
                 lines: '{{count}}개 줄'
             }
         },
@@ -1330,23 +1405,73 @@ export const translations: Record<LanguageCode, Translation> = {
         tooltip: {
             menu: '메뉴',
             more: '더 보기',
+            back: '뒤로',
+            forward: '앞으로',
             moreActions: '더 많은 작업',
             settings: '설정',
             resetZoom: '확대/축소 초기화',
             reset: '초기화',
             zenMode: '禅 모드',
+            toggleZenMode: '禅 모드 전환',
             tabs: '탭 {{action}}',
             hide: '숨기기',
             show: '표시',
             openFileLocation: '파일 위치 열기',
+            toggleSplitView: '분할 보기 전환',
             splitView: '분할 보기',
+            toggleScrollSync: '스크롤 동기화 전환',
             scrollSync: '스크롤 동기화',
+            toggleFullWidth: '전체 너비 전환',
             fullWidth: '전체 너비',
+            reloadFromDisk: '디스크에서 다시 로드',
+            toggleAutoReload: '자동 다시 로드 전환',
             autoReload: '자동 다시 로드',
             editFile: '파일 편집',
             changeTheme: '테마 변경',
+            undock: '도킹 해제',
+            dock: '도킹',
+            switchSide: '위치 전환',
+            toggleFold: '접기 전환',
+            undockToc: '목차 도킹 해제',
+            dockToc: '목차 도킹',
+            showTableOfContents: '목차 표시',
+            hideTableOfContents: '목차 숨기기',
+            newTab: '새 탭',
+            close: '닫기',
+            find: '찾기',
             zoomIn: '확대',
             zoomOut: '축소'
+        },
+        toc: {
+            noHeadingsFound: '제목을 찾을 수 없습니다'
+        },
+        dragAndDrop: {
+            embed: '삽입하려면 놓으세요',
+            open: '열려면 놓으세요'
+        },
+        installer: {
+            markdownViewer: '마크다운 뷰어',
+            current: '현재:',
+            target: '대상:',
+            simpleMarkdownViewer: '간단한 마크다운 뷰어',
+            justMe: '나만',
+            allUsers: '모든 사용자',
+            registerMd: '.md 파일의 기본 프로그램으로 등록',
+            createDesktopShortcut: '바탕화면 바로가기 만들기',
+            addToStartMenu: '시작 메뉴에 추가',
+            launchAfterInstallation: '설치 후 실행',
+            installedFor: '설치 대상:',
+            repairFileAssociations: '파일 연결 복구',
+            launchAfterUpdate: '업데이트 후 실행',
+            uninstall: '제거',
+            updateRepair: '업데이트/복구',
+            installForAllUsers: '모든 사용자를 위해 설치',
+            installNow: '지금 설치',
+            requiresAdmin: '관리자 권한이 필요합니다',
+            updating: '업데이트 중',
+            installing: '설치 중',
+            markpad: 'Markpad...',
+            accessDenied: '액세스가 거부되었습니다. 관리자 권한으로 다시 실행해 주세요.'
         },
         uninstaller: {
             uninstallMarkpad: 'Markpad를 제거하시겠습니까?',
@@ -1362,7 +1487,8 @@ export const translations: Record<LanguageCode, Translation> = {
         common: {
             close: '닫기',
             minimize: '최소화',
-            maximize: '최대화'
+            maximize: '최대화',
+            loadingFullDocument: '전체 문서를 불러오는 중...'
         }
     },
     ru: {
@@ -2711,6 +2837,7 @@ export const translations: Record<LanguageCode, Translation> = {
             toolbarOnBar: 'Belka',
             toolbarInMenu: 'Menu',
             resetToolbar: 'Resetuj pasek',
+            move: 'Przenieś',
             moveUp: 'Przenieś wyżej',
             moveDown: 'Przenieś niżej',
             default: 'Domyślny',
@@ -5929,6 +6056,517 @@ export const translations: Record<LanguageCode, Translation> = {
         }
     }
 };
+
+type SupplementalTranslationSection = 'settings' | 'toc' | 'common';
+type SupplementalTranslations = Partial<Record<SupplementalTranslationSection, Record<string, string>>>;
+
+const interactiveLabelTranslations: Record<LanguageCode, SupplementalTranslations> = {
+    en: {
+        settings: {
+            toolbarPlacement: 'Toolbar placement',
+            toolbarOnBar: 'Bar',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Reset toolbar',
+            move: 'Move',
+            moveUp: 'Move up',
+            moveDown: 'Move down',
+            resizeWindow: 'Resize settings window'
+        },
+        toc: {
+            resizeTableOfContents: 'Resize table of contents'
+        },
+        common: {
+            decrease: 'Decrease',
+            increase: 'Increase'
+        }
+    },
+    ja: {
+        settings: {
+            toolbarPlacement: 'ツールバーの配置',
+            toolbarOnBar: 'バー',
+            toolbarInMenu: 'メニュー',
+            resetToolbar: 'ツールバーをリセット',
+            move: '移動',
+            moveUp: '上へ移動',
+            moveDown: '下へ移動',
+            resizeWindow: '設定ウィンドウのサイズを変更'
+        },
+        toc: {
+            resizeTableOfContents: '目次のサイズを変更'
+        },
+        common: {
+            decrease: '減らす',
+            increase: '増やす'
+        }
+    },
+    'zh-CN': {
+        settings: {
+            toolbarPlacement: '工具栏位置',
+            toolbarOnBar: '栏',
+            toolbarInMenu: '菜单',
+            resetToolbar: '重置工具栏',
+            move: '移动',
+            moveUp: '上移',
+            moveDown: '下移',
+            resizeWindow: '调整设置窗口大小'
+        },
+        toc: {
+            resizeTableOfContents: '调整目录大小'
+        },
+        common: {
+            decrease: '减少',
+            increase: '增加'
+        }
+    },
+    'zh-TW': {
+        settings: {
+            toolbarPlacement: '工具列位置',
+            toolbarOnBar: '工具列',
+            toolbarInMenu: '選單',
+            resetToolbar: '重設工具列',
+            move: '移動',
+            moveUp: '上移',
+            moveDown: '下移',
+            resizeWindow: '調整設定視窗大小'
+        },
+        toc: {
+            resizeTableOfContents: '調整目錄大小'
+        },
+        common: {
+            decrease: '減少',
+            increase: '增加'
+        }
+    },
+    ko: {
+        settings: {
+            toolbarPlacement: '도구 모음 위치',
+            toolbarOnBar: '막대',
+            toolbarInMenu: '메뉴',
+            resetToolbar: '도구 모음 초기화',
+            move: '이동',
+            moveUp: '위로 이동',
+            moveDown: '아래로 이동',
+            resizeWindow: '설정 창 크기 조정'
+        },
+        toc: {
+            resizeTableOfContents: '목차 크기 조정'
+        },
+        common: {
+            decrease: '줄이기',
+            increase: '늘리기'
+        }
+    },
+    ru: {
+        settings: {
+            toolbarPlacement: 'Расположение панели',
+            toolbarOnBar: 'Панель',
+            toolbarInMenu: 'Меню',
+            resetToolbar: 'Сбросить панель',
+            move: 'Переместить',
+            moveUp: 'Переместить вверх',
+            moveDown: 'Переместить вниз',
+            resizeWindow: 'Изменить размер окна настроек'
+        },
+        toc: {
+            resizeTableOfContents: 'Изменить размер оглавления'
+        },
+        common: {
+            decrease: 'Уменьшить',
+            increase: 'Увеличить'
+        }
+    },
+    es: {
+        settings: {
+            toolbarPlacement: 'Ubicación de la barra',
+            toolbarOnBar: 'Barra',
+            toolbarInMenu: 'Menú',
+            resetToolbar: 'Restablecer barra',
+            move: 'Mover',
+            moveUp: 'Mover arriba',
+            moveDown: 'Mover abajo',
+            resizeWindow: 'Cambiar tamaño de la ventana de ajustes'
+        },
+        toc: {
+            resizeTableOfContents: 'Cambiar tamaño de la tabla de contenido'
+        },
+        common: {
+            decrease: 'Disminuir',
+            increase: 'Aumentar'
+        }
+    },
+    fr: {
+        settings: {
+            toolbarPlacement: 'Emplacement de la barre',
+            toolbarOnBar: 'Barre',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Réinitialiser la barre',
+            move: 'Déplacer',
+            moveUp: 'Déplacer vers le haut',
+            moveDown: 'Déplacer vers le bas',
+            resizeWindow: 'Redimensionner la fenêtre des paramètres'
+        },
+        toc: {
+            resizeTableOfContents: 'Redimensionner la table des matières'
+        },
+        common: {
+            decrease: 'Diminuer',
+            increase: 'Augmenter'
+        }
+    },
+    de: {
+        settings: {
+            toolbarPlacement: 'Position der Symbolleiste',
+            toolbarOnBar: 'Leiste',
+            toolbarInMenu: 'Menü',
+            resetToolbar: 'Symbolleiste zurücksetzen',
+            move: 'Verschieben',
+            moveUp: 'Nach oben verschieben',
+            moveDown: 'Nach unten verschieben',
+            resizeWindow: 'Einstellungsfenster vergrößern oder verkleinern'
+        },
+        toc: {
+            resizeTableOfContents: 'Inhaltsverzeichnis vergrößern oder verkleinern'
+        },
+        common: {
+            decrease: 'Verringern',
+            increase: 'Erhöhen'
+        }
+    },
+    'pt-BR': {
+        settings: {
+            toolbarPlacement: 'Posição da barra',
+            toolbarOnBar: 'Barra',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Redefinir barra',
+            move: 'Mover',
+            moveUp: 'Mover para cima',
+            moveDown: 'Mover para baixo',
+            resizeWindow: 'Redimensionar janela de configurações'
+        },
+        toc: {
+            resizeTableOfContents: 'Redimensionar sumário'
+        },
+        common: {
+            decrease: 'Diminuir',
+            increase: 'Aumentar'
+        }
+    },
+    it: {
+        settings: {
+            toolbarPlacement: 'Posizione barra',
+            toolbarOnBar: 'Barra',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Reimposta barra',
+            move: 'Sposta',
+            moveUp: 'Sposta su',
+            moveDown: 'Sposta giù',
+            resizeWindow: 'Ridimensiona finestra impostazioni'
+        },
+        toc: {
+            resizeTableOfContents: 'Ridimensiona indice'
+        },
+        common: {
+            decrease: 'Diminuisci',
+            increase: 'Aumenta'
+        }
+    },
+    pl: {
+        settings: {
+            toolbarPlacement: 'Miejsce na pasku',
+            toolbarOnBar: 'Belka',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Resetuj pasek',
+            move: 'Przenieś',
+            moveUp: 'Przenieś wyżej',
+            moveDown: 'Przenieś niżej',
+            resizeWindow: 'Zmień rozmiar okna ustawień'
+        },
+        toc: {
+            resizeTableOfContents: 'Zmień rozmiar spisu treści'
+        },
+        common: {
+            decrease: 'Zmniejsz',
+            increase: 'Zwiększ'
+        }
+    },
+    nl: {
+        settings: {
+            toolbarPlacement: 'Werkbalkpositie',
+            toolbarOnBar: 'Balk',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Werkbalk resetten',
+            move: 'Verplaatsen',
+            moveUp: 'Omhoog verplaatsen',
+            moveDown: 'Omlaag verplaatsen',
+            resizeWindow: 'Instellingenvenster vergroten of verkleinen'
+        },
+        toc: {
+            resizeTableOfContents: 'Inhoudsopgave vergroten of verkleinen'
+        },
+        common: {
+            decrease: 'Verlagen',
+            increase: 'Verhogen'
+        }
+    },
+    sv: {
+        settings: {
+            toolbarPlacement: 'Verktygsfältets placering',
+            toolbarOnBar: 'Fält',
+            toolbarInMenu: 'Meny',
+            resetToolbar: 'Återställ verktygsfält',
+            move: 'Flytta',
+            moveUp: 'Flytta upp',
+            moveDown: 'Flytta ned',
+            resizeWindow: 'Ändra storlek på inställningsfönster'
+        },
+        toc: {
+            resizeTableOfContents: 'Ändra storlek på innehållsförteckning'
+        },
+        common: {
+            decrease: 'Minska',
+            increase: 'Öka'
+        }
+    },
+    vi: {
+        settings: {
+            toolbarPlacement: 'Vị trí thanh công cụ',
+            toolbarOnBar: 'Thanh',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Đặt lại thanh công cụ',
+            move: 'Di chuyển',
+            moveUp: 'Di chuyển lên',
+            moveDown: 'Di chuyển xuống',
+            resizeWindow: 'Đổi kích thước cửa sổ cài đặt'
+        },
+        toc: {
+            resizeTableOfContents: 'Đổi kích thước mục lục'
+        },
+        common: {
+            decrease: 'Giảm',
+            increase: 'Tăng'
+        }
+    },
+    pt: {
+        settings: {
+            toolbarPlacement: 'Posição da barra',
+            toolbarOnBar: 'Barra',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Repor barra',
+            move: 'Mover',
+            moveUp: 'Mover para cima',
+            moveDown: 'Mover para baixo',
+            resizeWindow: 'Redimensionar janela de definições'
+        },
+        toc: {
+            resizeTableOfContents: 'Redimensionar índice'
+        },
+        common: {
+            decrease: 'Diminuir',
+            increase: 'Aumentar'
+        }
+    },
+    ro: {
+        settings: {
+            toolbarPlacement: 'Poziția barei',
+            toolbarOnBar: 'Bară',
+            toolbarInMenu: 'Meniu',
+            resetToolbar: 'Resetează bara',
+            move: 'Mută',
+            moveUp: 'Mută în sus',
+            moveDown: 'Mută în jos',
+            resizeWindow: 'Redimensionează fereastra de setări'
+        },
+        toc: {
+            resizeTableOfContents: 'Redimensionează cuprinsul'
+        },
+        common: {
+            decrease: 'Micșorează',
+            increase: 'Mărește'
+        }
+    },
+    hu: {
+        settings: {
+            toolbarPlacement: 'Eszköztár helye',
+            toolbarOnBar: 'Sáv',
+            toolbarInMenu: 'Menü',
+            resetToolbar: 'Eszköztár visszaállítása',
+            move: 'Áthelyezés',
+            moveUp: 'Mozgatás felfelé',
+            moveDown: 'Mozgatás lefelé',
+            resizeWindow: 'Beállítások ablak átméretezése'
+        },
+        toc: {
+            resizeTableOfContents: 'Tartalomjegyzék átméretezése'
+        },
+        common: {
+            decrease: 'Csökkentés',
+            increase: 'Növelés'
+        }
+    },
+    cs: {
+        settings: {
+            toolbarPlacement: 'Umístění panelu',
+            toolbarOnBar: 'Panel',
+            toolbarInMenu: 'Nabídka',
+            resetToolbar: 'Obnovit panel',
+            move: 'Přesunout',
+            moveUp: 'Přesunout nahoru',
+            moveDown: 'Přesunout dolů',
+            resizeWindow: 'Změnit velikost okna nastavení'
+        },
+        toc: {
+            resizeTableOfContents: 'Změnit velikost obsahu'
+        },
+        common: {
+            decrease: 'Snížit',
+            increase: 'Zvýšit'
+        }
+    },
+    sk: {
+        settings: {
+            toolbarPlacement: 'Umiestnenie panela',
+            toolbarOnBar: 'Panel',
+            toolbarInMenu: 'Ponuka',
+            resetToolbar: 'Obnoviť panel',
+            move: 'Presunúť',
+            moveUp: 'Presunúť hore',
+            moveDown: 'Presunúť dole',
+            resizeWindow: 'Zmeniť veľkosť okna nastavení'
+        },
+        toc: {
+            resizeTableOfContents: 'Zmeniť veľkosť obsahu'
+        },
+        common: {
+            decrease: 'Znížiť',
+            increase: 'Zvýšiť'
+        }
+    },
+    el: {
+        settings: {
+            toolbarPlacement: 'Θέση γραμμής εργαλείων',
+            toolbarOnBar: 'Γραμμή',
+            toolbarInMenu: 'Μενού',
+            resetToolbar: 'Επαναφορά γραμμής εργαλείων',
+            move: 'Μετακίνηση',
+            moveUp: 'Μετακίνηση πάνω',
+            moveDown: 'Μετακίνηση κάτω',
+            resizeWindow: 'Αλλαγή μεγέθους παραθύρου ρυθμίσεων'
+        },
+        toc: {
+            resizeTableOfContents: 'Αλλαγή μεγέθους πίνακα περιεχομένων'
+        },
+        common: {
+            decrease: 'Μείωση',
+            increase: 'Αύξηση'
+        }
+    },
+    fi: {
+        settings: {
+            toolbarPlacement: 'Työkalupalkin sijainti',
+            toolbarOnBar: 'Palkki',
+            toolbarInMenu: 'Valikko',
+            resetToolbar: 'Nollaa työkalupalkki',
+            move: 'Siirrä',
+            moveUp: 'Siirrä ylös',
+            moveDown: 'Siirrä alas',
+            resizeWindow: 'Muuta asetusikkunan kokoa'
+        },
+        toc: {
+            resizeTableOfContents: 'Muuta sisällysluettelon kokoa'
+        },
+        common: {
+            decrease: 'Pienennä',
+            increase: 'Suurenna'
+        }
+    },
+    da: {
+        settings: {
+            toolbarPlacement: 'Værktøjslinjens placering',
+            toolbarOnBar: 'Linje',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Nulstil værktøjslinje',
+            move: 'Flyt',
+            moveUp: 'Flyt op',
+            moveDown: 'Flyt ned',
+            resizeWindow: 'Tilpas størrelsen på indstillingsvinduet'
+        },
+        toc: {
+            resizeTableOfContents: 'Tilpas størrelsen på indholdsfortegnelsen'
+        },
+        common: {
+            decrease: 'Formindsk',
+            increase: 'Forøg'
+        }
+    },
+    no: {
+        settings: {
+            toolbarPlacement: 'Verktøylinjens plassering',
+            toolbarOnBar: 'Linje',
+            toolbarInMenu: 'Meny',
+            resetToolbar: 'Tilbakestill verktøylinje',
+            move: 'Flytt',
+            moveUp: 'Flytt opp',
+            moveDown: 'Flytt ned',
+            resizeWindow: 'Endre størrelse på innstillingsvindu'
+        },
+        toc: {
+            resizeTableOfContents: 'Endre størrelse på innholdsfortegnelsen'
+        },
+        common: {
+            decrease: 'Reduser',
+            increase: 'Øk'
+        }
+    },
+    id: {
+        settings: {
+            toolbarPlacement: 'Posisi bilah alat',
+            toolbarOnBar: 'Bilah',
+            toolbarInMenu: 'Menu',
+            resetToolbar: 'Atur ulang bilah alat',
+            move: 'Pindahkan',
+            moveUp: 'Pindahkan ke atas',
+            moveDown: 'Pindahkan ke bawah',
+            resizeWindow: 'Ubah ukuran jendela pengaturan'
+        },
+        toc: {
+            resizeTableOfContents: 'Ubah ukuran daftar isi'
+        },
+        common: {
+            decrease: 'Kurangi',
+            increase: 'Tambah'
+        }
+    },
+    tr: {
+        settings: {
+            toolbarPlacement: 'Araç çubuğu konumu',
+            toolbarOnBar: 'Çubuk',
+            toolbarInMenu: 'Menü',
+            resetToolbar: 'Araç çubuğunu sıfırla',
+            move: 'Taşı',
+            moveUp: 'Yukarı taşı',
+            moveDown: 'Aşağı taşı',
+            resizeWindow: 'Ayarlar penceresini yeniden boyutlandır'
+        },
+        toc: {
+            resizeTableOfContents: 'İçindekiler tablosunu yeniden boyutlandır'
+        },
+        common: {
+            decrease: 'Azalt',
+            increase: 'Artır'
+        }
+    }
+};
+
+for (const [language, sections] of Object.entries(interactiveLabelTranslations) as [LanguageCode, SupplementalTranslations][]) {
+    for (const [section, values] of Object.entries(sections) as [SupplementalTranslationSection, Record<string, string>][]) {
+        const currentSection = translations[language][section];
+        if (currentSection && typeof currentSection === 'object') {
+            Object.assign(currentSection, values);
+        } else {
+            translations[language][section] = { ...values };
+        }
+    }
+}
 
 export function t(key: string, lang: LanguageCode = 'en'): string {
     const keys = key.split('.');
