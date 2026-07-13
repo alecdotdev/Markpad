@@ -233,6 +233,241 @@ body {
 	vertical-align: text-bottom;
 }
 
+.markdown-body .frontmatter-panel {
+	margin: 0 0 1.5rem;
+	border: 1px solid var(--color-border-default);
+	border-radius: 8px;
+	background: var(--color-canvas-subtle);
+	overflow: hidden;
+}
+
+.markdown-body .frontmatter-summary {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	min-height: 2.25rem;
+	padding: 0.45rem 0.75rem;
+	border: 0;
+	background: transparent;
+	color: var(--color-fg-default);
+	font: inherit;
+	font-weight: 600;
+	text-align: left;
+	cursor: pointer;
+	list-style: none;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.markdown-body .frontmatter-summary::marker,
+.markdown-body .frontmatter-summary::-webkit-details-marker {
+	display: none;
+	content: "";
+}
+
+.markdown-body .frontmatter-summary:focus-visible {
+	outline: 2px solid var(--color-accent-fg);
+	outline-offset: -3px;
+}
+
+.markdown-body .frontmatter-chevron {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	inline-size: 1rem;
+	block-size: 1rem;
+	color: var(--color-fg-muted);
+	transform: rotate(90deg);
+	transition: transform 0.15s ease;
+}
+
+.markdown-body .frontmatter-panel:not([open]) .frontmatter-chevron {
+	transform: rotate(0deg);
+}
+
+.markdown-body .frontmatter-title {
+	flex: 1;
+}
+
+.markdown-body .frontmatter-count {
+	min-inline-size: 1.5rem;
+	padding: 0.05rem 0.45rem;
+	border: 1px solid var(--color-border-muted);
+	border-radius: 999px;
+	color: var(--color-fg-muted);
+	font-size: 0.78em;
+	font-weight: 500;
+	text-align: center;
+}
+
+.markdown-body .frontmatter-grid {
+	display: grid;
+	grid-template-columns: fit-content(12rem) minmax(0, 1fr);
+	column-gap: 0.75rem;
+	row-gap: 0.45rem;
+	align-items: start;
+	padding: 0.75rem;
+	border-top: 1px solid var(--color-border-muted);
+}
+
+.markdown-body .frontmatter-key {
+	padding-block: 0.35rem;
+	color: var(--color-fg-muted);
+	font-size: 0.9em;
+	overflow-wrap: anywhere;
+}
+
+.markdown-body .frontmatter-value {
+	min-width: 0;
+}
+
+.markdown-body .frontmatter-value input,
+.markdown-body .frontmatter-value select {
+	width: 100%;
+	min-height: 2rem;
+	box-sizing: border-box;
+	border: 1px solid var(--color-border-default);
+	border-radius: 6px;
+	background: var(--color-canvas-default);
+	color: var(--color-fg-default);
+	font: inherit;
+	font-size: 0.92em;
+	padding: 0.3rem 0.5rem;
+}
+
+.markdown-body .frontmatter-value input:focus-visible,
+.markdown-body .frontmatter-value select:focus-visible {
+	outline: 2px solid var(--color-accent-fg);
+	outline-offset: 1px;
+}
+
+.markdown-body .frontmatter-value code {
+	display: block;
+	padding: 0.35rem 0.5rem;
+	border: 1px solid var(--color-border-muted);
+	border-radius: 6px;
+	background: var(--color-canvas-default);
+	white-space: pre-wrap;
+}
+
+.markdown-body .frontmatter-tags {
+	display: flex;
+	flex-direction: column;
+	gap: 0.45rem;
+	min-width: 0;
+}
+
+.markdown-body .frontmatter-tag-list {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.35rem;
+	min-height: 2rem;
+}
+
+.markdown-body .frontmatter-tag {
+	display: inline-flex;
+	align-items: stretch;
+	max-width: 100%;
+	border: 1px solid var(--color-border-default);
+	border-radius: 6px;
+	background: var(--color-canvas-default);
+	overflow: hidden;
+}
+
+.markdown-body .frontmatter-tag-text,
+.markdown-body .frontmatter-tag-remove,
+.markdown-body .frontmatter-tag-add-button {
+	min-height: 1.8rem;
+	border: 0;
+	background: transparent;
+	color: var(--color-fg-default);
+	font: inherit;
+	font-size: 0.9em;
+}
+
+.markdown-body .frontmatter-tag-text {
+	max-width: min(18rem, 100%);
+	padding: 0.2rem 0.5rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: text;
+}
+
+.markdown-body .frontmatter-tag-remove {
+	inline-size: 1.7rem;
+	border-left: 1px solid var(--color-border-muted);
+	color: var(--color-fg-muted);
+	cursor: pointer;
+}
+
+.markdown-body .frontmatter-tag-add {
+	display: grid;
+	grid-template-columns: minmax(8rem, 1fr) 2rem;
+	gap: 0.35rem;
+	width: min(100%, 24rem);
+}
+
+.markdown-body .frontmatter-tag-add-button {
+	border: 1px solid var(--color-border-default);
+	border-radius: 6px;
+	background: var(--color-canvas-default);
+	color: var(--color-fg-muted);
+	cursor: pointer;
+}
+
+.markdown-body .frontmatter-value .frontmatter-tag-edit-input {
+	width: min(14rem, 100%);
+	min-height: 1.8rem;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	padding: 0.2rem 0.5rem;
+}
+
+.markdown-body .frontmatter-tag-text:hover,
+.markdown-body .frontmatter-tag-remove:hover,
+.markdown-body .frontmatter-tag-add-button:hover {
+	background: var(--color-neutral-muted);
+	color: var(--color-fg-default);
+}
+
+.markdown-body .frontmatter-tag-text:focus-visible,
+.markdown-body .frontmatter-tag-remove:focus-visible,
+.markdown-body .frontmatter-tag-add-button:focus-visible {
+	outline: 2px solid var(--color-accent-fg);
+	outline-offset: 1px;
+}
+
+.markdown-body .frontmatter-error,
+.markdown-body .frontmatter-field-error {
+	color: var(--color-danger-fg);
+	font-size: 0.9em;
+}
+
+.markdown-body .frontmatter-error {
+	padding: 0.75rem;
+	border-top: 1px solid var(--color-border-muted);
+	white-space: pre-wrap;
+}
+
+.markdown-body .frontmatter-field-error {
+	margin-top: 0.25rem;
+}
+
+@media (max-width: 720px) {
+	.markdown-body .frontmatter-grid {
+		grid-template-columns: minmax(0, 1fr);
+		row-gap: 0.25rem;
+	}
+
+	.markdown-body .frontmatter-key {
+		padding-block-end: 0;
+	}
+}
+
 .markdown-body h1:hover .anchor .octicon-link:before,
 .markdown-body h2:hover .anchor .octicon-link:before,
 .markdown-body h3:hover .anchor .octicon-link:before,
