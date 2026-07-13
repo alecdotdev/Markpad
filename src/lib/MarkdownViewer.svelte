@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
-	import { listen } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount, tick, untrack } from 'svelte';
 	import { fly } from 'svelte/transition';
@@ -39,6 +38,7 @@ import {
 	import DOMPurify from 'dompurify';
 	import HomePage from './components/HomePage.svelte';
 import { tabManager } from './stores/tabs.svelte.js';
+import { snapshotTab, validateTransferPayload } from './utils/tabTransfer.js';
 import { settings } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
 
@@ -354,9 +354,27 @@ import { t } from './utils/i18n.js';
 	const WINDOW_STATE_KEY = 'savedTabsDataV2';
 	const LEGACY_STATE_KEY = 'savedTabsData';
 
-	function persistWindowState() {
+	// localStorage is origin-scoped, so every window shares the one snapshot
+	// slot. Only the main window persists and restores tabs: secondary window
+	// labels carry a per-session token, so a snapshot of theirs could never
+	// be restored under the same label again, and letting N windows write the
+	// shared key means the last window closed overwrites everyone else.
+	const isMainWindow = appWindow.label === 'main';
+
+	// Persisted through Rust, not localStorage: setItem is an async message
+	// to the WebKit storage process that dies in transit when the last
+	// window's close ends the process (reproduced in QA as "close secondary
+	// first, then main → snapshot gone"). An awaited invoke keeps the close
+	// handler — and the process — alive until the bytes are on disk, so one
+	// deterministic write at close replaces any keep-writing-while-running
+	// scheme. The localStorage keys are read once for migration and removed
+	// after the first successful Rust write; a downgraded build then starts
+	// a fresh session instead of misreading anything.
+	async function persistWindowState() {
+		if (!isMainWindow) return;
 		try {
-			localStorage.setItem(WINDOW_STATE_KEY, tabManager.serializeState());
+			await invoke('save_window_state', { json: tabManager.serializeState() });
+			localStorage.removeItem(WINDOW_STATE_KEY);
 			localStorage.removeItem(LEGACY_STATE_KEY);
 		} catch (e) {
 			console.error('Failed to save state on close:', e);
@@ -374,9 +392,16 @@ import { t } from './utils/i18n.js';
 				});
 				if (response !== 'discard') return;
 			}
-			localStorage.removeItem(WINDOW_STATE_KEY);
-			localStorage.removeItem(LEGACY_STATE_KEY);
 			isForceExiting = true;
+			if (isMainWindow) {
+				try {
+					await invoke('clear_window_state');
+				} catch (e) {
+					console.error('Failed to clear window state:', e);
+				}
+				localStorage.removeItem(WINDOW_STATE_KEY);
+				localStorage.removeItem(LEGACY_STATE_KEY);
+			}
 		}
 		appWindow.close();
 	}
@@ -640,6 +665,11 @@ import { t } from './utils/i18n.js';
 				if (tabManager.activeTab && tabManager.activeTab.path === filePath) {
 					tabManager.closeTab(tabManager.activeTab.id);
 				}
+			} else {
+				// Permission denials (macOS TCC) and other read failures used
+				// to die silently in the console, leaving an empty tab with no
+				// explanation. Surface them.
+				addToast('Error loading file: ' + errStr, 'error');
 			}
 		}
 	}
@@ -1740,7 +1770,7 @@ import { t } from './utils/i18n.js';
 
 	async function destroyWindowAfterTabsClosed() {
 		if (settings.restoreStateOnReopen) {
-			persistWindowState();
+			await persistWindowState();
 		}
 
 		await appWindow.destroy();
@@ -2277,22 +2307,42 @@ import { t } from './utils/i18n.js';
 		}
 	}
 
+	// Moving a tab to a new window preserves its state as-is — dirty content,
+	// edit/split mode, history — so there is deliberately no canCloseTab()
+	// save prompt here: movement is not closing. The content travels through
+	// the Rust broker (never disk, never localStorage), and the source tab is
+	// deleted only after the destination confirms the claim, so any failure —
+	// window creation error, timeout — leaves the tab exactly where it was.
 	async function handleDetach(tabId: string) {
-		if (!(await canCloseTab(tabId))) return;
+		if (isCloseWalkActive) return;
 		const tab = tabManager.tabs.find((t) => t.id === tabId);
-		if (!tab || !tab.path) return;
+		if (!tab || tab.path === 'HOME' || tabManager.tabs.length < 2) return;
 
-		const path = tab.path;
-		tabManager.closeTab(tabId);
+		const payload = JSON.stringify(snapshotTab(tab));
+		const token = (await invoke('stage_detached_tab', { payload })) as string;
 
-		const label = 'window-' + Date.now();
-		const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-		const webview = new WebviewWindow(label, {
-			url: 'index.html?file=' + encodeURIComponent(path),
-			title: 'Markpad - ' + path.split(/[/\\]/).pop(),
-			width: 1000,
-			height: 800,
+		let settled = false;
+		const unlisten = await appWindow.listen<string>('tab-transfer-claimed', (event) => {
+			if (settled || event.payload !== token) return;
+			settled = true;
+			unlisten();
+			tabManager.closeTab(tabId);
 		});
+		const cancel = () => {
+			if (settled) return;
+			settled = true;
+			unlisten();
+			invoke('cancel_detached_tab', { token }).catch(console.error);
+		};
+		setTimeout(cancel, 15000);
+
+		try {
+			await invoke('create_transfer_window', { token });
+		} catch (e) {
+			console.error('create_transfer_window failed:', e);
+			addToast('Failed to open new window: ' + String(e), 'error');
+			cancel();
+		}
 	}
 
 	function startDrag(e: MouseEvent, tabId: string | null) {
@@ -2414,11 +2464,14 @@ import { t } from './utils/i18n.js';
 				const appWindow = getCurrentWindow();
 				const appMode = (await invoke('get_app_mode')) as any;
 
-			if (settings.restoreStateOnReopen) {
-				// v2 key first; the legacy key is only read for one-time
-				// migration of a snapshot written by an older build.
+			if (isMainWindow && settings.restoreStateOnReopen) {
+				// Rust-side file first; the localStorage keys are only read
+				// for one-time migration of a snapshot written by an older
+				// build (v2 key, then the legacy key).
 				const savedData =
-					localStorage.getItem(WINDOW_STATE_KEY) ?? localStorage.getItem(LEGACY_STATE_KEY);
+					((await invoke('load_window_state').catch(() => null)) as string | null) ??
+					localStorage.getItem(WINDOW_STATE_KEY) ??
+					localStorage.getItem(LEGACY_STATE_KEY);
 				if (savedData) {
 					tabManager.restoreState(savedData);
 					// The snapshot carries window state only — content always
@@ -2444,6 +2497,38 @@ import { t } from './utils/i18n.js';
 			}
 
 			const urlParams = new URLSearchParams(window.location.search);
+
+			// A window created by "Move to New Window" claims its tab from the
+			// Rust broker. The transfer token rides in the window label itself
+			// ("window-<token>") — a URL query would 404 in the asset protocol.
+			// The payload is validated strictly before any tab is built: a tab
+			// whose content fields are not strings must never be constructed
+			// (the editor would attribute a stale buffer to it and auto-save
+			// could destroy the file). A failed claim or invalid payload just
+			// yields an empty window — the source kept its tab.
+			const claimToken = appWindow.label.startsWith('window-')
+				? appWindow.label.slice('window-'.length)
+				: null;
+			if (claimToken) {
+				try {
+					const payload = (await invoke('claim_detached_tab', { token: claimToken })) as string | null;
+					const snap = payload ? validateTransferPayload(payload) : null;
+					if (snap) {
+						const id = tabManager.insertTransferredTab(snap);
+						const transferred = tabManager.tabs.find((t) => t.id === id);
+						if (transferred) {
+							const html = await invoke('render_markdown', { content: transferred.rawContent });
+							tabManager.updateTabContent(id, processMarkdownHtml(html as string, transferred.path, collapsedHeaders));
+							tick().then(renderRichContent);
+						}
+					} else {
+						console.warn('Tab transfer claim failed or payload invalid; opening empty window');
+					}
+				} catch (e) {
+					console.error('Tab transfer claim error:', e);
+				}
+			}
+
 			const fileParam = urlParams.get('file');
 			if (fileParam) {
 				const decodedPath = decodeURIComponent(fileParam);
@@ -2456,7 +2541,7 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 			unlisteners.push(
-				await listen('file-changed', () => {
+				await appWindow.listen('file-changed', () => {
 					if (!liveMode || !currentFile) return;
 					// Skip events caused by our own auto-save / save invocations,
 					// otherwise the reload would clobber any keystrokes that landed
@@ -2471,28 +2556,28 @@ import { t } from './utils/i18n.js';
 			);
 
 			unlisteners.push(
-				await listen('file-path', (event) => {
+				await appWindow.listen('file-path', (event) => {
 					const filePath = event.payload as string;
 					if (filePath) loadMarkdown(filePath);
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-close-file', () => {
+				await appWindow.listen('menu-close-file', () => {
 					closeFile();
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-edit-file', () => {
+				await appWindow.listen('menu-edit-file', () => {
 					toggleEdit();
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-edit-find', () => {
+				await appWindow.listen('menu-edit-find', () => {
 					triggerFindAction();
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-rename', async (event) => {
+				await appWindow.listen('menu-tab-rename', async (event) => {
 					const tabId = event.payload as string;
 					const tab = tabManager.tabs.find((t) => t.id === tabId);
 					if (!tab || !tab.path) return;
@@ -2515,31 +2600,36 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-new', () => {
+				await appWindow.listen('menu-tab-new', () => {
 					tabManager.addNewTab();
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-undo', () => {
+				await appWindow.listen('menu-tab-undo', () => {
 					console.log('Received menu-tab-undo event');
 					handleUndoCloseTab();
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-close', async (event) => {
+				await appWindow.listen('menu-tab-close', async (event) => {
 					const tabId = event.payload as string;
 					await closeTabAndWindowIfLast(tabId);
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-close-others', (event) => {
+				await appWindow.listen('menu-tab-detach', (event) => {
+					handleDetach(event.payload as string);
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen('menu-tab-close-others', (event) => {
 					const tabId = event.payload as string;
 					const tabsToClose = tabManager.tabs.filter((t) => t.id !== tabId).map((t) => t.id);
 					tabsToClose.forEach((id) => tabManager.closeTab(id));
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-close-right', (event) => {
+				await appWindow.listen('menu-tab-close-right', (event) => {
 					const tabId = event.payload as string;
 					const index = tabManager.tabs.findIndex((t) => t.id === tabId);
 					if (index !== -1) {
@@ -2549,7 +2639,7 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-check-updates', () => {
+				await appWindow.listen('menu-check-updates', () => {
 					updateStore.openDialog();
 				}),
 			);
@@ -2558,17 +2648,17 @@ import { t } from './utils/i18n.js';
 			// menu and the burger stay behaviourally identical. Save mirrors
 			// the keydown guard (`isEditing || isSplit`) so menu ⌘S in pure
 			// view mode is a no-op, matching the keyboard shortcut.
-			unlisteners.push(await listen('menu-app-quit',         () => appExit()));
-			unlisteners.push(await listen('menu-file-new',         () => handleNewFile()));
-			unlisteners.push(await listen('menu-file-open',        () => selectFile()));
-			unlisteners.push(await listen('menu-file-reload',      () => reloadFromDisk()));
-			unlisteners.push(await listen('menu-file-close',       () => closeFile()));
-			unlisteners.push(await listen('menu-file-save',        () => {
+			unlisteners.push(await appWindow.listen('menu-app-quit',         () => appExit()));
+			unlisteners.push(await appWindow.listen('menu-file-new',         () => handleNewFile()));
+			unlisteners.push(await appWindow.listen('menu-file-open',        () => selectFile()));
+			unlisteners.push(await appWindow.listen('menu-file-reload',      () => reloadFromDisk()));
+			unlisteners.push(await appWindow.listen('menu-file-close',       () => closeFile()));
+			unlisteners.push(await appWindow.listen('menu-file-save',        () => {
 				if (isEditing || tabManager.activeTab?.isSplit) saveContent();
 			}));
-			unlisteners.push(await listen('menu-file-save-as',     () => saveContentAs()));
-			unlisteners.push(await listen('menu-file-export-html', () => exportAsHtml()));
-			unlisteners.push(await listen('menu-file-export-pdf', () => exportAsPdf()));
+			unlisteners.push(await appWindow.listen('menu-file-save-as',     () => saveContentAs()));
+			unlisteners.push(await appWindow.listen('menu-file-export-html', () => exportAsHtml()));
+			unlisteners.push(await appWindow.listen('menu-file-export-pdf', () => exportAsPdf()));
 			unlisteners.push(
 				await appWindow.onCloseRequested(async (event) => {
 					console.log('onCloseRequested triggered');
@@ -2594,6 +2684,11 @@ import { t } from './utils/i18n.js';
 					if (dirtyTabs.length > 0) {
 						event.preventDefault();
 						isCloseWalkActive = true;
+						// The walk's dialogs are in-app modals inside THIS
+						// window: with multiple windows, another window may be
+						// covering it and the review would be invisible. Bring
+						// the reviewing window to the front first.
+						invoke('show_window').catch(console.error);
 						try {
 							// Auto-save without confirmation: silently save every
 							// dirty tab that has a real path. Untitled tabs need a
@@ -2642,8 +2737,11 @@ import { t } from './utils/i18n.js';
 					}
 
 					// Session is clean now; record the window state for restore.
+					// Awaited: the close-requested handler holds the close open
+					// until the Rust write returns, so the process cannot exit
+					// under the snapshot.
 					if (settings.restoreStateOnReopen) {
-						persistWindowState();
+						await persistWindowState();
 					}
 
 					// If we intercepted the close to run the review, re-trigger
