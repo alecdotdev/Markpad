@@ -665,11 +665,17 @@ body {
 .markdown-body table {
 	border-spacing: 0;
 	border-collapse: collapse;
-	display: table;
-	table-layout: fixed;
-	width: 100%;
+	/* Behave like GitHub: keep natural column widths and let a genuinely wide
+	   table scroll horizontally within the content column instead of being
+	   clipped by the article's `overflow-x: hidden`. `display: block` turns the
+	   table itself into the scroll container; cells still wrap (see the
+	   white-space/overflow-wrap rules below), so tables whose content fits keep
+	   wrapping and never show a scrollbar. */
+	display: block;
+	width: max-content;
 	max-width: 100%;
-	overflow: visible;
+	overflow-x: auto;
+	overflow-y: hidden;
 	margin-top: 0;
 	margin-bottom: 16px;
 }
@@ -1424,6 +1430,17 @@ body {
 		white-space: pre-wrap !important;
 		overflow-wrap: anywhere !important;
 		word-break: normal !important;
+		overflow: visible !important;
+	}
+
+	/* Paper has no horizontal scrollbar, so restore the fixed table-layout for
+	   export: wide tables wrap to fit the page width instead of being clipped
+	   by the on-screen `display: block; overflow-x: auto` scroll container. */
+	.markdown-body table {
+		display: table !important;
+		table-layout: fixed !important;
+		width: 100% !important;
+		max-width: 100% !important;
 		overflow: visible !important;
 	}
 
