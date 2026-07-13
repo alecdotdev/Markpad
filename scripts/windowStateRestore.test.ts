@@ -65,23 +65,35 @@ test('the close flow resolves dirty tabs before serializing window state', () =>
 	assert.ok(walk < persist, 'dirty tabs must be resolved before the snapshot is written');
 });
 
-test('v2 snapshots live under their own key, invisible to legacy builds', () => {
-	// An older build restoring a v2 snapshot ends up with undefined tab
-	// content; its editor then attributes a stale buffer to the wrong tab and
-	// auto-save writes it to disk. Separate keys keep the formats apart.
-	const helper = viewer.slice(viewer.indexOf('function persistWindowState'));
+test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys removed)', () => {
+	// An older build restoring a snapshot it cannot understand ends up with
+	// undefined tab content; its editor then attributes a stale buffer to the
+	// wrong tab and auto-save writes it to disk. The snapshot now lives in a
+	// Rust-written file (setItem is an async message to the WebKit storage
+	// process and loses a flush race when the last window's close ends the
+	// process); both localStorage keys are removed on write, so a downgraded
+	// build starts a fresh session instead of misreading anything.
+	const helper = viewer.slice(viewer.indexOf('async function persistWindowState'));
 	const scope = helper.slice(0, helper.indexOf('\n\t}'));
-	assert.match(scope, /setItem\(WINDOW_STATE_KEY/);
+	assert.match(scope, /invoke\('save_window_state'/);
+	assert.doesNotMatch(scope, /setItem\(/);
+	assert.match(scope, /removeItem\(WINDOW_STATE_KEY\)/);
 	assert.match(scope, /removeItem\(LEGACY_STATE_KEY\)/);
 	assert.match(viewer, /const WINDOW_STATE_KEY = 'savedTabsDataV2';/);
-	// startup prefers the v2 key and falls back to legacy for migration
+	// only the main window persists: secondary labels are per-session, and a
+	// shared write slot would let the last window closed overwrite the rest
+	assert.match(scope, /if \(!isMainWindow\) return;/);
+	// startup prefers the Rust file and falls back to the localStorage keys
+	// (v2 first, then legacy) for one-time migration of older snapshots
+	assert.match(viewer, /invoke\('load_window_state'\)/);
 	assert.match(
 		viewer,
-		/localStorage\.getItem\(WINDOW_STATE_KEY\) \?\? localStorage\.getItem\(LEGACY_STATE_KEY\)/,
+		/localStorage\.getItem\(WINDOW_STATE_KEY\) \?\?\n?\s*localStorage\.getItem\(LEGACY_STATE_KEY\)/,
 	);
-	// explicit exit clears both
+	// explicit exit clears the file and both keys
 	const exitFn = viewer.slice(viewer.indexOf('async function appExit'));
 	const exitScope = exitFn.slice(0, exitFn.indexOf('\n\t}'));
+	assert.match(exitScope, /clear_window_state/);
 	assert.match(exitScope, /removeItem\(WINDOW_STATE_KEY\)/);
 	assert.match(exitScope, /removeItem\(LEGACY_STATE_KEY\)/);
 });
