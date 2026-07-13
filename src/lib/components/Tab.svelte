@@ -1,8 +1,9 @@
 <script lang="ts">
-	import type { Tab } from '../stores/tabs.svelte.js';
+	import { type Tab, tabManager } from '../stores/tabs.svelte.js';
 	import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
 	import { invoke } from '@tauri-apps/api/core';
-	import { emit } from '@tauri-apps/api/event';
+	import { emitTo } from '@tauri-apps/api/event';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { t } from '../utils/i18n.js';
 	import { settings } from '../stores/settings.svelte.js';
 	import { getTabFileActions, hasRealFilePath } from '../utils/tabFileActions.js';
@@ -82,21 +83,29 @@
 			x: e.clientX,
 			y: e.clientY,
 			items: [
-				{ label: t('menu.newFile', currentLang), shortcut: 'Ctrl+T', onClick: () => emit('menu-tab-new') },
-				{ label: t('menu.undoCloseTab', currentLang), shortcut: 'Ctrl+Shift+T', onClick: () => emit('menu-tab-undo') },
+				{ label: t('menu.newFile', currentLang), shortcut: 'Ctrl+T', onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-new') },
+				{ label: t('menu.undoCloseTab', currentLang), shortcut: 'Ctrl+Shift+T', onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-undo') },
 				{
 					label: t('menu.rename', currentLang),
 					// Rename renames the file on disk; untitled/HOME tabs have
 					// no file, and the handler previously no-oped silently.
 					disabled: !hasRealFilePath(tab.path),
-					onClick: () => emit('menu-tab-rename', tab.id),
+					onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-rename', tab.id),
 				},
 				{ separator: true },
 				...fileActionItems,
 				{ separator: true },
-				{ label: t('menu.closeFile', currentLang), shortcut: 'Ctrl+W', onClick: () => emit('menu-tab-close', tab.id) },
-				{ label: t('menu.closeOtherTabs', currentLang), onClick: () => emit('menu-tab-close-others', tab.id) },
-				{ label: t('menu.closeTabsToRight', currentLang), onClick: () => emit('menu-tab-close-right', tab.id) },
+				{
+					label: t('menu.moveToNewWindow', currentLang),
+					// Moving the only tab would just churn windows, and the HOME
+					// tab is recreatable anywhere; both stay in place.
+					disabled: tab.path === 'HOME' || tabManager.tabs.length < 2,
+					onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-detach', tab.id),
+				},
+				{ separator: true },
+				{ label: t('menu.closeFile', currentLang), shortcut: 'Ctrl+W', onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-close', tab.id) },
+				{ label: t('menu.closeOtherTabs', currentLang), onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-close-others', tab.id) },
+				{ label: t('menu.closeTabsToRight', currentLang), onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-close-right', tab.id) },
 			],
 		};
 	}
