@@ -4,7 +4,8 @@
 	import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
 	import { t } from '../utils/i18n.js';
 	import { settings } from '../stores/settings.svelte.js';
-	import { emit } from '@tauri-apps/api/event';
+	import { emitTo } from '@tauri-apps/api/event';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 
 	import { flip } from 'svelte/animate';
 	import { tick } from 'svelte';
@@ -167,8 +168,8 @@
 			x: e.clientX,
 			y: e.clientY,
 			items: [
-				{ label: t('menu.newFile', currentLang), shortcut: 'Ctrl+T', onClick: () => emit('menu-tab-new') },
-				{ label: t('menu.undoCloseTab', currentLang), shortcut: 'Ctrl+Shift+T', onClick: () => emit('menu-tab-undo') },
+				{ label: t('menu.newFile', currentLang), shortcut: 'Ctrl+T', onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-new') },
+				{ label: t('menu.undoCloseTab', currentLang), shortcut: 'Ctrl+Shift+T', onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-undo') },
 			]
 		};
 	}
