@@ -2257,13 +2257,7 @@ import { t } from './utils/i18n.js';
 
 			clearTimeout(debounceTimer);
 			debounceTimer = setTimeout(() => {
-				renderMarkdownPreview(tab.rawContent, tab.path)
-					.then((processed) => {
-						tabManager.updateTabContent(tab.id, processed);
-						(tab as any)._lastRenderedRawContent = tab.rawContent;
-						tick().then(renderRichContent);
-					})
-					.catch(console.error);
+				renderTabPreviewFromRaw(tab).catch(console.error);
 			}, 16);
 		}
 	});
