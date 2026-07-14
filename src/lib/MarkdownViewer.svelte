@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
+	import { emitTo } from '@tauri-apps/api/event';
 	import { onMount, tick, untrack } from 'svelte';
-	import { fly } from 'svelte/transition';
+	import { fly, fade } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 	import { open, save, ask } from '@tauri-apps/plugin-dialog';
@@ -315,6 +316,31 @@ import { t } from './utils/i18n.js';
 			};
 		});
 	}
+
+	// "Identify" flash: hovering a "Move to window …" menu entry in another
+	// window makes THIS window raise its hand — a brief accent ring plus a
+	// centered badge naming it. Pure visuals; no focus or z-order change.
+	let identifyFlash = $state<{ show: boolean; display: string; color: string | null }>({
+		show: false,
+		display: '',
+		color: null,
+	});
+	let identifyFlashTimer: ReturnType<typeof setTimeout> | undefined;
+
+	// Every viewer window keeps its display metadata registered with Rust:
+	// the "Move to window …" menu, the ⌘⇧M cycle order, and identify badges
+	// are all served from that registry (tab state lives per WebView, so
+	// Rust cannot derive it).
+	$effect(() => {
+		const activeTabTitle = tabManager.activeTab?.title ?? '';
+		const tabCount = tabManager.tabs.length;
+		invoke('set_window_meta', {
+			tagName: null,
+			tagColor: null,
+			activeTabTitle,
+			tabCount,
+		}).catch(() => {});
+	});
 
 	function handleModalSave() {
 		if (modalState.resolve) modalState.resolve('save');
@@ -2431,6 +2457,10 @@ import { t } from './utils/i18n.js';
 			e.preventDefault();
 			tabManager.addHomeTab();
 		}
+		if (cmdOrCtrl && e.shiftKey && key === 'm') {
+			e.preventDefault();
+			carryActiveTabToNextWindow();
+		}
 		if (cmdOrCtrl && !e.shiftKey && !e.altKey && key === 'o') {
 			e.preventDefault();
 			selectFile();
@@ -2572,41 +2602,143 @@ import { t } from './utils/i18n.js';
 		}
 	}
 
-	// Moving a tab to a new window preserves its state as-is — dirty content,
-	// edit/split mode, history — so there is deliberately no canCloseTab()
-	// save prompt here: movement is not closing. The content travels through
-	// the Rust broker (never disk, never localStorage), and the source tab is
-	// deleted only after the destination confirms the claim, so any failure —
-	// window creation error, timeout — leaves the tab exactly where it was.
-	async function handleDetach(tabId: string) {
-		if (isCloseWalkActive) return;
+	// Moving a tab preserves its state as-is — dirty content, edit/split
+	// mode, history — so there is deliberately no canCloseTab() save prompt:
+	// movement is not closing. The content travels through the Rust broker
+	// (never disk, never localStorage), and the source tab is deleted only
+	// after the destination confirms the claim, so any failure — window
+	// creation error, dead target, timeout — leaves the tab exactly where
+	// it was. `deliver` is the only step that differs between "to a new
+	// window" and "to an existing window".
+	async function transferTab(
+		tabId: string,
+		deliver: (token: string) => Promise<void>,
+		onMoved?: () => void,
+	): Promise<boolean> {
+		if (isCloseWalkActive) return false;
 		const tab = tabManager.tabs.find((t) => t.id === tabId);
-		if (!tab || tab.path === 'HOME' || tabManager.tabs.length < 2) return;
+		if (!tab || tab.path === 'HOME') return false;
 
 		const payload = JSON.stringify(snapshotTab(tab));
 		const token = (await invoke('stage_detached_tab', { payload })) as string;
 
-		let settled = false;
-		const unlisten = await appWindow.listen<string>('tab-transfer-claimed', (event) => {
-			if (settled || event.payload !== token) return;
-			settled = true;
-			unlisten();
-			tabManager.closeTab(tabId);
-		});
-		const cancel = () => {
-			if (settled) return;
-			settled = true;
-			unlisten();
-			invoke('cancel_detached_tab', { token }).catch(console.error);
-		};
-		setTimeout(cancel, 15000);
+		// Resolves true on the claim acknowledgement (tab moved), false on
+		// timeout or delivery failure (tab stays) — callers that chain moves
+		// (merge) must await the acknowledgement, not just the delivery.
+		return new Promise<boolean>(async (resolve) => {
+			let settled = false;
+			const unlisten = await appWindow.listen<string>('tab-transfer-claimed', (event) => {
+				if (settled || event.payload !== token) return;
+				settled = true;
+				unlisten();
+				tabManager.closeTab(tabId);
+				onMoved?.();
+				resolve(true);
+			});
+			const cancel = () => {
+				if (settled) return;
+				settled = true;
+				unlisten();
+				invoke('cancel_detached_tab', { token }).catch(console.error);
+				resolve(false);
+			};
+			setTimeout(cancel, 15000);
 
+			try {
+				await deliver(token);
+			} catch (e) {
+				console.error('tab transfer delivery failed:', e);
+				addToast('Failed to move tab: ' + String(e), 'error');
+				cancel();
+			}
+		});
+	}
+
+	async function handleDetach(tabId: string) {
+		if (tabManager.tabs.length < 2) return;
+		await transferTab(tabId, (token) => invoke('create_transfer_window', { token }));
+	}
+
+	async function moveTabToWindow(tabId: string, targetLabel: string, focusAfter = false) {
+		await transferTab(
+			tabId,
+			(token) => invoke('offer_tab_to_window', { targetLabel, token }),
+			focusAfter ? () => invoke('focus_window', { label: targetLabel }).catch(console.error) : undefined,
+		);
+	}
+
+	// ⌘⇧M carries the active tab to the next window (by creation order,
+	// cyclic) and focus follows it — pressing repeatedly walks the tab
+	// onward. With no other window it degrades to detach-to-new-window.
+	async function carryActiveTabToNextWindow() {
+		const activeId = tabManager.activeTabId;
+		if (!activeId) return;
+		const windows = (await invoke('list_viewer_windows')) as Array<{ label: string; number: number }>;
+		const others = windows.filter((w) => w.label !== appWindow.label);
+		if (others.length === 0) {
+			await handleDetach(activeId);
+			return;
+		}
+		const ordered = windows.slice().sort((a, b) => a.number - b.number);
+		const selfIdx = ordered.findIndex((w) => w.label === appWindow.label);
+		const next = ordered[(selfIdx + 1) % ordered.length];
+		await moveTabToWindow(activeId, next.label, true);
+	}
+
+	// "Merge all windows": every other window is asked to hand its tabs to
+	// this one. Each source pushes tab-by-tab through the same acknowledged
+	// broker path, then closes itself once empty (HOME tabs are recreatable
+	// and simply dropped).
+	async function mergeAllWindowsHere() {
+		const windows = (await invoke('list_viewer_windows')) as Array<{ label: string }>;
+		const others = windows.filter((w) => w.label !== appWindow.label);
+		if (others.length === 0) {
+			addToast(t('toast.noOtherWindows', settings.language), 'info');
+			return;
+		}
+		for (const w of others) {
+			emitTo(w.label, 'merge-into', appWindow.label).catch(console.error);
+		}
+	}
+
+	// Claims a staged transfer and builds the tab. The payload is validated
+	// strictly before any tab is constructed: a tab whose content fields are
+	// not strings must never exist (the editor would attribute a stale
+	// buffer to it and auto-save could destroy the file). Used both by a
+	// fresh detach window on boot (token from its own label) and by an
+	// existing window receiving a "tab-transfer-offer".
+	async function consumeTransferToken(token: string): Promise<boolean> {
 		try {
-			await invoke('create_transfer_window', { token });
+			const payload = (await invoke('claim_detached_tab', { token })) as string | null;
+			const snap = payload ? validateTransferPayload(payload) : null;
+			if (!snap) {
+				console.warn('Tab transfer claim failed or payload invalid');
+				return false;
+			}
+			const id = tabManager.insertTransferredTab(snap);
+			const transferred = tabManager.tabs.find((t) => t.id === id);
+			if (transferred) {
+				await renderTabPreviewFromRaw(transferred);
+			}
+			showHome = false;
+			return true;
 		} catch (e) {
-			console.error('create_transfer_window failed:', e);
-			addToast('Failed to open new window: ' + String(e), 'error');
-			cancel();
+			console.error('Tab transfer claim error:', e);
+			return false;
+		}
+	}
+
+	async function mergeSelfInto(targetLabel: string) {
+		if (isCloseWalkActive) return;
+		for (const tab of [...tabManager.tabs]) {
+			if (tab.path === 'HOME') {
+				tabManager.closeTab(tab.id);
+				continue;
+			}
+			await moveTabToWindow(tab.id, targetLabel);
+		}
+		if (tabManager.tabs.length === 0) {
+			await appWindow.destroy();
 		}
 	}
 
@@ -2792,21 +2924,7 @@ import { t } from './utils/i18n.js';
 				? appWindow.label.slice('window-'.length)
 				: null;
 			if (claimToken) {
-				try {
-					const payload = (await invoke('claim_detached_tab', { token: claimToken })) as string | null;
-					const snap = payload ? validateTransferPayload(payload) : null;
-					if (snap) {
-						const id = tabManager.insertTransferredTab(snap);
-						const transferred = tabManager.tabs.find((t) => t.id === id);
-						if (transferred) {
-							await renderTabPreviewFromRaw(transferred);
-						}
-					} else {
-						console.warn('Tab transfer claim failed or payload invalid; opening empty window');
-					}
-				} catch (e) {
-					console.error('Tab transfer claim error:', e);
-				}
+				await consumeTransferToken(claimToken);
 			}
 
 			const fileParam = urlParams.get('file');
@@ -2899,6 +3017,34 @@ import { t } from './utils/i18n.js';
 			unlisteners.push(
 				await appWindow.listen('menu-tab-detach', (event) => {
 					handleDetach(event.payload as string);
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen('menu-tab-move', (event) => {
+					const { tabId, targetLabel } = event.payload as { tabId: string; targetLabel: string };
+					moveTabToWindow(tabId, targetLabel);
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen<string>('tab-transfer-offer', (event) => {
+					// A close review in progress must not race arriving tabs;
+					// the untouched stage times out and the source keeps its
+					// tab.
+					if (isCloseWalkActive) return;
+					consumeTransferToken(event.payload);
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen<string>('merge-into', (event) => {
+					mergeSelfInto(event.payload);
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen('window-identify', (event) => {
+					const p = event.payload as { display: string; color: string | null };
+					identifyFlash = { show: true, display: p.display, color: p.color };
+					clearTimeout(identifyFlashTimer);
+					identifyFlashTimer = setTimeout(() => (identifyFlash.show = false), 700);
 				}),
 			);
 			unlisteners.push(
@@ -3135,6 +3281,7 @@ import { t } from './utils/i18n.js';
 		onselectFile={selectFile}
 		onnewFile={handleNewFile}
 		onopenFile={selectFile}
+		onmergeAllWindows={mergeAllWindowsHere}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
 		onreloadFromDisk={reloadFromDisk}
@@ -3178,6 +3325,7 @@ import { t } from './utils/i18n.js';
 		onselectFile={selectFile}
 		onnewFile={handleNewFile}
 		onopenFile={selectFile}
+		onmergeAllWindows={mergeAllWindowsHere}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
 		onreloadFromDisk={reloadFromDisk}
@@ -3529,6 +3677,15 @@ import { t } from './utils/i18n.js';
 		oncancel={handleModalCancel} />
 
 	<UpdateDialog />
+
+	{#if identifyFlash.show}
+		<div
+			class="identify-flash"
+			style:--identify-color={identifyFlash.color ?? 'var(--color-accent-fg)'}
+			transition:fade={{ duration: 150 }}>
+			<span class="identify-badge">{identifyFlash.display}</span>
+		</div>
+	{/if}
 
 	<div class="toast-container">
 		{#each toasts as toast (toast.id)}
@@ -4009,6 +4166,33 @@ import { t } from './utils/i18n.js';
 	@keyframes fadeIn {
 		from { opacity: 0; }
 		to { opacity: 1; }
+	}
+
+	.identify-flash {
+		position: fixed;
+		inset: 0;
+		z-index: 40000;
+		pointer-events: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-shadow: inset 0 0 0 3px var(--identify-color);
+		border-radius: 8px;
+	}
+
+	.identify-badge {
+		padding: 10px 22px;
+		border-radius: 10px;
+		background: var(--identify-color);
+		color: #fff;
+		font-size: 20px;
+		font-weight: 600;
+		font-family: var(--win-font);
+		box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+		max-width: 70vw;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.toast-container {

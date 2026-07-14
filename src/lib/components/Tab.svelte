@@ -51,7 +51,21 @@
 		invoke('open_file_folder', { path: tab.path }).catch(console.error);
 	}
 
-	function handleContextMenu(e: MouseEvent) {
+	type ViewerWindowEntry = {
+		label: string;
+		number: number;
+		tag_name: string | null;
+		tag_color: string | null;
+		active_tab_title: string;
+		tab_count: number;
+	};
+
+	function windowDisplay(w: ViewerWindowEntry, lang: typeof settings.language): string {
+		const identity = w.tag_name ?? `${t('menu.window', lang)} ${w.number}`;
+		return w.active_tab_title ? `${identity} · ${w.active_tab_title}` : identity;
+	}
+
+	async function handleContextMenu(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
 
@@ -61,6 +75,30 @@
 			disabled: action.disabled,
 			onClick: action.id === 'copy-path' ? copyTabPath : openTabFileLocation,
 		}));
+
+		// "Move to window …" targets come from the Rust window registry.
+		// Hovering an entry asks that window to identify itself with a
+		// flash, so the menu label never needs to be guessed at.
+		const selfLabel = getCurrentWindow().label;
+		let moveToWindowItems: ContextMenuItem[] = [];
+		try {
+			const windows = (await invoke('list_viewer_windows')) as ViewerWindowEntry[];
+			moveToWindowItems = windows
+				.filter((w) => w.label !== selfLabel)
+				.map((w) => ({
+					label: `${t('menu.moveToWindow', currentLang)} ${windowDisplay(w, currentLang)}`,
+					disabled: tab.path === 'HOME',
+					onHover: () =>
+						emitTo(w.label, 'window-identify', {
+							display: w.tag_name ?? `${t('menu.window', currentLang)} ${w.number}`,
+							color: w.tag_color,
+						}),
+					onClick: () =>
+						emitTo(selfLabel, 'menu-tab-move', { tabId: tab.id, targetLabel: w.label }),
+				}));
+		} catch (err) {
+			console.error('list_viewer_windows failed:', err);
+		}
 
 		tabContextMenu = {
 			show: true,
@@ -80,6 +118,7 @@
 					disabled: tab.path === 'HOME' || tabManager.tabs.length < 2,
 					onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-detach', tab.id),
 				},
+				...moveToWindowItems,
 				{ separator: true },
 				{ label: t('menu.closeFile', currentLang), shortcut: 'Ctrl+W', onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-close', tab.id) },
 				{ label: t('menu.closeOtherTabs', currentLang), onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-close-others', tab.id) },

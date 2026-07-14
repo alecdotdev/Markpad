@@ -634,6 +634,17 @@ fn list_viewer_windows(state: State<'_, AppState>) -> Vec<WindowListEntry> {
     list
 }
 
+/// Brings a specific viewer window to the front — used when ⌘⇧M carries a
+/// tab to the next window and focus should follow it.
+#[tauri::command]
+fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
+    let window = app
+        .get_webview_window(&label)
+        .ok_or_else(|| format!("no such window: {label}"))?;
+    bring_webview_window_to_front(&window);
+    Ok(())
+}
+
 /// Offers a staged tab transfer to an EXISTING window: the destination's
 /// frontend claims the token through the same broker path a detach window
 /// uses, and the source deletes its tab only on the claim acknowledgement.
@@ -1430,6 +1441,7 @@ pub fn run() {
             set_window_meta,
             list_viewer_windows,
             offer_tab_to_window,
+            focus_window,
             save_window_state,
             load_window_state,
             clear_window_state

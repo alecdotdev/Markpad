@@ -152,6 +152,9 @@ export const translations: Record<LanguageCode, Translation> = {
             closeFile: 'Close File',
             closeWindow: 'Close Window',
             moveToNewWindow: 'Move to New Window',
+            moveToWindow: 'Move to',
+            window: 'Window',
+            mergeAllWindows: 'Merge All Windows Here',
             undo: 'Undo',
             redo: 'Redo',
             cut: 'Cut',
@@ -239,6 +242,7 @@ export const translations: Record<LanguageCode, Translation> = {
             failedToCopyCode: 'Failed to copy code',
             unsupportedFile: 'Unsupported file type: {{filename}}',
             autoSaveFailed: 'Auto-save failed — unsaved changes still in memory',
+            noOtherWindows: 'No other windows to merge',
             savedNewerEdits: 'Saved — staying in edit mode because you have newer edits',
             openExportedFileFailed: 'Could not open exported file'
         },
@@ -467,6 +471,9 @@ export const translations: Record<LanguageCode, Translation> = {
             closeFile: '关闭文件',
             closeWindow: '关闭窗口',
             moveToNewWindow: '移动到新窗口',
+            moveToWindow: '移动到',
+            window: '窗口',
+            mergeAllWindows: '合并所有窗口到本窗口',
             undo: '撤销',
             redo: '重做',
             cut: '剪切',
@@ -537,6 +544,7 @@ export const translations: Record<LanguageCode, Translation> = {
             failedToCopyCode: '复制代码失败',
             unsupportedFile: '不支持的文件类型: {{filename}}',
             autoSaveFailed: '自动保存失败 — 未保存的更改仍在内存中',
+            noOtherWindows: '没有其他窗口可合并',
             savedNewerEdits: '已保存 — 因为存在更新的编辑,继续保持编辑模式'
         },
         modal: {
@@ -730,6 +738,9 @@ export const translations: Record<LanguageCode, Translation> = {
             closeFile: 'ファイルを閉じる',
             closeWindow: 'ウィンドウを閉じる',
             moveToNewWindow: '新しいウィンドウに移動',
+            moveToWindow: '移動先:',
+            window: 'ウィンドウ',
+            mergeAllWindows: 'すべてのウィンドウをここに結合',
             undo: '元に戻す',
             redo: 'やり直し',
             cut: '切り取り',
@@ -800,6 +811,7 @@ export const translations: Record<LanguageCode, Translation> = {
             failedToCopyCode: 'コードのコピーに失敗しました',
             unsupportedFile: 'サポートされていないファイル形式: {{filename}}',
             autoSaveFailed: '自動保存に失敗しました — 未保存の変更はメモリ内に残っています',
+            noOtherWindows: '結合できる他のウィンドウがありません',
             savedNewerEdits: '保存しました — 新しい編集があるため編集モードを継続します'
         },
         modal: {
@@ -993,6 +1005,9 @@ export const translations: Record<LanguageCode, Translation> = {
             closeFile: '關閉文件',
             closeWindow: '關閉窗口',
             moveToNewWindow: '移動到新窗口',
+            moveToWindow: '移動到',
+            window: '窗口',
+            mergeAllWindows: '合併所有窗口到本窗口',
             undo: '撤銷',
             redo: '重做',
             cut: '剪切',
@@ -1063,6 +1078,7 @@ export const translations: Record<LanguageCode, Translation> = {
             failedToCopyCode: '複製代碼失敗',
             unsupportedFile: '不支持的文件類型: {{filename}}',
             autoSaveFailed: '自動儲存失敗 — 未儲存的變更仍在記憶體中',
+            noOtherWindows: '沒有其他窗口可合併',
             savedNewerEdits: '已儲存 — 因有較新的編輯,繼續保持編輯模式'
         },
         modal: {
