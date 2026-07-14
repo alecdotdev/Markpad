@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
-	import { listen } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount, tick, untrack } from 'svelte';
 	import { fly } from 'svelte/transition';
@@ -50,6 +49,7 @@ import {
 	import DOMPurify from 'dompurify';
 	import HomePage from './components/HomePage.svelte';
 import { tabManager } from './stores/tabs.svelte.js';
+import { snapshotTab, validateTransferPayload } from './utils/tabTransfer.js';
 import { settings } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
 
@@ -365,6 +365,46 @@ import { t } from './utils/i18n.js';
 	}
 
 	let isForceExiting = $state(false);
+	// True while the window-close walk is showing per-tab dialogs; the native
+	// red button is not blocked by the dialog overlay, so this keeps a second
+	// close request from starting a competing walk.
+	let isCloseWalkActive = false;
+
+	// v2 window-state snapshots live under their own key, and the legacy key
+	// is removed on every write: an older Markpad build restoring a v2
+	// snapshot it cannot understand ends up with undefined tab content, and
+	// its editor then attributes a stale buffer to the wrong tab — which
+	// auto-save happily writes to disk. Keeping the formats on separate keys
+	// makes old and new builds invisible to each other.
+	const WINDOW_STATE_KEY = 'savedTabsDataV2';
+	const LEGACY_STATE_KEY = 'savedTabsData';
+
+	// localStorage is origin-scoped, so every window shares the one snapshot
+	// slot. Only the main window persists and restores tabs: secondary window
+	// labels carry a per-session token, so a snapshot of theirs could never
+	// be restored under the same label again, and letting N windows write the
+	// shared key means the last window closed overwrites everyone else.
+	const isMainWindow = appWindow.label === 'main';
+
+	// Persisted through Rust, not localStorage: setItem is an async message
+	// to the WebKit storage process that dies in transit when the last
+	// window's close ends the process (reproduced in QA as "close secondary
+	// first, then main → snapshot gone"). An awaited invoke keeps the close
+	// handler — and the process — alive until the bytes are on disk, so one
+	// deterministic write at close replaces any keep-writing-while-running
+	// scheme. The localStorage keys are read once for migration and removed
+	// after the first successful Rust write; a downgraded build then starts
+	// a fresh session instead of misreading anything.
+	async function persistWindowState() {
+		if (!isMainWindow) return;
+		try {
+			await invoke('save_window_state', { json: tabManager.serializeState() });
+			localStorage.removeItem(WINDOW_STATE_KEY);
+			localStorage.removeItem(LEGACY_STATE_KEY);
+		} catch (e) {
+			console.error('Failed to save state on close:', e);
+		}
+	}
 
 	async function appExit() {
 		if (settings.restoreStateOnReopen) {
@@ -377,8 +417,16 @@ import { t } from './utils/i18n.js';
 				});
 				if (response !== 'discard') return;
 			}
-			localStorage.removeItem('savedTabsData');
 			isForceExiting = true;
+			if (isMainWindow) {
+				try {
+					await invoke('clear_window_state');
+				} catch (e) {
+					console.error('Failed to clear window state:', e);
+				}
+				localStorage.removeItem(WINDOW_STATE_KEY);
+				localStorage.removeItem(LEGACY_STATE_KEY);
+			}
 		}
 		appWindow.close();
 	}
@@ -850,6 +898,11 @@ import { t } from './utils/i18n.js';
 				if (tabManager.activeTab && tabManager.activeTab.path === filePath) {
 					tabManager.closeTab(tabManager.activeTab.id);
 				}
+			} else {
+				// Permission denials (macOS TCC) and other read failures used
+				// to die silently in the console, leaving an empty tab with no
+				// explanation. Surface them.
+				addToast('Error loading file: ' + errStr, 'error');
 			}
 		}
 	}
@@ -1589,9 +1642,12 @@ import { t } from './utils/i18n.js';
 		}
 
 		// Discard: drop pending save so we don't write what the user just
-		// threw away. The effect will re-arm a timer if the tab gets edited
-		// again.
+		// threw away, and revert to the last saved content so the tab is
+		// clean — callers either close it (tab close) or keep it open for the
+		// window-state snapshot (window close with restore enabled).
 		cancelPendingAutoSave(tabId);
+		tab.rawContent = tab.originalContent;
+		tab.isDirty = false;
 		return true;
 	}
 
@@ -1710,12 +1766,14 @@ import { t } from './utils/i18n.js';
 		let targetPath = tab.path;
 
 		if (!targetPath) {
-			// Special handling for new (untitled) files
+			// Special handling for new (untitled) files. Prefill the numbered
+			// tab title so the dialog itself names which tab is being saved.
 			const selected = await save({
 				filters: [
 					{ name: 'Markdown', extensions: ['md'] },
 					{ name: 'All Files', extensions: ['*'] },
 				],
+				defaultPath: tab.title,
 			});
 			if (selected) {
 				targetPath = selected;
@@ -1978,7 +2036,7 @@ import { t } from './utils/i18n.js';
 
 	async function destroyWindowAfterTabsClosed() {
 		if (settings.restoreStateOnReopen) {
-			localStorage.setItem('savedTabsData', tabManager.serializeState());
+			await persistWindowState();
 		}
 
 		await appWindow.destroy();
@@ -2514,22 +2572,42 @@ import { t } from './utils/i18n.js';
 		}
 	}
 
+	// Moving a tab to a new window preserves its state as-is — dirty content,
+	// edit/split mode, history — so there is deliberately no canCloseTab()
+	// save prompt here: movement is not closing. The content travels through
+	// the Rust broker (never disk, never localStorage), and the source tab is
+	// deleted only after the destination confirms the claim, so any failure —
+	// window creation error, timeout — leaves the tab exactly where it was.
 	async function handleDetach(tabId: string) {
-		if (!(await canCloseTab(tabId))) return;
+		if (isCloseWalkActive) return;
 		const tab = tabManager.tabs.find((t) => t.id === tabId);
-		if (!tab || !tab.path) return;
+		if (!tab || tab.path === 'HOME' || tabManager.tabs.length < 2) return;
 
-		const path = tab.path;
-		tabManager.closeTab(tabId);
+		const payload = JSON.stringify(snapshotTab(tab));
+		const token = (await invoke('stage_detached_tab', { payload })) as string;
 
-		const label = 'window-' + Date.now();
-		const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-		const webview = new WebviewWindow(label, {
-			url: 'index.html?file=' + encodeURIComponent(path),
-			title: 'Markpad - ' + path.split(/[/\\]/).pop(),
-			width: 1000,
-			height: 800,
+		let settled = false;
+		const unlisten = await appWindow.listen<string>('tab-transfer-claimed', (event) => {
+			if (settled || event.payload !== token) return;
+			settled = true;
+			unlisten();
+			tabManager.closeTab(tabId);
 		});
+		const cancel = () => {
+			if (settled) return;
+			settled = true;
+			unlisten();
+			invoke('cancel_detached_tab', { token }).catch(console.error);
+		};
+		setTimeout(cancel, 15000);
+
+		try {
+			await invoke('create_transfer_window', { token });
+		} catch (e) {
+			console.error('create_transfer_window failed:', e);
+			addToast('Failed to open new window: ' + String(e), 'error');
+			cancel();
+		}
 	}
 
 	function startDrag(e: MouseEvent, tabId: string | null) {
@@ -2651,26 +2729,86 @@ import { t } from './utils/i18n.js';
 				const appWindow = getCurrentWindow();
 				const appMode = (await invoke('get_app_mode')) as any;
 
-			if (settings.restoreStateOnReopen) {
-				const savedData = localStorage.getItem('savedTabsData');
+			if (isMainWindow && settings.restoreStateOnReopen) {
+				// localStorage first, Rust file as fallback. Startup always
+				// deletes the localStorage keys after migrating, so their
+				// presence means an OLDER build wrote them since our last
+				// run (fresh install upgrade, or a downgrade period) — in
+				// either case they are newer than the Rust file. Reading the
+				// file first would resurrect a pre-downgrade snapshot over
+				// the one the older build just wrote.
+				const savedData =
+					localStorage.getItem(WINDOW_STATE_KEY) ??
+					localStorage.getItem(LEGACY_STATE_KEY) ??
+					((await invoke('load_window_state').catch(() => null)) as string | null);
 				if (savedData) {
 					tabManager.restoreState(savedData);
-					for (const tab of tabManager.tabs) {
-						if (!tab.content && tab.rawContent) {
-							renderMarkdownPreview(tab.rawContent, tab.path)
-								.then((processed) => {
-									tabManager.updateTabContent(tab.id, processed);
-									if (tabManager.activeTabId === tab.id) {
-										tick().then(renderRichContent);
-									}
-								})
-								.catch(console.error);
+					// The snapshot carries window state only — content always
+					// comes from disk, so restored tabs show the file's real
+					// current bytes. A file that no longer exists drops its tab.
+					for (const tab of [...tabManager.tabs]) {
+						try {
+							const raw = (await invoke('read_file_content', { path: tab.path })) as string;
+							tab.rawContent = raw;
+							tab.originalContent = raw;
+							const processed = await renderMarkdownPreview(raw, tab.path);
+							tabManager.updateTabContent(tab.id, processed);
+							if (tabManager.activeTabId === tab.id) {
+								tick().then(renderRichContent);
+							}
+						} catch (e) {
+							console.warn('Restore: dropping tab for unreadable file', tab.path, e);
+							tabManager.closeTab(tab.id);
 						}
 					}
 				}
 			}
+			if (isMainWindow) {
+				// Hand the snapshot over to the Rust file NOW, then drop the
+				// localStorage keys: write-through first so a crash between
+				// the two steps can never lose the snapshot, and delete at
+				// startup rather than at close so the stale copy cannot
+				// outlive the migration (the close-time removal never runs
+				// for users who disabled restore-on-reopen, which would
+				// leave the old snapshot on disk forever).
+				if (settings.restoreStateOnReopen && tabManager.tabs.length > 0) {
+					await persistWindowState();
+				}
+				localStorage.removeItem(WINDOW_STATE_KEY);
+				localStorage.removeItem(LEGACY_STATE_KEY);
+			}
 
 			const urlParams = new URLSearchParams(window.location.search);
+
+			// A window created by "Move to New Window" claims its tab from the
+			// Rust broker. The transfer token rides in the window label itself
+			// ("window-<token>") — a URL query would 404 in the asset protocol.
+			// The payload is validated strictly before any tab is built: a tab
+			// whose content fields are not strings must never be constructed
+			// (the editor would attribute a stale buffer to it and auto-save
+			// could destroy the file). A failed claim or invalid payload just
+			// yields an empty window — the source kept its tab.
+			const claimToken = appWindow.label.startsWith('window-')
+				? appWindow.label.slice('window-'.length)
+				: null;
+			if (claimToken) {
+				try {
+					const payload = (await invoke('claim_detached_tab', { token: claimToken })) as string | null;
+					const snap = payload ? validateTransferPayload(payload) : null;
+					if (snap) {
+						const id = tabManager.insertTransferredTab(snap);
+						const transferred = tabManager.tabs.find((t) => t.id === id);
+						if (transferred) {
+							await renderTabPreviewFromRaw(transferred);
+						}
+					} else {
+						console.warn('Tab transfer claim failed or payload invalid; opening empty window');
+					}
+				} catch (e) {
+					console.error('Tab transfer claim error:', e);
+				}
+			}
+
 			const fileParam = urlParams.get('file');
 			if (fileParam) {
 				const decodedPath = decodeURIComponent(fileParam);
@@ -2683,7 +2821,7 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 			unlisteners.push(
-				await listen('file-changed', () => {
+				await appWindow.listen('file-changed', () => {
 					if (!liveMode || !currentFile) return;
 					// Skip events caused by our own auto-save / save invocations,
 					// otherwise the reload would clobber any keystrokes that landed
@@ -2698,28 +2836,28 @@ import { t } from './utils/i18n.js';
 			);
 
 			unlisteners.push(
-				await listen('file-path', (event) => {
+				await appWindow.listen('file-path', (event) => {
 					const filePath = event.payload as string;
 					if (filePath) loadMarkdown(filePath);
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-close-file', () => {
+				await appWindow.listen('menu-close-file', () => {
 					closeFile();
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-edit-file', () => {
+				await appWindow.listen('menu-edit-file', () => {
 					toggleEdit();
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-edit-find', () => {
+				await appWindow.listen('menu-edit-find', () => {
 					triggerFindAction();
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-rename', async (event) => {
+				await appWindow.listen('menu-tab-rename', async (event) => {
 					const tabId = event.payload as string;
 					const tab = tabManager.tabs.find((t) => t.id === tabId);
 					if (!tab || !tab.path) return;
@@ -2742,31 +2880,36 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-new', () => {
+				await appWindow.listen('menu-tab-new', () => {
 					tabManager.addNewTab();
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-undo', () => {
+				await appWindow.listen('menu-tab-undo', () => {
 					console.log('Received menu-tab-undo event');
 					handleUndoCloseTab();
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-close', async (event) => {
+				await appWindow.listen('menu-tab-close', async (event) => {
 					const tabId = event.payload as string;
 					await closeTabAndWindowIfLast(tabId);
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-close-others', (event) => {
+				await appWindow.listen('menu-tab-detach', (event) => {
+					handleDetach(event.payload as string);
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen('menu-tab-close-others', (event) => {
 					const tabId = event.payload as string;
 					const tabsToClose = tabManager.tabs.filter((t) => t.id !== tabId).map((t) => t.id);
 					tabsToClose.forEach((id) => tabManager.closeTab(id));
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-close-right', (event) => {
+				await appWindow.listen('menu-tab-close-right', (event) => {
 					const tabId = event.payload as string;
 					const index = tabManager.tabs.findIndex((t) => t.id === tabId);
 					if (index !== -1) {
@@ -2776,7 +2919,7 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-check-updates', () => {
+				await appWindow.listen('menu-check-updates', () => {
 					updateStore.openDialog();
 				}),
 			);
@@ -2785,114 +2928,106 @@ import { t } from './utils/i18n.js';
 			// menu and the burger stay behaviourally identical. Save mirrors
 			// the keydown guard (`isEditing || isSplit`) so menu ⌘S in pure
 			// view mode is a no-op, matching the keyboard shortcut.
-			unlisteners.push(await listen('menu-app-quit',         () => appExit()));
-			unlisteners.push(await listen('menu-file-new',         () => handleNewFile()));
-			unlisteners.push(await listen('menu-file-open',        () => selectFile()));
-			unlisteners.push(await listen('menu-file-reload',      () => reloadFromDisk()));
-			unlisteners.push(await listen('menu-file-close',       () => closeFile()));
-			unlisteners.push(await listen('menu-file-save',        () => {
+			unlisteners.push(await appWindow.listen('menu-app-quit',         () => appExit()));
+			unlisteners.push(await appWindow.listen('menu-file-new',         () => handleNewFile()));
+			unlisteners.push(await appWindow.listen('menu-file-open',        () => selectFile()));
+			unlisteners.push(await appWindow.listen('menu-file-reload',      () => reloadFromDisk()));
+			unlisteners.push(await appWindow.listen('menu-file-close',       () => closeFile()));
+			unlisteners.push(await appWindow.listen('menu-file-save',        () => {
 				if (isEditing || tabManager.activeTab?.isSplit) saveContent();
 			}));
-			unlisteners.push(await listen('menu-file-save-as',     () => saveContentAs()));
-			unlisteners.push(await listen('menu-file-export-html', () => exportAsHtml()));
-			unlisteners.push(await listen('menu-file-export-pdf', () => exportAsPdf()));
+			unlisteners.push(await appWindow.listen('menu-file-save-as',     () => saveContentAs()));
+			unlisteners.push(await appWindow.listen('menu-file-export-html', () => exportAsHtml()));
+			unlisteners.push(await appWindow.listen('menu-file-export-pdf', () => exportAsPdf()));
 			unlisteners.push(
 				await appWindow.onCloseRequested(async (event) => {
 					console.log('onCloseRequested triggered');
 					if (isForceExiting) return;
 
-					// CRITICAL: before serializing tab state to localStorage
-					// (the restore-on-reopen path), make sure all pending
-					// auto-save edits are actually flushed to disk. Without
-					// this, closing the window with auto-save on but
-					// confirmBeforeSave off would silently put unsaved edits
-					// in localStorage only and never persist them to file.
-					if (settings.autoSave && !settings.confirmBeforeSave) {
-						const dirtyWithPath = tabManager.tabs.filter(
-							(t) => t.isDirty && t.path !== '',
-						);
-						for (const tab of dirtyWithPath) {
-							cancelPendingAutoSave(tab.id);
-							try {
-								await saveContent(tab.id);
-							} catch (e) {
-								console.error('Flush-on-close save failed for tab', tab.id, e);
-							}
-						}
-					}
-
-					if (settings.restoreStateOnReopen) {
-						try {
-							const stateStr = tabManager.serializeState();
-							localStorage.setItem('savedTabsData', stateStr);
-						} catch (e) {
-							console.error('Failed to save state on close:', e);
-						}
+					// The red button is a native control, so it is NOT blocked
+					// by the in-app dialog overlay: a second click while the
+					// walk below is showing a dialog would re-enter this handler
+					// and start a competing walk whose setActive calls fight the
+					// first one — the highlighted tab stops matching the dialog.
+					// One walk at a time.
+					if (isCloseWalkActive) {
+						event.preventDefault();
 						return;
 					}
 
+					// Unsaved content and session restore are separate concerns:
+					// dirty tabs are resolved FIRST through the per-tab dialogs,
+					// then the restore snapshot records window state only (open
+					// files, active tab, edit mode, split, scroll) — it never
+					// carries document content.
 					const dirtyTabs = tabManager.tabs.filter((t) => t.isDirty);
-					console.log('Dirty tabs:', dirtyTabs.length);
 					if (dirtyTabs.length > 0) {
-						console.log('Preventing default close');
-				event.preventDefault();
-
-				// Auto-save without confirmation: try silently saving every dirty
-				// tab that has a real path. If untitled tabs exist they need a
-				// Save dialog, so we just fall through to the modal — that is
-				// NOT a failure case and shouldn't show an error toast. We
-				// also DON'T clear pending timers up front: if the user picks
-				// Cancel in the modal below, we want the timers to keep
-				// running for tabs that are still dirty.
-				if (settings.autoSave && !settings.confirmBeforeSave) {
-					const tabsWithPath = dirtyTabs.filter((t) => t.path !== '');
-					const hasUntitled = dirtyTabs.some((t) => t.path === '');
-					if (!hasUntitled) {
-						let allOk = true;
-						for (const tab of tabsWithPath) {
-							cancelPendingAutoSave(tab.id);
-							const ok = await saveContent(tab.id);
-							if (!ok) { allOk = false; break; }
-						}
-						if (allOk) {
-							appWindow.close();
-							return;
-						}
-						// A real save failure happened — surface it.
-						addToast(t('toast.autoSaveFailed', settings.language), 'error');
-					}
-					// hasUntitled: skip toast, just fall through to the modal.
-				}
-
-				const response = await askCustom(t('modal.youHaveUnsavedFiles', settings.language).replace('{{count}}', dirtyTabs.length.toString()), {
-											title: t('modal.unsavedChanges', settings.language),
-					kind: 'warning',
-					showSave: true,
-				});
-
-						if (response === 'save') {
-							// Attempt to save all dirty tabs
-							for (const tab of dirtyTabs) {
-								tabManager.setActive(tab.id);
-								await tick();
-								cancelPendingAutoSave(tab.id);
-								const saved = await saveContent(tab.id);
-								if (!saved) return; // Cancelled or failed
+						event.preventDefault();
+						isCloseWalkActive = true;
+						// The walk's dialogs are in-app modals inside THIS
+						// window: with multiple windows, another window may be
+						// covering it and the review would be invisible. Bring
+						// the reviewing window to the front first.
+						invoke('show_window').catch(console.error);
+						try {
+							// Auto-save without confirmation: silently save every
+							// dirty tab that has a real path. Untitled tabs need a
+							// Save dialog, so the walk below handles them. A failed
+							// silent save is surfaced and its tab also goes to the
+							// walk. Timers are cancelled per tab right before its
+							// save to avoid duplicate writes.
+							if (settings.autoSave && !settings.confirmBeforeSave) {
+								for (const tab of dirtyTabs.filter((t) => t.path !== '')) {
+									cancelPendingAutoSave(tab.id);
+									const ok = await saveContent(tab.id);
+									if (!ok) {
+										addToast(t('toast.autoSaveFailed', settings.language), 'error');
+										break;
+									}
+								}
 							}
-							// If all saved successfully, close the app
-							appWindow.close();
-						} else if (response === 'discard') {
-							// Force close by removing this listener or skipping check?
-							// Since we are inside the event handler, we can't easily remove "this" listener specifically
-							// without refactoring how unlisteners are stored/accessed relative to this callback.
-							// However, if we just want to exit, we can use exit() from rust or just appWindow.destroy()?
-							// WebviewWindow.close() triggers this event again.
-							// Solution: invoke a command to exit forcefully or set a flag.
-							// The simplest might be to just clear the dirty flags and close.
-							tabManager.tabs.forEach((t) => (t.isDirty = false));
-							appWindow.close();
+
+							// Close review (issue #189): walk the remaining dirty
+							// tabs one at a time — activate each and run the same
+							// localized unsaved-changes dialog a single tab close
+							// shows. Cancel stops the walk and keeps the window
+							// open. Strict tab-strip order (left to right) so the
+							// sequence is predictable; numbered untitled titles
+							// let the dialog name each tab. Re-find every round —
+							// a save can leave a tab dirty again (TOCTOU) and
+							// tabs can change while a dialog is up.
+							while (true) {
+								const dirty = tabManager.tabs.find((t) => t.isDirty);
+								if (!dirty) break;
+								tabManager.setActive(dirty.id);
+								await tick();
+								if (!(await canCloseTab(dirty.id))) return;
+								// Resolved tabs (saved, or reverted by Don't Save)
+								// stay open for the window-state snapshot when
+								// restore is enabled; untitled tabs have nothing to
+								// restore, and with restore off the red button
+								// closes tabs one by one.
+								if (!settings.restoreStateOnReopen || dirty.path === '') {
+									tabManager.closeTab(dirty.id);
+								}
+							}
+						} finally {
+							isCloseWalkActive = false;
 						}
 					}
+
+					// Session is clean now; record the window state for restore.
+					// Awaited: the close-requested handler holds the close open
+					// until the Rust write returns, so the process cannot exit
+					// under the snapshot.
+					if (settings.restoreStateOnReopen) {
+						await persistWindowState();
+					}
+
+					// If we intercepted the close to run the review, re-trigger
+					// it: the handler re-enters, finds nothing dirty, and the
+					// close proceeds.
+					if (dirtyTabs.length > 0) appWindow.close();
 				}),
 			);
 
@@ -2954,13 +3089,19 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 
-			try {
-				const args: string[] = await invoke('send_markdown_path');
-				if (args?.length > 0) {
-					await loadMarkdown(args[0]);
+			// Startup-file delivery (argv / macOS Opened-before-ready stash) is
+			// a boot-time channel that belongs to the FIRST window only. It is
+			// process-global state: letting every window consume it meant each
+			// detached window re-opened the file the app was launched with.
+			if (isMainWindow) {
+				try {
+					const args: string[] = await invoke('send_markdown_path');
+					if (args?.length > 0) {
+						await loadMarkdown(args[0]);
+					}
+				} catch (error) {
+					console.error('Error receiving Markdown file path:', error);
 				}
-			} catch (error) {
-				console.error('Error receiving Markdown file path:', error);
 			}
 
 			mode = appMode;
