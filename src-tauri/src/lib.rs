@@ -188,8 +188,12 @@ fn bring_webview_window_to_front(window: &tauri::WebviewWindow) {
 }
 
 /// Picks the viewer window that should receive an externally opened file:
-/// the focused viewer if any, otherwise any viewer. Viewer windows are
-/// "main" and detached "window-*" windows; "installer" never receives files.
+/// the focused viewer if any, else the viewer the user focused most
+/// recently, else any viewer. The middle rung matters for Finder opens —
+/// Finder is frontmost at that moment, so is_focused() is false for every
+/// Markpad window and delivery would otherwise degrade to arbitrary map
+/// order. Viewer windows are "main" and detached "window-*" windows;
+/// "installer" never receives files.
 fn pick_delivery_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     let viewers: Vec<tauri::WebviewWindow> = app
         .webview_windows()
@@ -198,11 +202,26 @@ fn pick_delivery_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         .map(|(_, window)| window)
         .collect();
 
-    viewers
+    if let Some(focused) = viewers
         .iter()
         .find(|window| window.is_focused().unwrap_or(false))
-        .cloned()
-        .or_else(|| viewers.into_iter().next())
+    {
+        return Some(focused.clone());
+    }
+
+    let last = app
+        .state::<AppState>()
+        .last_focused_viewer
+        .lock()
+        .unwrap()
+        .clone();
+    if let Some(label) = last {
+        if let Some(window) = viewers.iter().find(|w| w.label() == label) {
+            return Some(window.clone());
+        }
+    }
+
+    viewers.into_iter().next()
 }
 
 /// Creates the destination window for a tab transfer. The window's label
@@ -539,6 +558,11 @@ fn unwatch_file(window: tauri::Window, state: State<'_, WatcherState>) -> Result
 
 struct AppState {
     startup_file: Mutex<Option<String>>,
+    // Label of the viewer window the user focused most recently. When an
+    // OS file-open arrives, Finder is frontmost and is_focused() is false
+    // for every Markpad window — without this the delivery target degrades
+    // to arbitrary HashMap order.
+    last_focused_viewer: Mutex<Option<String>>,
 }
 
 #[tauri::command]
@@ -1022,6 +1046,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState {
             startup_file: Mutex::new(None),
+            last_focused_viewer: Mutex::new(None),
         })
         .manage(WatcherState {
             watchers: Mutex::new(std::collections::HashMap::new()),
@@ -1320,11 +1345,21 @@ pub fn run() {
             clear_window_state
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                // Drop this window's file watcher so a closed window never
-                // leaves a dangling notify handle behind.
-                let state = window.state::<WatcherState>();
-                state.watchers.lock().unwrap().remove(window.label());
+            match event {
+                tauri::WindowEvent::Focused(true) => {
+                    let label = window.label();
+                    if label == "main" || label.starts_with("window-") {
+                        let state = window.state::<AppState>();
+                        *state.last_focused_viewer.lock().unwrap() = Some(label.to_string());
+                    }
+                }
+                tauri::WindowEvent::Destroyed => {
+                    // Drop this window's file watcher so a closed window
+                    // never leaves a dangling notify handle behind.
+                    let state = window.state::<WatcherState>();
+                    state.watchers.lock().unwrap().remove(window.label());
+                }
+                _ => {}
             }
         })
         .on_menu_event(|app, event| {
