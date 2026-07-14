@@ -327,6 +327,54 @@ import { t } from './utils/i18n.js';
 	});
 	let identifyFlashTimer: ReturnType<typeof setTimeout> | undefined;
 
+	// Pinned window tags are named sessions. A pinned window saves its open
+	// file set under its tag at close; the HOME page lists pinned tags and
+	// reopens the set on click.
+	let pinnedTags = $state<Array<{ name: string; color: string; files: string[] }>>([]);
+
+	async function refreshPinnedTags() {
+		try {
+			pinnedTags = (await invoke('list_pinned_tags')) as typeof pinnedTags;
+		} catch (e) {
+			console.error('list_pinned_tags failed:', e);
+		}
+	}
+
+	async function savePinnedTagIfNeeded() {
+		const tag = tabManager.windowTag;
+		if (!tag?.pinned) return;
+		const files = tabManager.tabs.filter((t) => t.path !== '' && t.path !== 'HOME').map((t) => t.path);
+		try {
+			await invoke('save_pinned_tag', { name: tag.name, color: tag.color, files });
+		} catch (e) {
+			console.error('save_pinned_tag failed:', e);
+		}
+	}
+
+	async function openPinnedTag(tag: { name: string; color: string; files: string[] }) {
+		tabManager.setWindowTag({ name: tag.name, color: tag.color, pinned: true });
+		for (const file of tag.files) {
+			await loadMarkdown(file);
+		}
+		showHome = false;
+	}
+
+	async function unpinTagFromHome(name: string) {
+		try {
+			await invoke('remove_pinned_tag', { name });
+			if (tabManager.windowTag?.name === name) {
+				tabManager.setWindowTag({ ...tabManager.windowTag, pinned: false });
+			}
+			await refreshPinnedTags();
+		} catch (e) {
+			console.error('remove_pinned_tag failed:', e);
+		}
+	}
+
+	$effect(() => {
+		if (showHome) refreshPinnedTags();
+	});
+
 	// Every viewer window keeps its display metadata registered with Rust:
 	// the "Move to window …" menu, the ⌘⇧M cycle order, and identify badges
 	// are all served from that registry (tab state lives per WebView, so
@@ -441,6 +489,7 @@ import { t } from './utils/i18n.js';
 	}
 
 	async function appExit() {
+		await savePinnedTagIfNeeded();
 		if (settings.restoreStateOnReopen) {
 			const hasUnsaved = tabManager.tabs.some((t) => t.isDirty || (t.path === '' && t.rawContent.trim() !== ''));
 			if (hasUnsaved) {
@@ -2069,6 +2118,7 @@ import { t } from './utils/i18n.js';
 	}
 
 	async function destroyWindowAfterTabsClosed() {
+		await savePinnedTagIfNeeded();
 		if (settings.restoreStateOnReopen) {
 			await persistWindowState();
 		}
@@ -2918,6 +2968,8 @@ import { t } from './utils/i18n.js';
 				localStorage.removeItem(LEGACY_STATE_KEY);
 			}
 
+			refreshPinnedTags();
+
 			const urlParams = new URLSearchParams(window.location.search);
 
 			// A window created by "Move to New Window" claims its tab from the
@@ -3174,6 +3226,7 @@ import { t } from './utils/i18n.js';
 					// Awaited: the close-requested handler holds the close open
 					// until the Rust write returns, so the process cannot exit
 					// under the snapshot.
+					await savePinnedTagIfNeeded();
 					if (settings.restoreStateOnReopen) {
 						await persistWindowState();
 					}
@@ -3657,7 +3710,7 @@ import { t } from './utils/i18n.js';
 				</div>
 			</div>
 	{:else}
-		<HomePage {recentFiles} onselectFile={selectFile} onloadFile={loadMarkdown} onremoveRecentFile={removeRecentFile} onnewFile={handleNewFile} />
+		<HomePage {recentFiles} {pinnedTags} onselectFile={selectFile} onloadFile={loadMarkdown} onremoveRecentFile={removeRecentFile} onnewFile={handleNewFile} onopenPinnedTag={openPinnedTag} onunpinTag={unpinTagFromHome} />
 	{/if}
 
 	<div 
@@ -4178,14 +4231,17 @@ import { t } from './utils/i18n.js';
 
 	.identify-flash {
 		position: fixed;
-		inset: 0;
+		/* Inset from the window edge: breathing room reads stronger than a
+		   flush ring, and the larger radius stays concentric with the macOS
+		   window corners. */
+		inset: 6px;
 		z-index: 40000;
 		pointer-events: none;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		box-shadow: inset 0 0 0 3px var(--identify-color);
-		border-radius: 8px;
+		box-shadow: inset 0 0 0 4px var(--identify-color);
+		border-radius: 12px;
 	}
 
 	.identify-badge {

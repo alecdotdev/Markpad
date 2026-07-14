@@ -181,6 +181,62 @@ fn clear_window_state(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// Pinned window tags are named sessions: a window whose tag is pinned
+// saves its open file paths under the tag at close, and the HOME page can
+// reopen that set later. Stored as a small JSON file next to the window
+// state, keyed (upserted) by tag name.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct PinnedTag {
+    name: String,
+    color: String,
+    files: Vec<String>,
+}
+
+fn pinned_tags_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("pinned-tags.json"))
+}
+
+fn read_pinned_tags(app: &AppHandle) -> Vec<PinnedTag> {
+    pinned_tags_path(app)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn list_pinned_tags(app: AppHandle) -> Vec<PinnedTag> {
+    read_pinned_tags(&app)
+}
+
+#[tauri::command]
+fn save_pinned_tag(
+    app: AppHandle,
+    name: String,
+    color: String,
+    files: Vec<String>,
+) -> Result<(), String> {
+    let mut tags = read_pinned_tags(&app);
+    if let Some(existing) = tags.iter_mut().find(|t| t.name == name) {
+        existing.color = color;
+        existing.files = files;
+    } else {
+        tags.push(PinnedTag { name, color, files });
+    }
+    let json = serde_json::to_string(&tags).map_err(|e| e.to_string())?;
+    fs::write(pinned_tags_path(&app)?, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_pinned_tag(app: AppHandle, name: String) -> Result<(), String> {
+    let mut tags = read_pinned_tags(&app);
+    tags.retain(|t| t.name != name);
+    let json = serde_json::to_string(&tags).map_err(|e| e.to_string())?;
+    fs::write(pinned_tags_path(&app)?, json).map_err(|e| e.to_string())
+}
+
 fn bring_webview_window_to_front(window: &tauri::WebviewWindow) {
     let _ = window.show();
     let _ = window.unminimize();
@@ -1444,7 +1500,10 @@ pub fn run() {
             focus_window,
             save_window_state,
             load_window_state,
-            clear_window_state
+            clear_window_state,
+            list_pinned_tags,
+            save_pinned_tag,
+            remove_pinned_tag
         ])
         .on_window_event(|window, event| {
             match event {

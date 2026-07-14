@@ -68,9 +68,9 @@ class TabManager {
 	// color chip). Window-level, not tab-level; secondary windows' tags die
 	// with them, main's rides the v2 snapshot as an additive field that
 	// older builds simply ignore.
-	windowTag = $state<{ name: string; color: string } | null>(null);
+	windowTag = $state<{ name: string; color: string; pinned?: boolean } | null>(null);
 
-	setWindowTag(tag: { name: string; color: string } | null) {
+	setWindowTag(tag: { name: string; color: string; pinned?: boolean } | null) {
 		this.windowTag = tag;
 	}
 
@@ -114,7 +114,11 @@ class TabManager {
 				data.windowTag.name !== '' &&
 				typeof data.windowTag.color === 'string'
 			) {
-				this.windowTag = { name: data.windowTag.name, color: data.windowTag.color };
+				this.windowTag = {
+					name: data.windowTag.name,
+					color: data.windowTag.color,
+					pinned: data.windowTag.pinned === true,
+				};
 			}
 
 			const restored: Tab[] = [];

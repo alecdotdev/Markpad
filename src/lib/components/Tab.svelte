@@ -60,9 +60,11 @@
 		tab_count: number;
 	};
 
+	// Identity only (tag name, or "Window N") — the hover identify-flash on
+	// the target window is the disambiguator, so appending the active tab
+	// title here just added noise.
 	function windowDisplay(w: ViewerWindowEntry, lang: typeof settings.language): string {
-		const identity = w.tag_name ?? `${t('menu.window', lang)} ${w.number}`;
-		return w.active_tab_title ? `${identity} · ${w.active_tab_title}` : identity;
+		return w.tag_name ?? `${t('menu.window', lang)} ${w.number}`;
 	}
 
 	async function handleContextMenu(e: MouseEvent) {

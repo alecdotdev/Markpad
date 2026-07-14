@@ -6,6 +6,7 @@
 	import { flip } from 'svelte/animate';
 	import iconUrl from '../../assets/icon.png';
 	import TabList from './TabList.svelte';
+	import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
 	import { tabManager } from '../stores/tabs.svelte.js';
 	import { settings } from '../stores/settings.svelte.js';
 	import { t } from '../utils/i18n.js';
@@ -327,8 +328,61 @@
 	}
 
 	function clearTag() {
+		const tag = tabManager.windowTag;
+		if (tag?.pinned) {
+			invoke('remove_pinned_tag', { name: tag.name }).catch(console.error);
+		}
 		tabManager.setWindowTag(null);
 		tagEditorOpen = false;
+	}
+
+	// Right-clicking the chip offers pinning: a pinned tag is a named
+	// session — the window's open files are saved under the tag at close,
+	// and the HOME page can reopen the set later.
+	let chipMenu = $state<{ show: boolean; x: number; y: number; items: ContextMenuItem[] }>({
+		show: false,
+		x: 0,
+		y: 0,
+		items: [],
+	});
+
+	function currentRealFiles(): string[] {
+		return tabManager.tabs.filter((t) => t.path !== '' && t.path !== 'HOME').map((t) => t.path);
+	}
+
+	function pinTag() {
+		const tag = tabManager.windowTag;
+		if (!tag) return;
+		invoke('save_pinned_tag', { name: tag.name, color: tag.color, files: currentRealFiles() }).catch(
+			console.error,
+		);
+		tabManager.setWindowTag({ ...tag, pinned: true });
+	}
+
+	function unpinTag() {
+		const tag = tabManager.windowTag;
+		if (!tag) return;
+		invoke('remove_pinned_tag', { name: tag.name }).catch(console.error);
+		tabManager.setWindowTag({ ...tag, pinned: false });
+	}
+
+	function handleChipContextMenu(e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		const pinned = tabManager.windowTag?.pinned === true;
+		chipMenu = {
+			show: true,
+			x: e.clientX,
+			y: e.clientY,
+			items: [
+				pinned
+					? { label: t('menu.unpinWindowTag', currentLanguage), onClick: unpinTag }
+					: { label: t('menu.pinWindowTag', currentLanguage), onClick: pinTag },
+				{ separator: true },
+				{ label: t('menu.setWindowTag', currentLanguage), onClick: openTagEditor },
+				{ label: t('menu.windowTagClear', currentLanguage), onClick: clearTag },
+			],
+		};
 	}
 </script>
 
@@ -550,7 +604,12 @@
 						e.stopPropagation();
 						openTagEditor();
 					}}
+					oncontextmenu={handleChipContextMenu}
 					onmousedown={(e) => e.preventDefault()}>
+					{#if tabManager.windowTag.pinned}
+						<svg class="chip-pin" width="10" height="10" viewBox="0 0 24 24" fill="currentColor"
+							><path d="M16 3a1 1 0 0 1 .707 1.707L15 6.414V10l3 3v2h-5v6l-1 1-1-1v-6H6v-2l3-3V6.414L7.293 4.707A1 1 0 0 1 8 3z" /></svg>
+					{/if}
 					{tabManager.windowTag.name}
 				</button>
 			{/if}
@@ -1019,6 +1078,8 @@
 		<span class="tooltip-shortcut">{tooltip.shortcut}</span>
 	{/if}
 </div>
+
+<ContextMenu {...chipMenu} onhide={() => (chipMenu.show = false)} />
 
 <style>
 	.custom-title-bar {
@@ -1600,6 +1661,11 @@
 
 	.window-tag-chip:hover {
 		filter: brightness(1.1);
+	}
+
+	.chip-pin {
+		margin-right: 4px;
+		flex-shrink: 0;
 	}
 
 	.tag-editor {
