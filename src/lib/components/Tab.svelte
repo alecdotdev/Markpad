@@ -68,7 +68,13 @@
 			items: [
 				{ label: t('menu.newFile', currentLang), shortcut: 'Ctrl+T', onClick: () => emit('menu-tab-new') },
 				{ label: t('menu.undoCloseTab', currentLang), shortcut: 'Ctrl+Shift+T', onClick: () => emit('menu-tab-undo') },
-				{ label: t('menu.rename', currentLang), onClick: () => emit('menu-tab-rename', tab.id) },
+				{
+					label: t('menu.rename', currentLang),
+					// Rename renames the file on disk; untitled/HOME tabs have
+					// no file, and the handler previously no-oped silently.
+					disabled: !hasRealFilePath(tab.path),
+					onClick: () => emit('menu-tab-rename', tab.id),
+				},
 				{ separator: true },
 				...fileActionItems,
 				{ separator: true },

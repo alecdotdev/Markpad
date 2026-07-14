@@ -9,6 +9,8 @@
 		message,
 		kind = 'info',
 		showSave = false,
+		showInput = false,
+		inputValue = $bindable(''),
 		onconfirm,
 		onsave,
 		oncancel,
@@ -18,18 +20,26 @@
 		message: string;
 		kind?: 'info' | 'warning' | 'error';
 		showSave?: boolean;
+		showInput?: boolean;
+		inputValue?: string;
 		onconfirm: () => void;
 		onsave?: () => void;
 		oncancel: () => void;
 	}>();
 
 	let modalContent = $state<HTMLDivElement>();
+	let inputElement = $state<HTMLInputElement>();
 	let previousActiveElement: HTMLElement | null = null;
 
 	$effect(() => {
 		if (show) {
 			previousActiveElement = document.activeElement as HTMLElement;
 			setTimeout(() => {
+				if (showInput && inputElement) {
+					inputElement.focus();
+					inputElement.select();
+					return;
+				}
 				const focusable = modalContent?.querySelector('button.primary') as HTMLElement;
 				if (focusable) {
 					focusable.focus();
@@ -43,6 +53,9 @@
 	});
 
 	function handleKeydown(e: KeyboardEvent) {
+		// While the user is typing in the input, plain letters are text —
+		// the y/n confirm/cancel shortcuts must not fire.
+		const typingInInput = showInput && e.target === inputElement;
 		if (e.key === 'Escape') {
 			e.preventDefault();
 			oncancel();
@@ -56,12 +69,12 @@
 			}
 		}
 		// Y for Yes/Confirm
-		if (e.key.toLowerCase() === 'y' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+		if (!typingInInput && e.key.toLowerCase() === 'y' && !e.ctrlKey && !e.altKey && !e.metaKey) {
 			e.preventDefault();
 			onconfirm();
 		}
 		// N for No/Cancel
-		if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+		if (!typingInInput && e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.altKey && !e.metaKey) {
 			e.preventDefault();
 			oncancel();
 		}
@@ -112,6 +125,9 @@
 			</div>
 			<div class="modal-body">
 				<p>{message}</p>
+				{#if showInput}
+					<input class="modal-input" type="text" bind:this={inputElement} bind:value={inputValue} spellcheck="false" />
+				{/if}
 			</div>
 			<div class="modal-footer">
 					<button class="modal-btn secondary" onclick={oncancel}>{t('settings.cancel', settings.language)}</button>
@@ -172,6 +188,24 @@
 		font-size: 14px;
 		line-height: 1.5;
 		color: var(--color-fg-muted);
+	}
+
+	.modal-input {
+		margin-top: 12px;
+		width: 100%;
+		box-sizing: border-box;
+		padding: 6px 10px;
+		font-size: 14px;
+		font-family: inherit;
+		color: var(--color-fg-default);
+		background: var(--color-canvas-default);
+		border: 1px solid var(--color-border-default);
+		border-radius: 6px;
+		outline: none;
+	}
+
+	.modal-input:focus {
+		border-color: var(--color-accent-fg);
 	}
 
 	.modal-footer {
