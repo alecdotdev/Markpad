@@ -65,9 +65,11 @@ class TabManager {
 	 * are not persisted.
 	 */
 	// Optional user-assigned window identity (Chrome-tab-group-style name +
-	// color chip). Window-level, not tab-level; secondary windows' tags die
-	// with them, main's rides the v2 snapshot as an additive field that
-	// older builds simply ignore.
+	// color chip). Window-level, not tab-level. Pinning is the ONLY gateway
+	// to persistence: an unpinned tag is session decoration and dies with
+	// its window; a pinned tag rides the v2 snapshot (an additive field
+	// older builds ignore) so main restores it — one switch governs name,
+	// color, saved file set, HOME card, and restart survival alike.
 	windowTag = $state<{ name: string; color: string; pinned?: boolean } | null>(null);
 
 	setWindowTag(tag: { name: string; color: string; pinned?: boolean } | null) {
@@ -77,7 +79,7 @@ class TabManager {
 	serializeState(): string {
 		const stateData = {
 			version: 2,
-			windowTag: this.windowTag,
+			windowTag: this.windowTag?.pinned ? this.windowTag : null,
 			activeTabId: this.activeTabId,
 			tabs: this.tabs
 				.filter((t) => t.path !== '')
