@@ -186,9 +186,13 @@
 			tabindex="-1"
 			oncontextmenu={handleContainerContextMenu}
 			onwheel={(e) => {
-				if (e.deltaY !== 0) {
+				// Trackpads report horizontal two-finger swipes as deltaX;
+				// only translating deltaY left sideways swipes dead. Use
+				// whichever axis dominates the gesture.
+				const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+				if (delta !== 0) {
 					e.preventDefault();
-					e.currentTarget.scrollLeft += e.deltaY;
+					e.currentTarget.scrollLeft += delta;
 				}
 			}}>
 			{#each tabManager.tabs as tab, i (tab.id)}

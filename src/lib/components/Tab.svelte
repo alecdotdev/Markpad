@@ -112,7 +112,10 @@
 		display: flex;
 		align-items: center;
 		height: 28px;
-		min-width: 100px;
+		/* Tabs compress before overflowing: 72px still fits the ellipsized
+		   label and the close affordance, and buys roughly a third more
+		   tabs on screen before the strip starts scrolling. */
+		min-width: 72px;
 		max-width: 200px;
 		padding: 0;
 		margin: 0;
