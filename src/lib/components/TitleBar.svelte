@@ -319,10 +319,27 @@
 
 	function applyTag() {
 		const name = tagDraftName.trim();
+		const prev = tabManager.windowTag;
 		if (name === '') {
+			if (prev?.pinned) {
+				invoke('remove_pinned_tag', { name: prev.name }).catch(console.error);
+			}
 			tabManager.setWindowTag(null);
 		} else {
-			tabManager.setWindowTag({ name, color: tagDraftColor });
+			// Editing name/color must not change the pinned state — losing it
+			// here left an orphaned card on the HOME page that "re-infected"
+			// the tag with pinned on the next click. A rename of a pinned tag
+			// also renames its saved session.
+			const pinned = prev?.pinned === true;
+			if (pinned && prev && prev.name !== name) {
+				invoke('remove_pinned_tag', { name: prev.name }).catch(console.error);
+			}
+			tabManager.setWindowTag({ name, color: tagDraftColor, pinned });
+			if (pinned) {
+				invoke('save_pinned_tag', { name, color: tagDraftColor, files: currentRealFiles() }).catch(
+					console.error,
+				);
+			}
 		}
 		tagEditorOpen = false;
 	}
@@ -379,7 +396,7 @@
 					? { label: t('menu.unpinWindowTag', currentLanguage), onClick: unpinTag }
 					: { label: t('menu.pinWindowTag', currentLanguage), onClick: pinTag },
 				{ separator: true },
-				{ label: t('menu.setWindowTag', currentLanguage), onClick: openTagEditor },
+				{ label: t('menu.renameWindowTag', currentLanguage), onClick: openTagEditor },
 				{ label: t('menu.windowTagClear', currentLanguage), onClick: clearTag },
 			],
 		};
