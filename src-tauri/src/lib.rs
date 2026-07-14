@@ -548,9 +548,12 @@ fn send_markdown_path(state: State<'_, AppState>) -> Vec<String> {
         .filter(|arg| !arg.starts_with("-"))
         .collect();
 
-    if let Some(startup_path) = state.startup_file.lock().unwrap().as_ref() {
-        if !files.contains(startup_path) {
-            files.insert(0, startup_path.clone());
+    // take(): the stash is a one-shot boot buffer (Opened arriving before
+    // the frontend was ready); once delivered it must not feed any later
+    // caller another copy.
+    if let Some(startup_path) = state.startup_file.lock().unwrap().take() {
+        if !files.contains(&startup_path) {
+            files.insert(0, startup_path);
         }
     }
 
