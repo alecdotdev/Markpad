@@ -563,6 +563,91 @@ struct AppState {
     // for every Markpad window — without this the delivery target degrades
     // to arbitrary HashMap order.
     last_focused_viewer: Mutex<Option<String>>,
+    // Display metadata for every viewer window, pushed by each window's
+    // frontend (tab state lives in its own WebView, so Rust cannot derive
+    // it). Serves the "Move to window …" menu, the window tag chip, and
+    // the ⌘⇧M cycle order. `number` is a session-stable creation ordinal
+    // (main = 1); names/colors are the user's optional window tags.
+    window_registry: Mutex<std::collections::HashMap<String, WindowMeta>>,
+    window_counter: std::sync::atomic::AtomicU64,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
+struct WindowMeta {
+    number: u64,
+    tag_name: Option<String>,
+    tag_color: Option<String>,
+    active_tab_title: String,
+    tab_count: usize,
+}
+
+/// Registered by each viewer window's frontend on boot and whenever its
+/// displayable state changes (active tab, tab count, tag edits). The first
+/// call from a window assigns its session-stable number.
+#[tauri::command]
+fn set_window_meta(
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    tag_name: Option<String>,
+    tag_color: Option<String>,
+    active_tab_title: String,
+    tab_count: usize,
+) {
+    let label = window.label().to_string();
+    if label != "main" && !label.starts_with("window-") {
+        return;
+    }
+    let mut registry = state.window_registry.lock().unwrap();
+    let entry = registry.entry(label).or_insert_with(|| WindowMeta {
+        number: state
+            .window_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1,
+        ..WindowMeta::default()
+    });
+    entry.tag_name = tag_name;
+    entry.tag_color = tag_color;
+    entry.active_tab_title = active_tab_title;
+    entry.tab_count = tab_count;
+}
+
+#[derive(Clone, serde::Serialize)]
+struct WindowListEntry {
+    label: String,
+    #[serde(flatten)]
+    meta: WindowMeta,
+}
+
+/// Live viewer windows in creation order (registry entries are pruned on
+/// window destruction, so no liveness filtering is needed beyond that).
+#[tauri::command]
+fn list_viewer_windows(state: State<'_, AppState>) -> Vec<WindowListEntry> {
+    let registry = state.window_registry.lock().unwrap();
+    let mut list: Vec<WindowListEntry> = registry
+        .iter()
+        .map(|(label, meta)| WindowListEntry {
+            label: label.clone(),
+            meta: meta.clone(),
+        })
+        .collect();
+    list.sort_by_key(|e| e.meta.number);
+    list
+}
+
+/// Offers a staged tab transfer to an EXISTING window: the destination's
+/// frontend claims the token through the same broker path a detach window
+/// uses, and the source deletes its tab only on the claim acknowledgement.
+#[tauri::command]
+fn offer_tab_to_window(
+    app: AppHandle,
+    target_label: String,
+    token: String,
+) -> Result<(), String> {
+    if app.get_webview_window(&target_label).is_none() {
+        return Err(format!("no such window: {target_label}"));
+    }
+    app.emit_to(target_label.as_str(), "tab-transfer-offer", token)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1047,6 +1132,8 @@ pub fn run() {
         .manage(AppState {
             startup_file: Mutex::new(None),
             last_focused_viewer: Mutex::new(None),
+            window_registry: Mutex::new(std::collections::HashMap::new()),
+            window_counter: std::sync::atomic::AtomicU64::new(0),
         })
         .manage(WatcherState {
             watchers: Mutex::new(std::collections::HashMap::new()),
@@ -1340,6 +1427,9 @@ pub fn run() {
             tab_transfer::claim_detached_tab,
             tab_transfer::cancel_detached_tab,
             create_transfer_window,
+            set_window_meta,
+            list_viewer_windows,
+            offer_tab_to_window,
             save_window_state,
             load_window_state,
             clear_window_state
@@ -1358,6 +1448,14 @@ pub fn run() {
                     // never leaves a dangling notify handle behind.
                     let state = window.state::<WatcherState>();
                     state.watchers.lock().unwrap().remove(window.label());
+                    // And its registry entry, so the "Move to window …"
+                    // menu never lists a dead destination.
+                    let app_state = window.state::<AppState>();
+                    app_state
+                        .window_registry
+                        .lock()
+                        .unwrap()
+                        .remove(window.label());
                 }
                 _ => {}
             }
