@@ -135,10 +135,11 @@ mod tests {
 }
 
 struct WatcherState {
-    watcher: Mutex<Option<RecommendedWatcher>>,
+    watchers: Mutex<std::collections::HashMap<String, RecommendedWatcher>>,
 }
 
 mod setup;
+mod tab_transfer;
 
 #[tauri::command]
 async fn show_window(window: tauri::Window) {
@@ -147,10 +148,125 @@ async fn show_window(window: tauri::Window) {
     let _ = window.set_focus();
 }
 
+// Window-state snapshots are written through Rust instead of localStorage:
+// setItem is an async message to the WebKit storage process and dies in
+// transit when the last window's close ends the process, whereas an
+// awaited invoke keeps the close handler — and therefore the process —
+// alive until the bytes are on disk.
+fn window_state_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("window-state-v2.json"))
+}
+
+#[tauri::command]
+fn save_window_state(app: AppHandle, json: String) -> Result<(), String> {
+    fs::write(window_state_path(&app)?, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_window_state(app: AppHandle) -> Option<String> {
+    fs::read_to_string(window_state_path(&app).ok()?).ok()
+}
+
+#[tauri::command]
+fn clear_window_state(app: AppHandle) -> Result<(), String> {
+    let path = window_state_path(&app)?;
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn bring_webview_window_to_front(window: &tauri::WebviewWindow) {
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
+}
+
+/// Picks the viewer window that should receive an externally opened file:
+/// the focused viewer if any, else the viewer the user focused most
+/// recently, else any viewer. The middle rung matters for Finder opens —
+/// Finder is frontmost at that moment, so is_focused() is false for every
+/// Markpad window and delivery would otherwise degrade to arbitrary map
+/// order. Viewer windows are "main" and detached "window-*" windows;
+/// "installer" never receives files.
+fn pick_delivery_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    let viewers: Vec<tauri::WebviewWindow> = app
+        .webview_windows()
+        .into_iter()
+        .filter(|(label, _)| label == "main" || label.starts_with("window-"))
+        .map(|(_, window)| window)
+        .collect();
+
+    if let Some(focused) = viewers
+        .iter()
+        .find(|window| window.is_focused().unwrap_or(false))
+    {
+        return Some(focused.clone());
+    }
+
+    let last = app
+        .state::<AppState>()
+        .last_focused_viewer
+        .lock()
+        .unwrap()
+        .clone();
+    if let Some(label) = last {
+        if let Some(window) = viewers.iter().find(|w| w.label() == label) {
+            return Some(window.clone());
+        }
+    }
+
+    viewers.into_iter().next()
+}
+
+/// Creates the destination window for a tab transfer. The window's label
+/// embeds the transfer token ("window-<token>"), so the new frontend can
+/// derive which pending transfer to claim from its own label — no URL
+/// query involved (the asset protocol 404s on "index.html?x=y" paths).
+/// Deliberately NOT async: sync commands run on the main thread, which
+/// window creation requires on macOS.
+#[tauri::command]
+fn create_transfer_window(app: AppHandle, token: String) -> Result<(), String> {
+    let label = format!("window-{token}");
+
+    #[allow(unused_mut)]
+    let mut window_builder = tauri::WebviewWindowBuilder::new(
+        &app,
+        &label,
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("Markpad")
+    .inner_size(1000.0, 800.0)
+    .min_inner_size(400.0, 300.0)
+    .visible(false)
+    .resizable(true);
+
+    #[cfg(target_os = "macos")]
+    {
+        // Decorated macOS windows keep their shadow. The main window's
+        // shadow(false) is resurrected as a side effect of the window-state
+        // plugin restoring its frame at startup; a fresh secondary window
+        // gets no such restore, so it must opt in explicitly or it renders
+        // shadowless and blends into the window behind it.
+        window_builder = window_builder
+            .decorations(true)
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true)
+            .shadow(true);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        window_builder = window_builder.decorations(false).shadow(false);
+    }
+
+    window_builder.build().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn process_internal_embeds(content: &str) -> Cow<'_, str> {
@@ -400,21 +516,24 @@ fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn watch_file(
+    window: tauri::Window,
     handle: AppHandle,
     state: State<'_, WatcherState>,
     path: String,
 ) -> Result<(), String> {
-    let mut watcher_lock = state.watcher.lock().unwrap();
+    let label = window.label().to_string();
+    let mut watchers_lock = state.watchers.lock().unwrap();
 
-    *watcher_lock = None;
+    watchers_lock.remove(&label);
 
     let path_to_watch = path.clone();
     let app_handle = handle.clone();
+    let event_label = label.clone();
 
     let mut watcher = RecommendedWatcher::new(
         move |res: Result<notify::Event, notify::Error>| {
             if let Ok(_) = res {
-                let _ = app_handle.emit("file-changed", ());
+                let _ = app_handle.emit_to(event_label.as_str(), "file-changed", ());
             }
         },
         Config::default(),
@@ -425,20 +544,121 @@ fn watch_file(
         .watch(Path::new(&path_to_watch), RecursiveMode::NonRecursive)
         .map_err(|e| e.to_string())?;
 
-    *watcher_lock = Some(watcher);
+    watchers_lock.insert(label, watcher);
 
     Ok(())
 }
 
 #[tauri::command]
-fn unwatch_file(state: State<'_, WatcherState>) -> Result<(), String> {
-    let mut watcher_lock = state.watcher.lock().unwrap();
-    *watcher_lock = None;
+fn unwatch_file(window: tauri::Window, state: State<'_, WatcherState>) -> Result<(), String> {
+    let mut watchers_lock = state.watchers.lock().unwrap();
+    watchers_lock.remove(window.label());
     Ok(())
 }
 
 struct AppState {
     startup_file: Mutex<Option<String>>,
+    // Label of the viewer window the user focused most recently. When an
+    // OS file-open arrives, Finder is frontmost and is_focused() is false
+    // for every Markpad window — without this the delivery target degrades
+    // to arbitrary HashMap order.
+    last_focused_viewer: Mutex<Option<String>>,
+    // Display metadata for every viewer window, pushed by each window's
+    // frontend (tab state lives in its own WebView, so Rust cannot derive
+    // it). Serves the "Move to window …" menu, the window tag chip, and
+    // the ⌘⇧M cycle order. `number` is a session-stable creation ordinal
+    // (main = 1); names/colors are the user's optional window tags.
+    window_registry: Mutex<std::collections::HashMap<String, WindowMeta>>,
+    window_counter: std::sync::atomic::AtomicU64,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
+struct WindowMeta {
+    number: u64,
+    tag_name: Option<String>,
+    tag_color: Option<String>,
+    active_tab_title: String,
+    tab_count: usize,
+}
+
+/// Registered by each viewer window's frontend on boot and whenever its
+/// displayable state changes (active tab, tab count, tag edits). The first
+/// call from a window assigns its session-stable number.
+#[tauri::command]
+fn set_window_meta(
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    tag_name: Option<String>,
+    tag_color: Option<String>,
+    active_tab_title: String,
+    tab_count: usize,
+) {
+    let label = window.label().to_string();
+    if label != "main" && !label.starts_with("window-") {
+        return;
+    }
+    let mut registry = state.window_registry.lock().unwrap();
+    let entry = registry.entry(label).or_insert_with(|| WindowMeta {
+        number: state
+            .window_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1,
+        ..WindowMeta::default()
+    });
+    entry.tag_name = tag_name;
+    entry.tag_color = tag_color;
+    entry.active_tab_title = active_tab_title;
+    entry.tab_count = tab_count;
+}
+
+#[derive(Clone, serde::Serialize)]
+struct WindowListEntry {
+    label: String,
+    #[serde(flatten)]
+    meta: WindowMeta,
+}
+
+/// Live viewer windows in creation order (registry entries are pruned on
+/// window destruction, so no liveness filtering is needed beyond that).
+#[tauri::command]
+fn list_viewer_windows(state: State<'_, AppState>) -> Vec<WindowListEntry> {
+    let registry = state.window_registry.lock().unwrap();
+    let mut list: Vec<WindowListEntry> = registry
+        .iter()
+        .map(|(label, meta)| WindowListEntry {
+            label: label.clone(),
+            meta: meta.clone(),
+        })
+        .collect();
+    list.sort_by_key(|e| e.meta.number);
+    list
+}
+
+/// Brings a specific viewer window to the front — used when ⌘⇧M carries a
+/// tab to the next window and focus should follow it.
+#[tauri::command]
+fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
+    let window = app
+        .get_webview_window(&label)
+        .ok_or_else(|| format!("no such window: {label}"))?;
+    bring_webview_window_to_front(&window);
+    Ok(())
+}
+
+/// Offers a staged tab transfer to an EXISTING window: the destination's
+/// frontend claims the token through the same broker path a detach window
+/// uses, and the source deletes its tab only on the claim acknowledgement.
+#[tauri::command]
+fn offer_tab_to_window(
+    app: AppHandle,
+    target_label: String,
+    token: String,
+) -> Result<(), String> {
+    if app.get_webview_window(&target_label).is_none() {
+        return Err(format!("no such window: {target_label}"));
+    }
+    app.emit_to(target_label.as_str(), "tab-transfer-offer", token)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -448,9 +668,12 @@ fn send_markdown_path(state: State<'_, AppState>) -> Vec<String> {
         .filter(|arg| !arg.starts_with("-"))
         .collect();
 
-    if let Some(startup_path) = state.startup_file.lock().unwrap().as_ref() {
-        if !files.contains(startup_path) {
-            files.insert(0, startup_path.clone());
+    // take(): the stash is a one-shot boot buffer (Opened arriving before
+    // the frontend was ready); once delivered it must not feed any later
+    // caller another copy.
+    if let Some(startup_path) = state.startup_file.lock().unwrap().take() {
+        if !files.contains(&startup_path) {
+            files.insert(0, startup_path);
         }
     }
 
@@ -919,15 +1142,19 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState {
             startup_file: Mutex::new(None),
+            last_focused_viewer: Mutex::new(None),
+            window_registry: Mutex::new(std::collections::HashMap::new()),
+            window_counter: std::sync::atomic::AtomicU64::new(0),
         })
         .manage(WatcherState {
-            watcher: Mutex::new(None),
+            watchers: Mutex::new(std::collections::HashMap::new()),
         })
+        .manage(tab_transfer::TabTransferBroker::new())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             println!("Single Instance Args: {:?}", args);
-            let Some(window) = app.get_webview_window("main") else {
+            let Some(window) = pick_delivery_window(app) else {
                 return;
             };
 
@@ -947,7 +1174,7 @@ pub fn run() {
                     cwd_path.join(path).display().to_string()
                 };
 
-                let _ = window.emit("file-path", resolved_path);
+                let _ = app.emit_to(window.label(), "file-path", resolved_path);
             }
             bring_webview_window_to_front(&window);
         }))
@@ -963,6 +1190,15 @@ pub fn run() {
                         | tauri_plugin_window_state::StateFlags::VISIBLE
                         | tauri_plugin_window_state::StateFlags::FULLSCREEN,
                 )
+                // Detached tab windows share one saved state instead of
+                // accumulating a state entry per generated label.
+                .map_label(|label| {
+                    if label.starts_with("window-") {
+                        "secondary"
+                    } else {
+                        label
+                    }
+                })
                 .build(),
         )
         .setup(|app| {
@@ -1197,16 +1433,52 @@ pub fn run() {
             delete_file,
             copy_file,
             cleanup_empty_img_dir,
-            list_directory_contents
+            list_directory_contents,
+            tab_transfer::stage_detached_tab,
+            tab_transfer::claim_detached_tab,
+            tab_transfer::cancel_detached_tab,
+            create_transfer_window,
+            set_window_meta,
+            list_viewer_windows,
+            offer_tab_to_window,
+            focus_window,
+            save_window_state,
+            load_window_state,
+            clear_window_state
         ])
+        .on_window_event(|window, event| {
+            match event {
+                tauri::WindowEvent::Focused(true) => {
+                    let label = window.label();
+                    if label == "main" || label.starts_with("window-") {
+                        let state = window.state::<AppState>();
+                        *state.last_focused_viewer.lock().unwrap() = Some(label.to_string());
+                    }
+                }
+                tauri::WindowEvent::Destroyed => {
+                    // Drop this window's file watcher so a closed window
+                    // never leaves a dangling notify handle behind.
+                    let state = window.state::<WatcherState>();
+                    state.watchers.lock().unwrap().remove(window.label());
+                    // And its registry entry, so the "Move to window …"
+                    // menu never lists a dead destination.
+                    let app_state = window.state::<AppState>();
+                    app_state
+                        .window_registry
+                        .lock()
+                        .unwrap()
+                        .remove(window.label());
+                }
+                _ => {}
+            }
+        })
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
-            // Emit to the focused webview window rather than `app.emit(...)`,
-            // which would broadcast to every webview. Markpad is currently
-            // single-window, but additional webviews (e.g. detached tabs)
-            // would otherwise receive duplicate New/Close/Save invocations.
-            // Falls back to "main" if no window is focused (e.g. menu fired
-            // while the app is in the background).
+            // Emit to the focused webview window's label rather than
+            // `window.emit(...)`, which broadcasts to every webview and
+            // would fire menu actions (New/Close/Save…) in all windows at
+            // once. Falls back to "main" if no window is focused (e.g. menu
+            // fired while the app is in the background).
             let target = app
                 .webview_windows()
                 .into_values()
@@ -1215,12 +1487,12 @@ pub fn run() {
             let Some(window) = target else { return };
 
             if id == "check-updates" {
-                let _ = window.emit("menu-check-updates", ());
+                let _ = app.emit_to(window.label(), "menu-check-updates", ());
             } else if id == "menu-app-quit"
                 || id.starts_with("menu-file-")
                 || id.starts_with("menu-edit-")
             {
-                let _ = window.emit(id, ());
+                let _ = app.emit_to(window.label(), id, ());
             }
         })
         .build(tauri::generate_context!())
@@ -1235,8 +1507,8 @@ pub fn run() {
                         let state = _app_handle.state::<AppState>();
                         *state.startup_file.lock().unwrap() = Some(path_str.clone());
 
-                        if let Some(window) = _app_handle.get_webview_window("main") {
-                            let _ = window.emit("file-path", path_str);
+                        if let Some(window) = pick_delivery_window(_app_handle) {
+                            let _ = _app_handle.emit_to(window.label(), "file-path", path_str);
                             bring_webview_window_to_front(&window);
                         }
                     }
