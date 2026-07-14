@@ -4,6 +4,9 @@
 		shortcut?: string;
 		disabled?: boolean;
 		onClick?: () => void;
+		// Fired when the pointer enters the item — used by "Move to window…"
+		// entries to make the target window identify itself with a flash.
+		onHover?: () => void;
 		separator?: boolean;
 	};
 
@@ -60,6 +63,9 @@
 					<button
 						class="menu-item"
 						disabled={item.disabled}
+						onmouseenter={() => {
+							if (!item.disabled) item.onHover?.();
+						}}
 						onclick={() => {
 							if (!item.disabled && item.onClick) {
 								item.onClick();

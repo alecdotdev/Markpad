@@ -1,5 +1,7 @@
 import { t } from '../utils/i18n.js';
+import { nextUntitledTitle } from '../utils/untitledTitle.js';
 import { settings } from './settings.svelte.js';
+import { buildTransferredTab, type TransferableTab } from '../utils/tabTransfer.js';
 import {
 	canGoBackInHistory,
 	canGoForwardInHistory,
@@ -54,21 +56,103 @@ class TabManager {
 		return this.tabs.find((t) => t.id === this.activeTabId);
 	}
 
+	/**
+	 * Serialize WINDOW state only: which files are open, the active tab, and
+	 * per-tab UI (edit mode, split, scroll). Document content always lives on
+	 * disk — the snapshot never carries rawContent, so unsaved changes are
+	 * handled exclusively by the close dialogs, never smuggled through here.
+	 * Untitled tabs have no disk backing and are resolved at close, so they
+	 * are not persisted.
+	 */
+	// Optional user-assigned window identity (Chrome-tab-group-style name +
+	// color chip). Window-level, not tab-level. Pinning is the ONLY gateway
+	// to persistence: an unpinned tag is session decoration and dies with
+	// its window; a pinned tag rides the v2 snapshot (an additive field
+	// older builds ignore) so main restores it — one switch governs name,
+	// color, saved file set, HOME card, and restart survival alike.
+	windowTag = $state<{ name: string; color: string; pinned?: boolean } | null>(null);
+
+	setWindowTag(tag: { name: string; color: string; pinned?: boolean } | null) {
+		this.windowTag = tag;
+	}
+
 	serializeState(): string {
 		const stateData = {
+			version: 2,
+			windowTag: this.windowTag?.pinned ? this.windowTag : null,
 			activeTabId: this.activeTabId,
-			tabs: this.tabs.map(t => ({ ...t, editorViewState: null, content: '' }))
+			tabs: this.tabs
+				.filter((t) => t.path !== '')
+				.map((t) => ({
+					id: t.id,
+					path: t.path,
+					title: t.title,
+					isEditing: t.isEditing,
+					isSplit: t.isSplit,
+					splitRatio: t.splitRatio,
+					isScrollSynced: t.isScrollSynced,
+					scrollTop: t.scrollTop,
+					scrollPercentage: t.scrollPercentage,
+					anchorLine: t.anchorLine
+				}))
 		};
 		return JSON.stringify(stateData);
 	}
 
+	/**
+	 * Rebuild clean tabs from a window-state snapshot. Content starts empty —
+	 * the caller reads each file from disk afterwards. Also accepts the legacy
+	 * full-tab format, from which only the window-state fields are taken
+	 * (legacy untitled entries are dropped).
+	 */
 	restoreState(jsonBuffer: string) {
 		try {
 			const data = JSON.parse(jsonBuffer);
-			if (data && Array.isArray(data.tabs)) {
-				this.tabs = data.tabs;
-				this.activeTabId = data.activeTabId;
+			if (!data || !Array.isArray(data.tabs)) return;
+
+			if (
+				data.windowTag &&
+				typeof data.windowTag.name === 'string' &&
+				data.windowTag.name !== '' &&
+				typeof data.windowTag.color === 'string'
+			) {
+				this.windowTag = {
+					name: data.windowTag.name,
+					color: data.windowTag.color,
+					pinned: data.windowTag.pinned === true,
+				};
 			}
+
+			const restored: Tab[] = [];
+			for (const saved of data.tabs) {
+				if (!saved || typeof saved.path !== 'string' || saved.path === '') continue;
+				const filename = saved.path.split('\\').pop()?.split('/').pop() || saved.path;
+				const fileHistory = createFileHistory(saved.path, '');
+				restored.push({
+					id: typeof saved.id === 'string' ? saved.id : crypto.randomUUID(),
+					path: saved.path,
+					title: typeof saved.title === 'string' && saved.title !== '' ? saved.title : filename,
+					content: '',
+					rawContent: '',
+					originalContent: '',
+					scrollTop: typeof saved.scrollTop === 'number' ? saved.scrollTop : 0,
+					isDirty: false,
+					isEditing: saved.isEditing === true,
+					history: fileHistory.history,
+					historyIndex: fileHistory.historyIndex,
+					editorViewState: null,
+					scrollPercentage: typeof saved.scrollPercentage === 'number' ? saved.scrollPercentage : 0,
+					anchorLine: typeof saved.anchorLine === 'number' ? saved.anchorLine : 0,
+					isSplit: saved.isSplit === true,
+					splitRatio: typeof saved.splitRatio === 'number' ? saved.splitRatio : 0.5,
+					isScrollSynced: saved.isScrollSynced === true
+				});
+			}
+
+			this.tabs = restored;
+			this.activeTabId = restored.some((t) => t.id === data.activeTabId)
+				? data.activeTabId
+				: restored[0]?.id ?? null;
 		} catch (e) {
 			console.error('Failed to restore tab state', e);
 		}
@@ -76,7 +160,12 @@ class TabManager {
 
 	addTab(path: string, content: string = '') {
 		const id = crypto.randomUUID();
-		const filename = path.split('\\').pop()?.split('/').pop() || t('tabs.untitled', settings.language);
+		const filename =
+			path.split('\\').pop()?.split('/').pop() ||
+			nextUntitledTitle(
+				this.tabs.map((tab) => tab.title),
+				t('tabs.untitled', settings.language),
+			);
 		const fileHistory = createFileHistory(path, content);
 
 		this.tabs.push({
@@ -109,7 +198,10 @@ class TabManager {
 		this.tabs.push({
 			id,
 			path: '',
-			title: t('tabs.untitled', settings.language),
+			title: nextUntitledTitle(
+				this.tabs.map((tab) => tab.title),
+				t('tabs.untitled', settings.language),
+			),
 			content,
 			rawContent: content,
 			originalContent: content,
@@ -158,6 +250,24 @@ class TabManager {
 		});
 
 		this.activeTabId = id;
+	}
+
+	/**
+	 * Insert a tab that arrived from another window (cross-window transfer).
+	 * The snapshot carries the unsaved buffer — see tabTransfer.ts. Rendered
+	 * content starts empty (the caller re-renders); untitled arrivals are
+	 * re-numbered against THIS window's tabs. Independent of serializeState/
+	 * restoreState, which persist window shape only.
+	 */
+	insertTransferredTab(snap: TransferableTab): string {
+		const tab = buildTransferredTab(
+			snap,
+			this.tabs.map((tab) => tab.title),
+			t('tabs.untitled', settings.language),
+		);
+		this.tabs.push(tab);
+		this.activeTabId = tab.id;
+		return tab.id;
 	}
 
 	closeTab(id: string) {
