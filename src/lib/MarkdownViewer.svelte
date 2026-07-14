@@ -3089,13 +3089,19 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 
-			try {
-				const args: string[] = await invoke('send_markdown_path');
-				if (args?.length > 0) {
-					await loadMarkdown(args[0]);
+			// Startup-file delivery (argv / macOS Opened-before-ready stash) is
+			// a boot-time channel that belongs to the FIRST window only. It is
+			// process-global state: letting every window consume it meant each
+			// detached window re-opened the file the app was launched with.
+			if (isMainWindow) {
+				try {
+					const args: string[] = await invoke('send_markdown_path');
+					if (args?.length > 0) {
+						await loadMarkdown(args[0]);
+					}
+				} catch (error) {
+					console.error('Error receiving Markdown file path:', error);
 				}
-			} catch (error) {
-				console.error('Error receiving Markdown file path:', error);
 			}
 
 			mode = appMode;
