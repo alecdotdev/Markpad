@@ -27,6 +27,22 @@
 		items: [],
 	});
 
+	// A truncated title scrolls into view while the pointer rests on the
+	// tab (marquee), instead of compressing tabs below readability. The
+	// overflow is measured on hover because tab widths are flex-driven.
+	let labelEl = $state<HTMLSpanElement>();
+	let marqueeOffset = $state(0);
+
+	function startTitleMarquee() {
+		if (!labelEl) return;
+		const overflow = labelEl.scrollWidth - labelEl.clientWidth;
+		if (overflow > 0) marqueeOffset = overflow;
+	}
+
+	function stopTitleMarquee() {
+		marqueeOffset = 0;
+	}
+
 	function handleClose(e: MouseEvent) {
 		e.stopPropagation();
 		onclose(e);
@@ -82,13 +98,25 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="tab {isActive ? 'active' : ''}" class:last={isLast} role="group" title={tab.path || 'Recents'} oncontextmenu={handleContextMenu}>
+<div
+	class="tab {isActive ? 'active' : ''}"
+	class:last={isLast}
+	role="group"
+	title={tab.path || 'Recents'}
+	oncontextmenu={handleContextMenu}
+	onmouseenter={startTitleMarquee}
+	onmouseleave={stopTitleMarquee}>
 	<button class="tab-content-btn" onclick={onclick} onmousedown={(e) => {
 		if (e.button === 0) e.preventDefault();
 		handleMiddleClick(e);
 	}}>
-		<span class="tab-label">
-			{tab.title}
+		<span class="tab-label" class:marquee={marqueeOffset > 0} bind:this={labelEl}>
+			<span
+				class="tab-label-text"
+				style:transform={marqueeOffset > 0 ? `translateX(-${marqueeOffset}px)` : ''}
+				style:transition-duration={marqueeOffset > 0 ? `${Math.max(300, marqueeOffset * 20)}ms` : '150ms'}>
+				{tab.title}
+			</span>
 		</span>
 	</button>
 	<div class="tab-actions">
@@ -112,10 +140,7 @@
 		display: flex;
 		align-items: center;
 		height: 28px;
-		/* Tabs compress before overflowing: 72px still fits the ellipsized
-		   label and the close affordance, and buys roughly a third more
-		   tabs on screen before the strip starts scrolling. */
-		min-width: 72px;
+		min-width: 100px;
 		max-width: 200px;
 		padding: 0;
 		margin: 0;
@@ -168,6 +193,21 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+
+	/* While the marquee runs, the ellipsis gives way to the sliding text. */
+	.tab-label.marquee {
+		text-overflow: clip;
+	}
+
+	.tab-label-text {
+		display: inline;
+	}
+
+	.tab-label.marquee .tab-label-text {
+		display: inline-block;
+		transition-property: transform;
+		transition-timing-function: linear;
 	}
 
 	.tab-actions {
