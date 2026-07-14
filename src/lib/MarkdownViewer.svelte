@@ -335,11 +335,19 @@ import { t } from './utils/i18n.js';
 		const activeTabTitle = tabManager.activeTab?.title ?? '';
 		const tabCount = tabManager.tabs.length;
 		invoke('set_window_meta', {
-			tagName: null,
-			tagColor: null,
+			tagName: tabManager.windowTag?.name ?? null,
+			tagColor: tabManager.windowTag?.color ?? null,
 			activeTabTitle,
 			tabCount,
 		}).catch(() => {});
+	});
+
+	// The native window title carries the tag as a prefix so Mission
+	// Control and the Window menu can tell tagged windows apart too.
+	$effect(() => {
+		const tag = tabManager.windowTag;
+		const title = tag ? `${tag.name} — ${windowTitle}` : windowTitle;
+		appWindow.setTitle(title).catch(() => {});
 	});
 
 	function handleModalSave() {

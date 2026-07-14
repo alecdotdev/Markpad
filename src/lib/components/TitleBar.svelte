@@ -282,14 +282,54 @@
 			themeMenuOpen = false;
 			kebabMenuOpen = false;
 			homeMenuOpen = false;
+			tagEditorOpen = false;
 		};
-		if (themeMenuOpen || kebabMenuOpen || homeMenuOpen) {
+		if (themeMenuOpen || kebabMenuOpen || homeMenuOpen || tagEditorOpen) {
 			window.addEventListener('click', handleGlobalClick);
 		}
 		return () => {
 			window.removeEventListener('click', handleGlobalClick);
 		};
 	});
+
+	// Window tag editor (Chrome-tab-group-style): name + one of eight fixed
+	// colors. The palette matches in both themes, so no per-theme variants.
+	const TAG_COLORS = [
+		'#5f6368',
+		'#1a73e8',
+		'#d93025',
+		'#f9ab00',
+		'#188038',
+		'#d01884',
+		'#a142f4',
+		'#007b83',
+	];
+	let tagEditorOpen = $state(false);
+	let tagDraftName = $state('');
+	let tagDraftColor = $state(TAG_COLORS[1]);
+
+	function openTagEditor() {
+		tagDraftName = tabManager.windowTag?.name ?? '';
+		tagDraftColor = tabManager.windowTag?.color ?? TAG_COLORS[1];
+		tagEditorOpen = true;
+		themeMenuOpen = false;
+		kebabMenuOpen = false;
+	}
+
+	function applyTag() {
+		const name = tagDraftName.trim();
+		if (name === '') {
+			tabManager.setWindowTag(null);
+		} else {
+			tabManager.setWindowTag({ name, color: tagDraftColor });
+		}
+		tagEditorOpen = false;
+	}
+
+	function clearTag() {
+		tabManager.setWindowTag(null);
+		tagEditorOpen = false;
+	}
 </script>
 
 <svelte:window bind:innerWidth />
@@ -399,6 +439,16 @@
 					><rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><path d="M17.5 14v6"></path><path d="M14.5 17h6"></path></svg>
 				{t('menu.mergeAllWindows', currentLanguage)}
 			</button>
+					<button
+				class="home-menu-item"
+				onclick={() => {
+					homeMenuOpen = false;
+					openTagEditor();
+				}}>
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+				{t('menu.setWindowTag', currentLanguage)}
+			</button>
 					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.isEditing)}
 						<button
 						class="home-menu-item"
@@ -485,6 +535,61 @@
 						}}>
 						v{appVersion}
 					</button>
+				</div>
+			{/if}
+		</div>
+
+		<!-- Window tag: an optional Chrome-tab-group-style colored name chip.
+		     Hidden until set (via the hamburger menu); click to edit. -->
+		<div class="window-tag-container" role="presentation">
+			{#if tabManager.windowTag}
+				<button
+					class="window-tag-chip"
+					style:--tag-color={tabManager.windowTag.color}
+					onclick={(e) => {
+						e.stopPropagation();
+						openTagEditor();
+					}}
+					onmousedown={(e) => e.preventDefault()}>
+					{tabManager.windowTag.name}
+				</button>
+			{/if}
+			{#if tagEditorOpen}
+				<div
+					class="tag-editor"
+					role="dialog"
+					tabindex="-1"
+					transition:fly={{ y: 5, duration: 150 }}
+					onclick={(e) => e.stopPropagation()}
+					onkeydown={(e) => {
+						if (e.key === 'Escape') tagEditorOpen = false;
+						if (e.key === 'Enter') applyTag();
+					}}>
+					<!-- svelte-ignore a11y_autofocus -->
+					<input
+						class="tag-editor-input"
+						type="text"
+						autofocus
+						spellcheck="false"
+						placeholder={t('menu.windowTagPlaceholder', currentLanguage)}
+						bind:value={tagDraftName} />
+					<div class="tag-editor-colors">
+						{#each TAG_COLORS as color (color)}
+							<button
+								class="tag-color-dot {tagDraftColor === color ? 'selected' : ''}"
+								style:--tag-color={color}
+								aria-label={color}
+								onclick={() => {
+									tagDraftColor = color;
+									applyTag();
+								}}></button>
+						{/each}
+					</div>
+					{#if tabManager.windowTag}
+						<button class="tag-editor-clear" onclick={clearTag}>
+							{t('menu.windowTagClear', currentLanguage)}
+						</button>
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -1465,6 +1570,105 @@
 		display: flex;
 		align-items: center;
 		height: 100%;
+	}
+
+	.window-tag-container {
+		position: relative;
+		display: flex;
+		align-items: center;
+	}
+
+	.window-tag-chip {
+		display: inline-flex;
+		align-items: center;
+		height: 20px;
+		max-width: 120px;
+		padding: 0 10px;
+		margin-left: 4px;
+		border: none;
+		border-radius: 10px;
+		background: var(--tag-color);
+		color: #fff;
+		font-size: 11px;
+		font-weight: 600;
+		font-family: var(--win-font, 'Segoe UI', sans-serif);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		cursor: pointer;
+	}
+
+	.window-tag-chip:hover {
+		filter: brightness(1.1);
+	}
+
+	.tag-editor {
+		position: absolute;
+		top: 30px;
+		left: 0;
+		z-index: 20000;
+		width: 190px;
+		padding: 10px;
+		background: var(--color-canvas-default);
+		border: 1px solid var(--color-border-default);
+		border-radius: 8px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.tag-editor-input {
+		width: 100%;
+		box-sizing: border-box;
+		padding: 5px 8px;
+		font-size: 12px;
+		font-family: inherit;
+		color: var(--color-fg-default);
+		background: var(--color-canvas-default);
+		border: 1px solid var(--color-border-default);
+		border-radius: 6px;
+		outline: none;
+	}
+
+	.tag-editor-input:focus {
+		border-color: var(--color-accent-fg);
+	}
+
+	.tag-editor-colors {
+		display: flex;
+		justify-content: space-between;
+	}
+
+	.tag-color-dot {
+		width: 18px;
+		height: 18px;
+		border-radius: 50%;
+		border: 2px solid transparent;
+		background: var(--tag-color);
+		cursor: pointer;
+		padding: 0;
+	}
+
+	.tag-color-dot.selected,
+	.tag-color-dot:hover {
+		border-color: var(--color-fg-default);
+	}
+
+	.tag-editor-clear {
+		align-self: flex-start;
+		padding: 3px 8px;
+		font-size: 12px;
+		font-family: inherit;
+		color: var(--color-fg-muted);
+		background: transparent;
+		border: 1px solid var(--color-border-default);
+		border-radius: 6px;
+		cursor: pointer;
+	}
+
+	.tag-editor-clear:hover {
+		background: var(--color-neutral-muted);
 	}
 
 	.home-dropdown-menu {

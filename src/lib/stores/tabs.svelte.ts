@@ -64,9 +64,20 @@ class TabManager {
 	 * Untitled tabs have no disk backing and are resolved at close, so they
 	 * are not persisted.
 	 */
+	// Optional user-assigned window identity (Chrome-tab-group-style name +
+	// color chip). Window-level, not tab-level; secondary windows' tags die
+	// with them, main's rides the v2 snapshot as an additive field that
+	// older builds simply ignore.
+	windowTag = $state<{ name: string; color: string } | null>(null);
+
+	setWindowTag(tag: { name: string; color: string } | null) {
+		this.windowTag = tag;
+	}
+
 	serializeState(): string {
 		const stateData = {
 			version: 2,
+			windowTag: this.windowTag,
 			activeTabId: this.activeTabId,
 			tabs: this.tabs
 				.filter((t) => t.path !== '')
@@ -96,6 +107,15 @@ class TabManager {
 		try {
 			const data = JSON.parse(jsonBuffer);
 			if (!data || !Array.isArray(data.tabs)) return;
+
+			if (
+				data.windowTag &&
+				typeof data.windowTag.name === 'string' &&
+				data.windowTag.name !== '' &&
+				typeof data.windowTag.color === 'string'
+			) {
+				this.windowTag = { name: data.windowTag.name, color: data.windowTag.color };
+			}
 
 			const restored: Tab[] = [];
 			for (const saved of data.tabs) {
