@@ -943,6 +943,17 @@
 				if (hasSelection) {
 					const edits = selections.map((selection) => {
 						const selectedText = model.getValueInRange(selection);
+						// Pasting a URL over a URL replaces it. Wrapping would
+						// nest the old URL as the link text — and inside
+						// existing link syntax like ![](url) it produces
+						// broken nesting: ![]([old](new)).
+						if (urlRegex.test(selectedText.trim())) {
+							return {
+								range: selection,
+								text,
+								forceMoveMarkers: true,
+							};
+						}
 						const linkUrl = text.toLowerCase().startsWith("www.")
 							? `http://${text}`
 							: text;
