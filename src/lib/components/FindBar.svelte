@@ -27,6 +27,10 @@
 	let activeIndex = $state(-1);
 	let truncated = $state(false);
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+	let pendingActiveRange: Range | null = null;
+	let pendingActiveTop: number | null = null;
+	let pendingActiveIndex: number | null = null;
+	let appliedQuery = '';
 
 	function isHostElement(el: Element | null): boolean {
 		if (!el) return false;
@@ -93,7 +97,67 @@
 		return indices;
 	}
 
-	function applyHighlights() {
+	function matchesRange(range: Range, textNode: Text, index: number): boolean {
+		const doc = textNode.ownerDocument || document;
+		const matchRange = doc.createRange();
+		try {
+			matchRange.setStart(textNode, index);
+			matchRange.setEnd(textNode, index + query.length);
+			return range.compareBoundaryPoints(Range.START_TO_END, matchRange) > 0
+				&& range.compareBoundaryPoints(Range.END_TO_START, matchRange) < 0;
+		} catch {
+			return false;
+		} finally {
+			matchRange.detach();
+		}
+	}
+
+	function getRangeMatchIndex(range: Range): number | null {
+		const root = markdownBody;
+		if (!root || !query) return null;
+		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+			acceptNode(node: Node) {
+				const text = (node as Text).nodeValue;
+				if (!text || isInsideHost(node, root)) return NodeFilter.FILTER_REJECT;
+				return NodeFilter.FILTER_ACCEPT;
+			},
+		});
+		let total = 0;
+		let textNode = walker.nextNode() as Text | null;
+		while (textNode) {
+			for (const index of findInTextNode(textNode.nodeValue || '', query)) {
+				if (total >= MAX_MATCHES) return null;
+				if (matchesRange(range, textNode, index)) return total;
+				total++;
+			}
+			textNode = walker.nextNode() as Text | null;
+		}
+		return null;
+	}
+
+	function getRangeTop(range: Range): number | null {
+		const rect = range.getBoundingClientRect();
+		if (rect.height > 0 || rect.width > 0) return rect.top;
+		const firstRect = range.getClientRects()[0];
+		return firstRect ? firstRect.top : null;
+	}
+
+	function getClosestMarkIndex(top: number): number | null {
+		const marks = getMarks();
+		if (marks.length === 0) return null;
+		let closestIndex = 0;
+		let closestDistance = Number.POSITIVE_INFINITY;
+		for (const [index, mark] of marks.entries()) {
+			const distance = Math.abs(mark.getBoundingClientRect().top - top);
+			if (distance < closestDistance) {
+				closestIndex = index;
+				closestDistance = distance;
+			}
+		}
+		return closestIndex;
+	}
+
+	function applyHighlights(options: { preserveScroll?: boolean; preferredActiveIndex?: number | null } = {}) {
 		if (!markdownBody) {
 			matchCount = 0;
 			activeIndex = -1;
@@ -105,6 +169,7 @@
 			matchCount = 0;
 			activeIndex = -1;
 			truncated = false;
+			appliedQuery = '';
 			return;
 		}
 
@@ -120,6 +185,9 @@
 
 		let total = 0;
 		let hitCap = false;
+		let requestedActiveIndex = pendingActiveIndex;
+		const shouldPreserveScroll = pendingActiveRange !== null;
+		const requestedTop = pendingActiveTop;
 
 		// Walk and process in a single pass. We advance the walker BEFORE
 		// mutating each text node so its internal currentNode never points
@@ -144,6 +212,9 @@
 							breakOut = true;
 							break;
 						}
+						if (requestedActiveIndex === null && pendingActiveRange && matchesRange(pendingActiveRange, textNode, i)) {
+							requestedActiveIndex = total;
+						}
 						if (i > cursor) frag.appendChild(doc.createTextNode(text.slice(cursor, i)));
 						const mark = doc.createElement('mark');
 						mark.className = FIND_MARK_CLASS;
@@ -160,13 +231,26 @@
 			textNode = next;
 		}
 
+		pendingActiveRange = null;
+		pendingActiveTop = null;
+		pendingActiveIndex = null;
 		matchCount = total;
 		truncated = hitCap;
+		appliedQuery = query;
 		if (total === 0) {
 			activeIndex = -1;
 		} else {
-			activeIndex = 0;
-			setActive(0);
+			const closestActiveIndex = requestedTop === null ? null : getClosestMarkIndex(requestedTop);
+			const preferredActiveIndex =
+				options.preferredActiveIndex !== null
+				&& options.preferredActiveIndex !== undefined
+				&& options.preferredActiveIndex >= 0
+				&& options.preferredActiveIndex < total
+					? options.preferredActiveIndex
+					: null;
+			const nextActiveIndex = requestedActiveIndex ?? closestActiveIndex ?? preferredActiveIndex ?? 0;
+			activeIndex = nextActiveIndex;
+			setActive(nextActiveIndex, !shouldPreserveScroll && !options.preserveScroll);
 		}
 	}
 
@@ -217,14 +301,34 @@
 			// (e.g. parent flips `open` to false on tab switch without
 			// going through close()).
 			if (!open) return;
-			applyHighlights();
+			applyHighlights({ preferredActiveIndex: appliedQuery === query ? activeIndex : null });
 		}, DEBOUNCE_MS);
 	}
 
 	export function reapply() {
 		// Public hook for parent: call after the preview HTML is replaced
 		// so existing matches survive across re-renders.
-		applyHighlights();
+		applyHighlights({ preserveScroll: true, preferredActiveIndex: activeIndex });
+	}
+
+	function focusInput() {
+		tick().then(() => {
+			inputEl?.focus();
+			inputEl?.select();
+		});
+	}
+
+	export function focus() {
+		focusInput();
+	}
+
+	export function setQuery(value: string, activeRange?: Range | null) {
+		pendingActiveRange = activeRange ? activeRange.cloneRange() : null;
+		pendingActiveTop = activeRange ? getRangeTop(activeRange) : null;
+		query = value;
+		pendingActiveIndex = activeRange ? getRangeMatchIndex(activeRange) : null;
+		if (open) scheduleApply();
+		focusInput();
 	}
 
 	function close() {
@@ -257,10 +361,7 @@
 			return;
 		}
 		// On open, focus and select the input so typing replaces.
-		tick().then(() => {
-			inputEl?.focus();
-			inputEl?.select();
-		});
+		focusInput();
 	});
 
 	function handleKeydown(e: KeyboardEvent) {

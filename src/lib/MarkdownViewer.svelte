@@ -112,20 +112,44 @@ import { t } from './utils/i18n.js';
 	let liveMode = $state(false);
 
 	let findOpen = $state(false);
-	let findBar = $state<{ reapply: () => void; clearHighlights: () => void } | null>(null);
+	let findBar = $state<{
+		reapply: () => void;
+		clearHighlights: () => void;
+		focus: () => void;
+		setQuery: (value: string, activeRange?: Range | null) => void;
+	} | null>(null);
+
+	function getPreviewSelection(): { text: string; range: Range } | null {
+		const selection = window.getSelection();
+		if (!markdownBody || !selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+		if (!markdownBody.contains(selection.anchorNode) || !markdownBody.contains(selection.focusNode)) {
+			return null;
+		}
+		const range = selection.getRangeAt(0);
+		if (range.startContainer !== range.endContainer || range.startContainer.nodeType !== Node.TEXT_NODE) {
+			return null;
+		}
+		const text = selection.toString().trim();
+		if (!text) return null;
+		return { text, range: range.cloneRange() };
+	}
 
 	// Decide where Cmd/Ctrl+F should land based on what's visible and where
 	// focus is. Used by both the JS keydown handler (Win/Linux + macOS in-page
 	// shortcut) and the macOS native menu listener (which fires Cmd+F via the
 	// Edit menu accelerator and bypasses the JS keydown path).
-	function triggerFindAction() {
+	async function triggerFindAction() {
 		const active = document.activeElement as Node | null;
 		const editorHasFocus = !!editorPaneEl && !!active && editorPaneEl.contains(active);
 		const previewVisible = !isEditing || !!tabManager.activeTab?.isSplit;
 		if (editorHasFocus || !previewVisible) {
 			editorPane?.triggerFind?.();
 		} else if (markdownBody) {
+			const previewSelection = getPreviewSelection();
+			if (previewSelection) findBar?.setQuery(previewSelection.text, previewSelection.range);
 			findOpen = true;
+			await tick();
+			if (!previewSelection) findBar?.focus();
 		}
 	}
 
@@ -139,6 +163,20 @@ import { t } from './utils/i18n.js';
 	function addToast(message: string, type: 'info' | 'error' | 'warning' = 'info') {
 		const id = crypto.randomUUID();
 		toasts.push({ id, message, type });
+	}
+
+	async function copyMarkdownDocument() {
+		const tab = tabManager.activeTab;
+		const path = tab?.path || currentFile;
+		if (!tab || showHome || (path && !hasMarkdownLinkExtension(path))) return;
+
+		try {
+			await invoke('clipboard_write_text', { text: tab.rawContent || '' });
+			addToast(t('toast.markdownCopied', settings.language), 'info');
+		} catch (error) {
+			console.error('Failed to copy markdown:', error);
+			addToast(t('toast.failedToCopyMarkdown', settings.language), 'error');
+		}
 	}
 
 	// --- Auto-save bookkeeping (see saveContent + auto-save $effect below) ---
@@ -984,6 +1022,11 @@ import { t } from './utils/i18n.js';
 				throwOnError: false,
 			});
 		}
+
+		if (findOpen) {
+			await tick();
+			findBar?.reapply();
+		}
 	}
 
 	$effect(() => {
@@ -1015,8 +1058,10 @@ import { t } from './utils/i18n.js';
 	// re-types in the find bar.
 	$effect(() => {
 		const _ = sanitizedHtml;
-		if (!findOpen || !findBar) return;
-		tick().then(() => findBar?.reapply());
+		untrack(() => {
+			if (!findOpen || !findBar) return;
+			tick().then(() => findBar?.reapply());
+		});
 	});
 
 	$effect(() => {
@@ -2381,6 +2426,14 @@ import { t } from './utils/i18n.js';
 				e.preventDefault();
 				getCurrentWindow().close();
 			}
+		if (cmdOrCtrl && e.shiftKey && !e.altKey && key === 'c') {
+			const active = document.activeElement as Node | null;
+			const editorHasFocus = !!editorPaneEl && !!active && editorPaneEl.contains(active);
+			if (!editorHasFocus) {
+				e.preventDefault();
+				copyMarkdownDocument();
+			}
+		}
 		if (cmdOrCtrl && !e.shiftKey && !e.altKey && (code === 'Backslash' || code === 'IntlBackslash')) {
 			e.preventDefault();
 			if (tabManager.activeTabId) toggleSplitView(tabManager.activeTabId, true);
@@ -2453,7 +2506,7 @@ import { t } from './utils/i18n.js';
 			const editorHasFocus = !!editorPaneEl && !!active && editorPaneEl.contains(active);
 			if (!editorHasFocus) {
 				e.preventDefault();
-				triggerFindAction();
+				void triggerFindAction();
 			}
 		}
 	}
@@ -2715,7 +2768,7 @@ import { t } from './utils/i18n.js';
 			);
 			unlisteners.push(
 				await listen('menu-edit-find', () => {
-					triggerFindAction();
+					void triggerFindAction();
 				}),
 			);
 			unlisteners.push(
@@ -3015,6 +3068,7 @@ import { t } from './utils/i18n.js';
 		onSetTheme={(t) => (theme = t)}
 		onopenSettings={() => (showSettings = true)}
 		onfind={triggerFindAction}
+		oncopyMarkdown={copyMarkdownDocument}
 		oncloseTab={closeTabAndWindowIfLast} />
 	<div class="loading-screen">
 		<svg class="spinner" viewBox="0 0 50 50">
@@ -3060,6 +3114,7 @@ import { t } from './utils/i18n.js';
 		onSetTheme={(t) => (theme = t)}
 		onopenSettings={() => (showSettings = true)}
 		onfind={triggerFindAction}
+		oncopyMarkdown={copyMarkdownDocument}
 		canGoBack={canGoBackInFileHistory}
 		canGoForward={canGoForwardInFileHistory}
 		onback={() => navigateFileHistory('back')}
@@ -3108,6 +3163,7 @@ import { t } from './utils/i18n.js';
 								onnextTab={() => tabManager.cycleTab('next')}
 								onprevTab={() => tabManager.cycleTab('prev')}
 								onundoClose={handleUndoCloseTab}
+								oncopyMarkdown={copyMarkdownDocument}
 								onscrollsync={handleEditorScrollSync} />
 						{/if}
 					</div>
