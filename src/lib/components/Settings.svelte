@@ -2,9 +2,14 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { getVersion } from '@tauri-apps/api/app';
 	import { openUrl } from '@tauri-apps/plugin-opener';
-	import { settings, DEFAULT_FONTS, type OSType } from '../stores/settings.svelte.js';
+	import {
+		settings,
+		DEFAULT_FONTS,
+		type OSType,
+		type SettingsSurface,
+	} from '../stores/settings.svelte.js';
 	import { updateStore } from '../stores/update.svelte.js';
-	import { fade, scale, fly } from 'svelte/transition';
+	import { fade, scale } from 'svelte/transition';
 	import { t, getSupportedLanguages } from '../utils/i18n.js';
 	import type { LanguageCode } from '../utils/i18n.js';
 	import { getEditorToolbarTools } from '../utils/editorToolbar.js';
@@ -17,8 +22,9 @@
 		onclose,
 	} = $props<{ show?: boolean; theme?: string; onSetTheme?: (t: string) => void; onclose: () => void }>();
 
-	let activeCategory = $state<'editor' | 'preview' | 'appearance' | 'toolbars' | 'files'>('editor');
-	let highlightMenuOpen = $state(false);
+	type SettingsCategory = 'editor' | 'preview' | 'appearance' | 'toolbars' | 'files';
+	let activeCategory = $state<SettingsCategory>('editor');
+	let settingsSearch = $state('');
 	const highlightColors = [
 		{ value: 'default', color: 'var(--color-accent-fg)' },
 		{ value: 'yellow', color: '#ffd000' },
@@ -90,8 +96,8 @@
 	let titlebarToolbarDragOverId = $state<string | null>(null);
 	let titlebarToolbarDragState = $state<ToolbarSettingsDragState | null>(null);
 	let settingsModalFrame = $state<SettingsModalFrame>({
-		width: 560,
-		height: 420,
+		width: 960,
+		height: 700,
 		left: null,
 		top: null,
 	});
@@ -110,6 +116,9 @@
 	let settingsModalIsResizing = $state(false);
 	let editorToolbarSettingsTools = $derived(getEditorToolbarTools(settings.editorToolbarOrder));
 	let titlebarToolbarSettingsActions = $derived(getTitlebarToolbarActions(settings.titlebarToolbarOrder));
+	let windowBlurUnavailable = $derived(
+		settings.windowSurface === 'solid' || settings.windowOpacity >= 100 || settings.osType === 'linux',
+	);
 	let settingsModalFrameStyle = $derived.by(() => {
 		if (settingsModalFrame.left === null || settingsModalFrame.top === null) return '';
 		return [
@@ -119,6 +128,43 @@
 			`width: ${settingsModalFrame.width}px`,
 			`height: ${settingsModalFrame.height}px`,
 		].join('; ');
+	});
+	let settingsModalStyle = $derived(settingsModalFrameStyle);
+	let settingsSearchResults = $derived.by(() => {
+		const query = settingsSearch.trim().toLocaleLowerCase(settings.language);
+		if (!query) return [];
+		const items: { category: SettingsCategory; label: string }[] = [
+			{ category: 'editor', label: t('settings.editorSettings', settings.language) },
+			{ category: 'editor', label: `${t('settings.font', settings.language)} · ${t('settings.editor', settings.language)}` },
+			{ category: 'editor', label: `${t('settings.fontSize', settings.language)} · ${t('settings.editor', settings.language)}` },
+			{ category: 'editor', label: t('settings.wrapColumn', settings.language) },
+			{ category: 'editor', label: t('settings.wordWrap', settings.language) },
+			{ category: 'editor', label: t('settings.lineNumbers', settings.language) },
+			{ category: 'editor', label: t('settings.minimap', settings.language) },
+			{ category: 'editor', label: t('settings.vimMode', settings.language) },
+			{ category: 'editor', label: t('settings.statusBar', settings.language) },
+			{ category: 'editor', label: t('settings.wordCount', settings.language) },
+			{ category: 'editor', label: t('settings.showWhitespace', settings.language) },
+			{ category: 'preview', label: t('settings.previewSettings', settings.language) },
+			{ category: 'preview', label: `${t('settings.font', settings.language)} · ${t('settings.preview', settings.language)}` },
+			{ category: 'preview', label: `${t('settings.fontSize', settings.language)} · ${t('settings.preview', settings.language)}` },
+			{ category: 'appearance', label: t('settings.appearanceSettings', settings.language) },
+			{ category: 'appearance', label: t('settings.language', settings.language) },
+			{ category: 'appearance', label: t('settings.theme', settings.language) },
+			{ category: 'appearance', label: t('settings.windowSurface', settings.language) },
+			{ category: 'appearance', label: t('settings.surfaceOpacity', settings.language) },
+			{ category: 'appearance', label: t('settings.surfaceBlur', settings.language) },
+			{ category: 'appearance', label: t('settings.backdropDimming', settings.language) },
+			{ category: 'appearance', label: t('settings.showTabs', settings.language) },
+			{ category: 'appearance', label: t('settings.highlightColor', settings.language) },
+			{ category: 'toolbars', label: t('settings.toolbarsSettings', settings.language) },
+			{ category: 'toolbars', label: t('settings.editorToolbar', settings.language) },
+			{ category: 'toolbars', label: t('settings.applicationToolbar', settings.language) },
+			{ category: 'files', label: t('settings.fileSettings', settings.language) },
+			{ category: 'files', label: t('settings.autoSave', settings.language) },
+			{ category: 'files', label: t('settings.confirmBeforeSave', settings.language) },
+		];
+		return items.filter((item) => item.label.toLocaleLowerCase(settings.language).includes(query)).slice(0, 6);
 	});
 
 	type ToolbarSettingsDragState = {
@@ -274,9 +320,9 @@
 		return {
 			viewportWidth,
 			viewportHeight,
-			minWidth: Math.min(520, viewportWidth * 0.9),
+			minWidth: Math.min(700, viewportWidth * 0.9),
 			maxWidth: viewportWidth * 0.9,
-			minHeight: Math.min(360, viewportHeight * 0.9),
+			minHeight: Math.min(520, viewportHeight * 0.9),
 			maxHeight: viewportHeight * 0.9,
 		};
 	}
@@ -498,12 +544,7 @@
 			loadVscodeThemes();
 			previousActiveElement = document.activeElement as HTMLElement;
 			setTimeout(() => {
-				const firstFocusable = settingsModal?.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') as HTMLElement | null;
-				if (firstFocusable) {
-					firstFocusable.focus();
-				} else {
-					settingsModal?.focus();
-				}
+				settingsModal?.focus({ preventScroll: true });
 			}, 50);
 		} else if (previousActiveElement) {
 			previousActiveElement.focus();
@@ -560,16 +601,27 @@
 			console.error('Failed to delete theme:', e);
 		}
 	}
+
+	function selectSearchResult(category: SettingsCategory) {
+		activeCategory = category;
+		settingsSearch = '';
+	}
+
+	function resetAppearanceSection() {
+		settings.resetWindowAppearance();
+		onSetTheme?.('system');
+	}
 </script>
 
 {#if show}
 	<div class="settings-backdrop" transition:fade={{ duration: 150 }} role="presentation">
 		<div
 			class="settings-modal"
+			class:translucent={settings.windowSurface === 'translucent'}
 			class:dragging={settingsModalIsDragging}
 			class:resizing={settingsModalIsResizing}
 			bind:this={settingsModal}
-			style={settingsModalFrameStyle}
+			style={settingsModalStyle}
 			transition:scale={{ duration: 200, start: 0.95 }}
 			role="dialog"
 			aria-modal="true"
@@ -578,6 +630,27 @@
 			onkeydown={handleModalKeydown}>
 			<div class="settings-header" onpointerdown={handleSettingsModalDragPointerDown}>
 				<h1 id="settings-title">{t('settings.title', settings.language)}</h1>
+				<div class="settings-search" onpointerdown={(e) => e.stopPropagation()}>
+					<svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path>
+					</svg>
+					<input
+						type="search"
+						bind:value={settingsSearch}
+						placeholder={t('settings.searchPlaceholder', settings.language)}
+						aria-label={t('settings.searchPlaceholder', settings.language)} />
+					{#if settingsSearch.trim()}
+						<div class="settings-search-results">
+							{#if settingsSearchResults.length > 0}
+								{#each settingsSearchResults as result}
+									<button onclick={() => selectSearchResult(result.category)}>{result.label}</button>
+								{/each}
+							{:else}
+								<span>{t('settings.noSearchResults', settings.language)}</span>
+							{/if}
+						</div>
+					{/if}
+				</div>
 				<button class="close-btn" onclick={onclose} aria-label={t('common.close', settings.language)}>
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
@@ -596,8 +669,8 @@
 			</div>
 
 			<div class="settings-content">
-				<nav class="settings-nav">
-					<button class="nav-item" class:active={activeCategory === 'editor'} onclick={() => (activeCategory = 'editor')}>
+				<nav class="settings-nav" aria-label={t('settings.title', settings.language)}>
+					<button class="nav-item" class:active={activeCategory === 'editor'} aria-label={t('settings.editor', settings.language)} aria-current={activeCategory === 'editor' ? 'page' : undefined} onclick={() => (activeCategory = 'editor')}>
 						<svg
 								xmlns="http://www.w3.org/2000/svg"
 								width="16"
@@ -611,9 +684,9 @@
 								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
 								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
 							</svg>
-							{t('settings.editor', settings.language)}
+							<span class="nav-label">{t('settings.editor', settings.language)}</span>
 					</button>
-					<button class="nav-item" class:active={activeCategory === 'preview'} onclick={() => (activeCategory = 'preview')}>
+					<button class="nav-item" class:active={activeCategory === 'preview'} aria-label={t('settings.preview', settings.language)} aria-current={activeCategory === 'preview' ? 'page' : undefined} onclick={() => (activeCategory = 'preview')}>
 						<svg
 								xmlns="http://www.w3.org/2000/svg"
 								width="16"
@@ -627,9 +700,9 @@
 								<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
 								<circle cx="12" cy="12" r="3"></circle>
 							</svg>
-							{t('settings.preview', settings.language)}
+							<span class="nav-label">{t('settings.preview', settings.language)}</span>
 					</button>
-					<button class="nav-item" class:active={activeCategory === 'appearance'} onclick={() => (activeCategory = 'appearance')}>
+					<button class="nav-item" class:active={activeCategory === 'appearance'} aria-label={t('settings.appearance', settings.language)} aria-current={activeCategory === 'appearance' ? 'page' : undefined} onclick={() => (activeCategory = 'appearance')}>
 						<svg
 								xmlns="http://www.w3.org/2000/svg"
 								width="16"
@@ -645,9 +718,9 @@
 									d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
 								></path>
 							</svg>
-							{t('settings.appearance', settings.language)}
+							<span class="nav-label">{t('settings.appearance', settings.language)}</span>
 					</button>
-					<button class="nav-item" class:active={activeCategory === 'toolbars'} onclick={() => (activeCategory = 'toolbars')}>
+					<button class="nav-item" class:active={activeCategory === 'toolbars'} aria-label={t('settings.toolbars', settings.language)} aria-current={activeCategory === 'toolbars' ? 'page' : undefined} onclick={() => (activeCategory = 'toolbars')}>
 						<svg
 								xmlns="http://www.w3.org/2000/svg"
 								width="16"
@@ -663,9 +736,9 @@
 								<path d="M7 9v6"></path>
 								<path d="M17 9v6"></path>
 							</svg>
-							{t('settings.toolbars', settings.language)}
+							<span class="nav-label">{t('settings.toolbars', settings.language)}</span>
 					</button>
-					<button class="nav-item" class:active={activeCategory === 'files'} onclick={() => (activeCategory = 'files')}>
+					<button class="nav-item" class:active={activeCategory === 'files'} aria-label={t('settings.files', settings.language)} aria-current={activeCategory === 'files' ? 'page' : undefined} onclick={() => (activeCategory = 'files')}>
 						<svg
 								xmlns="http://www.w3.org/2000/svg"
 								width="16"
@@ -681,7 +754,7 @@
 								<line x1="9" y1="13" x2="15" y2="13"></line>
 								<line x1="9" y1="17" x2="13" y2="17"></line>
 							</svg>
-							{t('settings.files', settings.language)}
+							<span class="nav-label">{t('settings.files', settings.language)}</span>
 					</button>
 
 					<div class="nav-footer">
@@ -723,7 +796,7 @@
 					</div>
 				</nav>
 
-					<div class="settings-panel" role="presentation" onclick={() => { highlightMenuOpen = false; }}>
+					<div class="settings-panel" role="presentation">
 						{#if activeCategory === 'editor'}
 						<div class="settings-group">
 							<div class="settings-group-header">
@@ -734,6 +807,10 @@
 									onclick={() => { settings.resetEditorFont(); settings.resetEditorMaxWidth(); }}>
 									{t('settings.resetEditorSettings', settings.language)}
 								</button>
+							</div>
+
+							<div class="font-preview" aria-label={t('settings.editorFontPreview', settings.language)}>
+								<code style={`font-family: ${settings.editorFont}, monospace; font-size: ${settings.editorFontSize}px;`}># Markpad editor</code>
 							</div>
 
 							<div class="setting-item">
@@ -897,8 +974,17 @@
 								</button>
 							</div>
 
+							<div class="font-preview" aria-label={t('settings.fontPreview', settings.language)}>
+								<span
+									class="font-preview-text"
+									style={`font-family: ${settings.previewFont}, sans-serif; font-size: ${settings.previewFontSize}px;`}>
+									{t('settings.fontPreviewText', settings.language)}
+								</span>
+								<code style={`font-family: ${settings.codeFont}, monospace; font-size: ${settings.codeFontSize}px;`}># Markpad **preview**</code>
+							</div>
+
 							<div class="setting-item">
-								<label for="preview-font">{t('settings.font', settings.language)}</label>
+								<label for="preview-font">{t('settings.previewTextFont', settings.language)}</label>
 								<div class="select-wrapper">
 									<select id="preview-font" bind:value={settings.previewFont}>
 										{#each systemFonts as font}
@@ -937,7 +1023,7 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="code-font">{t('settings.font', settings.language)}</label>
+								<label for="code-font">{t('settings.previewCodeFont', settings.language)}</label>
 								<div class="select-wrapper">
 									<select id="code-font" bind:value={settings.codeFont}>
 										{#each systemFonts as font}
@@ -974,190 +1060,93 @@
 									<span class="slider-value">px</span>
 								</div>
 							</div>
-						</div>
+					</div>
 					{:else if activeCategory === 'appearance'}
 						<div class="settings-group">
-						<h2>{t('settings.appearanceSettings', settings.language)}</h2>
-
-						<div class="setting-item">
-							<label for="appearance-language">{t('settings.language', settings.language)}</label>
-							<div class="select-wrapper">
-								<select id="appearance-language" value={settings.language} onchange={(e) => settings.setLanguage(e.currentTarget.value as LanguageCode)}>
-									{#each getSupportedLanguages() as lang}
-										<option value={lang.code}>{lang.nativeName}</option>
-									{/each}
-								</select>
-								<svg
-									class="select-arrow"
-									width="12"
-									height="12"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-									stroke-linecap="round"
-									stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+							<div class="settings-group-header">
+								<h2>{t('settings.appearance', settings.language)}</h2>
+								<button class="reset-text-btn" onclick={resetAppearanceSection}>{t('settings.resetSection', settings.language)}</button>
 							</div>
-						</div>
 
-						<div class="setting-item" style="align-items: flex-start; padding-top: 16px;">
-							<label for="appearance-theme" style="margin-top: 6px;">{t('settings.theme', settings.language)}</label>
-								<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+								<div class="setting-item">
+									<label for="appearance-language">{t('settings.language', settings.language)}</label>
 									<div class="select-wrapper">
-										<select id="appearance-theme" value={theme} onchange={(e) => onSetTheme?.(e.currentTarget.value as any)}>
-											<option value="system">{t('settings.themeFollowSystem', settings.language)}</option>
-											<option value="light">{t('settings.themeDefaultLight', settings.language)}</option>
-											<option value="dark">{t('settings.themeDefaultDark', settings.language)}</option>
-											{#if savedVscodeThemes.length > 0}
-												<optgroup label={t('settings.vsCodeThemes', settings.language)}>
-													{#each savedVscodeThemes as themeOption}
-														<option value={`vscode:${themeOption}`}>{themeOption}</option>
-													{/each}
-												</optgroup>
-											{/if}
+										<select id="appearance-language" value={settings.language} onchange={(e) => settings.setLanguage(e.currentTarget.value as LanguageCode)}>
+											{#each getSupportedLanguages() as lang}<option value={lang.code}>{lang.nativeName}</option>{/each}
 										</select>
-										<svg
-											class="select-arrow"
-											width="12"
-											height="12"
-											viewBox="0 0 24 24"
-											fill="none"
-											stroke="currentColor"
-											stroke-width="2"
-											stroke-linecap="round"
-											stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+										<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
 									</div>
-									{#if theme.startsWith('vscode:')}
-										<button class="reset-text-btn" style="color: var(--color-danger-fg); font-size: 12px; padding: 0;" onclick={() => deleteTheme(theme.replace('vscode:', ''))}>
-										{t('settings.deleteSelectedTheme', settings.language)}
-									</button>
-									{/if}
 								</div>
-							</div>
-
-							<div class="setting-item" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-								<div style="display: flex; justify-content: space-between; width: 100%;">
+								<div class="setting-item">
+									<label for="appearance-theme">{t('settings.theme', settings.language)}</label>
+									<div class="select-wrapper">
+										<select id="appearance-theme" value={theme} onchange={(e) => onSetTheme?.(e.currentTarget.value)}>
+											<option value="light">{t('settings.themeLight', settings.language)}</option>
+											<option value="system">{t('settings.themeSystem', settings.language)}</option>
+											<option value="dark">{t('settings.themeDark', settings.language)}</option>
+											{#each savedVscodeThemes as themeOption}<option value={`vscode:${themeOption}`}>{themeOption}</option>{/each}
+										</select>
+										<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+									</div>
+								</div>
+								<div class="setting-item surface-preference">
+									<label for="appearance-window-surface">{t('settings.windowSurface', settings.language)}</label>
+									<div class="select-wrapper">
+										<select id="appearance-window-surface" value={settings.windowSurface} onchange={(e) => settings.setWindowSurface(e.currentTarget.value as SettingsSurface)}>
+											<option value="solid">{t('settings.surfaceSolid', settings.language)}</option><option value="translucent">{t('settings.surfaceTranslucent', settings.language)}</option>
+										</select>
+										<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+									</div>
+								</div>
+								<div class="setting-item surface-preference" class:unavailable={settings.windowSurface === 'solid'}>
+									<label for="appearance-window-opacity">{t('settings.surfaceOpacity', settings.language)}</label>
+									<div class:disabled={settings.windowSurface === 'solid'} class="range-control">
+										<input id="appearance-window-opacity" type="range" min="72" max="100" step="1" value={settings.windowOpacity} style={`--range-progress: ${((settings.windowOpacity - 72) / 28) * 100}%`} disabled={settings.windowSurface === 'solid'} oninput={(e) => settings.setWindowOpacity(e.currentTarget.valueAsNumber)} />
+										<output for="appearance-window-opacity">{settings.windowOpacity}%</output>
+									</div>
+								</div>
+								<div class="setting-item surface-preference" class:unavailable={windowBlurUnavailable}>
+									<label for="appearance-window-blur">{t('settings.surfaceBlur', settings.language)}</label>
+									<label class="toggle" class:disabled={windowBlurUnavailable}>
+										<input id="appearance-window-blur" type="checkbox" checked={settings.windowBlur && settings.osType !== 'linux'} disabled={windowBlurUnavailable} onchange={() => settings.toggleWindowBlur()} /><span class="toggle-slider"></span>
+									</label>
+								</div>
+								<div class="setting-item surface-preference" class:unavailable={settings.windowSurface === 'solid'}>
+									<label for="appearance-backdrop-dim">{t('settings.backdropDimming', settings.language)}</label>
+									<div class:disabled={settings.windowSurface === 'solid'} class="range-control">
+										<input id="appearance-backdrop-dim" type="range" min="0" max="70" step="1" value={settings.windowBackdropDim} style={`--range-progress: ${(settings.windowBackdropDim / 70) * 100}%`} disabled={settings.windowSurface === 'solid'} oninput={(e) => settings.setWindowBackdropDim(e.currentTarget.valueAsNumber)} />
+										<output for="appearance-backdrop-dim">{settings.windowBackdropDim}%</output>
+									</div>
+								</div>
+								<div class="setting-item">
 									<label for="theme-import">{t('settings.importVSCodeTheme', settings.language)}</label>
-									<button
-										class="reset-text-btn"
-										onclick={() =>
-											openUrl('https://vscodethemes.com/')
-												.catch(() => window.open('https://vscodethemes.com/', '_blank'))}
-									>
-										{t('settings.browseThemes', settings.language)}
-									</button>
-								</div>
-								<div style="display: flex; gap: 8px; width: 100%;">
-									<input 
-										type="text" 
-										id="theme-import" 
-										class="text-input" 
-										style="flex: 1;" 
-										placeholder="https://vscodethemes.com/e/..." 
-										bind:value={themeImportUrl} 
-										onkeydown={e => e.key === 'Enter' && importVscodeTheme()}
-									/>
-									<button class="import-btn" onclick={importVscodeTheme} disabled={importingTheme || !themeImportUrl}>
-										{importingTheme ? t('settings.importing', settings.language) : t('settings.import', settings.language)}
-									</button>
-								</div>
-							</div>
-
-							<div class="setting-item">
-								<label for="appearance-tabs">{t('settings.showTabs', settings.language)}</label>
-								<label class="toggle">
-									<input id="appearance-tabs" type="checkbox" checked={settings.showTabs} onchange={() => settings.toggleTabs()} />
-									<span class="toggle-slider"></span>
-								</label>
-							</div>
-
-							<div class="setting-item">
-								<label for="appearance-restore-state">{t('settings.restoreStateOnReopen', settings.language)}</label>
-								<label class="toggle">
-									<input id="appearance-restore-state" type="checkbox" checked={settings.restoreStateOnReopen} onchange={() => settings.toggleRestoreStateOnReopen()} />
-									<span class="toggle-slider"></span>
-								</label>
-							</div>
-
-							<div class="setting-item">
-								<label for="appearance-start-editor">{t('settings.startInEditor', settings.language)}</label>
-								<label class="toggle">
-									<input id="appearance-start-editor" type="checkbox" checked={settings.startInEditor} onchange={() => settings.toggleStartInEditor()} />
-									<span class="toggle-slider"></span>
-								</label>
-							</div>
-							<div class="setting-item">
-								<label for="appearance-new-file-mode">{t('settings.newFileDefaultMode', settings.language)}</label>
-								<label class="toggle">
-									<input id="appearance-new-file-mode" type="checkbox" checked={settings.newFileDefaultMode} onchange={() => settings.toggleNewFileDefaultMode()} />
-									<span class="toggle-slider"></span>
-								</label>
-							</div>
-							<div class="setting-item">
-								<label for="appearance-recent-files">{t('settings.showRecentFiles', settings.language)}</label>
-								<label class="toggle">
-									<input id="appearance-recent-files" type="checkbox" checked={settings.showRecentFiles} onchange={() => settings.toggleShowRecentFiles()} />
-									<span class="toggle-slider"></span>
-								</label>
-							</div>
-							<div class="setting-item">
-							<label for="appearance-toc">{t('settings.showTableOfContents', settings.language)}</label>
-							<label class="toggle">
-								<input id="appearance-toc" type="checkbox" checked={settings.showToc} onchange={() => settings.toggleToc()} />
-								<span class="toggle-slider"></span>
-							</label>
-						</div>
-
-						<div class="setting-item">
-							<label for="appearance-highlight-color">{t('settings.highlightColor', settings.language)}</label>
-							<div class="custom-dropdown-wrapper">
-								<button 
-									class="custom-dropdown-btn" 
-									onclick={(e) => { e.stopPropagation(); highlightMenuOpen = !highlightMenuOpen; }}>
-										<div style="display: flex; align-items: center; gap: 8px;">
-										<div class="color-circle" style="background-color: {highlightColors.find(c => c.value === settings.highlightColor)?.color || 'var(--color-accent-fg)'}"></div>
-										<span>{t(`colors.${settings.highlightColor || 'default'}`, settings.language)}</span>
+									<div class="theme-import-control">
+										<input type="text" id="theme-import" class="text-input" placeholder="https://vscodethemes.com/e/..." bind:value={themeImportUrl} onkeydown={e => e.key === 'Enter' && importVscodeTheme()} />
+										<button class="import-btn" onclick={importVscodeTheme} disabled={importingTheme || !themeImportUrl}>{importingTheme ? t('settings.importing', settings.language) : t('settings.import', settings.language)}</button>
+										<button class="import-btn" onclick={() => openUrl('https://vscodethemes.com/').catch(() => window.open('https://vscodethemes.com/', '_blank'))}>{t('settings.browseThemes', settings.language)}</button>
 									</div>
+								</div>
+								{#each [
+									{ id: 'appearance-tabs', label: t('settings.showTabs', settings.language), checked: settings.showTabs, action: () => settings.toggleTabs() },
+									{ id: 'appearance-restore-state', label: t('settings.restoreStateOnReopen', settings.language), checked: settings.restoreStateOnReopen, action: () => settings.toggleRestoreStateOnReopen() },
+									{ id: 'appearance-start-editor', label: t('settings.startInEditor', settings.language), checked: settings.startInEditor, action: () => settings.toggleStartInEditor() },
+									{ id: 'appearance-new-file-mode', label: t('settings.newFileDefaultMode', settings.language), checked: settings.newFileDefaultMode, action: () => settings.toggleNewFileDefaultMode() },
+									{ id: 'appearance-recent-files', label: t('settings.showRecentFiles', settings.language), checked: settings.showRecentFiles, action: () => settings.toggleShowRecentFiles() },
+									{ id: 'appearance-toc', label: t('settings.showTableOfContents', settings.language), checked: settings.showToc, action: () => settings.toggleToc() },
+								] as item}
+									<div class="setting-item"><label for={item.id}>{item.label}</label><label class="toggle"><input id={item.id} type="checkbox" checked={item.checked} onchange={item.action} /><span class="toggle-slider"></span></label></div>
+								{/each}
+								<div class="setting-item">
+									<label for="appearance-highlight-color">{t('settings.highlightColor', settings.language)}</label>
+									<div class="select-wrapper">
+										<select id="appearance-highlight-color" value={settings.highlightColor} onchange={(e) => settings.highlightColor = e.currentTarget.value}>
+											{#each highlightColors as color}<option value={color.value}>{t(`colors.${color.value}`, settings.language)}</option>{/each}
+										</select>
 										<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-								</button>
-								{#if highlightMenuOpen}
-									<div
-										class="custom-dropdown-menu"
-										role="menu"
-										tabindex="-1"
-										transition:fly={{ y: 5, duration: 150 }}
-										onclick={(e) => e.stopPropagation()}
-										onkeydown={(e) => {
-											if (e.key === 'Escape') highlightMenuOpen = false;
-										}}>
-										{#each highlightColors as color, index}
-											{#if index === 1}
-												<div class="theme-menu-divider" style="height: 1px; background-color: var(--color-border-muted); margin: 4px 0; transform: scaleY(0.5);"></div>
-											{/if}
-											<button 
-													class="custom-dropdown-option {settings.highlightColor === color.value ? 'selected' : ''}" 
-													onclick={() => {
-														settings.highlightColor = color.value;
-														highlightMenuOpen = false;
-													}}
-												>
-													<div class="color-circle" style="background-color: {color.color}"></div>
-													<span>{t(`colors.${color.value}`, settings.language)}</span>
-												</button>
-										{/each}
 									</div>
-								{/if}
-							</div>
-					</div>
-
-					<div class="setting-item">
-						<label for="appearance-zen-mode">{t('settings.zenMode', settings.language)}</label>
-						<label class="toggle">
-							<input id="appearance-zen-mode" type="checkbox" checked={settings.zenMode} onchange={() => settings.toggleZenMode()} />
-							<span class="toggle-slider"></span>
-						</label>
-					</div>
-					</div>
+								</div>
+								<div class="setting-item"><label for="appearance-zen-mode">{t('settings.zenMode', settings.language)}</label><label class="toggle"><input id="appearance-zen-mode" type="checkbox" checked={settings.zenMode} onchange={() => settings.toggleZenMode()} /><span class="toggle-slider"></span></label></div>
+						</div>
 					{:else if activeCategory === 'toolbars'}
 					<div class="settings-group">
 						<div class="settings-group-header">
@@ -1169,15 +1158,13 @@
 								<span class="toolbar-settings-chevron" aria-hidden="true"></span>
 								<span>{t('settings.applicationToolbar', settings.language)}</span>
 							</summary>
+							<button
+								type="button"
+								class="reset-text-btn toolbar-settings-reset"
+								onclick={() => settings.resetTitlebarToolbar()}>
+								{t('settings.resetToolbar', settings.language)}
+							</button>
 							<div class="toolbar-settings-body">
-								<div class="toolbar-settings-header">
-									<button
-										type="button"
-										class="reset-text-btn"
-										onclick={() => settings.resetTitlebarToolbar()}>
-										{t('settings.resetToolbar', settings.language)}
-									</button>
-								</div>
 								<div class="toolbar-settings-list" role="list">
 									{#each titlebarToolbarSettingsActions as action, index (action.id)}
 										{@const actionName = t(action.labelKey, settings.language) === action.labelKey ? action.fallbackName : t(action.labelKey, settings.language)}
@@ -1246,17 +1233,16 @@
 								<span class="toolbar-settings-chevron" aria-hidden="true"></span>
 								<span>{t('settings.editorToolbar', settings.language)}</span>
 							</summary>
+							<button
+								type="button"
+								class="reset-text-btn toolbar-settings-reset"
+								onclick={() => settings.resetEditorToolbar()}>
+								{t('settings.resetToolbar', settings.language)}
+							</button>
 							<div class="toolbar-settings-body">
-								<div class="toolbar-settings-header">
-									<button
-										type="button"
-										class="reset-text-btn"
-										onclick={() => settings.resetEditorToolbar()}>
-										{t('settings.resetToolbar', settings.language)}
-									</button>
-								</div>
 								<div class="toolbar-settings-list" role="list">
 									{#each editorToolbarSettingsTools as tool, index (tool.id)}
+										{@const toolName = t(tool.nameKey, settings.language) === tool.nameKey ? tool.name : t(tool.nameKey, settings.language)}
 										<div
 											class="toolbar-tool-row"
 											class:drag-source={editorToolbarDraggingId === tool.id}
@@ -1266,7 +1252,7 @@
 											<button
 												type="button"
 												class="toolbar-drag-handle"
-												aria-label={`${t('settings.move', settings.language)}: ${tool.name}`}
+												aria-label={`${t('settings.move', settings.language)}: ${toolName}`}
 												onpointerdown={(e) => handleEditorToolbarDragPointerDown(e, tool.id)}>
 												::
 											</button>
@@ -1277,21 +1263,21 @@
 													checked={isEditorToolbarToolVisible(tool.id)}
 													onchange={(e) => settings.setEditorToolbarToolVisible(tool.id, e.currentTarget.checked)}
 												/>
-												<span class="toolbar-tool-name">{tool.name}</span>
+											<span class="toolbar-tool-name">{toolName}</span>
 												<span class="toolbar-tool-sample">{tool.label}</span>
 											</label>
 											<div class="toolbar-order-controls">
 												<button
 													type="button"
 													disabled={index === 0}
-													aria-label={`${t('settings.moveUp', settings.language)}: ${tool.name}`}
+												aria-label={`${t('settings.moveUp', settings.language)}: ${toolName}`}
 													onclick={() => settings.moveEditorToolbarTool(tool.id, 'up')}>
 													{t('settings.moveUp', settings.language)}
 												</button>
 												<button
 													type="button"
 													disabled={index === editorToolbarSettingsTools.length - 1}
-													aria-label={`${t('settings.moveDown', settings.language)}: ${tool.name}`}
+												aria-label={`${t('settings.moveDown', settings.language)}: ${toolName}`}
 													onclick={() => settings.moveEditorToolbarTool(tool.id, 'down')}>
 													{t('settings.moveDown', settings.language)}
 												</button>
@@ -1347,7 +1333,7 @@
 		left: 0;
 		right: 0;
 		bottom: 0;
-		background: rgba(0, 0, 0, 0.4);
+		background: rgb(0 0 0 / 0.22);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -1355,21 +1341,38 @@
 	}
 
 	.settings-modal {
-		background: var(--color-canvas-default);
-		border: 1px solid var(--color-border-default);
-		border-radius: 6px;
-		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
-		width: min(560px, 90vw);
+		--settings-control-bg: var(--workbench-surface-base);
+		--settings-row-bg: var(--workbench-surface-raised);
+		box-sizing: border-box;
+		outline: none;
+		background: var(--workbench-surface-base);
+		border: 1px solid var(--workbench-border-strong);
+		border-radius: var(--workbench-panel-radius);
+		box-shadow: var(--workbench-shadow);
+		width: min(980px, 92vw);
 		max-width: 90vw;
-		min-width: min(520px, 90vw);
-		height: 420px;
+		min-width: min(700px, 90vw);
+		height: min(720px, 88vh);
 		max-height: 90vh;
-		min-height: min(360px, 90vh);
+		min-height: min(520px, 90vh);
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
 		position: relative;
 		font-family: var(--win-font);
+		color: var(--color-fg-default);
+	}
+
+	.settings-modal.translucent {
+		--settings-control-bg: color-mix(in srgb, var(--workbench-surface-base) 76%, transparent);
+		--settings-row-bg: color-mix(in srgb, var(--workbench-surface-raised) 78%, transparent);
+		background: color-mix(in srgb, var(--color-canvas-default) var(--window-surface-opacity, 92%), transparent);
+		-webkit-backdrop-filter: blur(var(--window-surface-blur, 18px)) saturate(1.08);
+		backdrop-filter: blur(var(--window-surface-blur, 18px)) saturate(1.08);
+	}
+
+	.settings-modal.translucent .settings-nav {
+		background: color-mix(in srgb, var(--color-canvas-subtle) 76%, transparent);
 	}
 
 	.settings-modal.dragging,
@@ -1383,7 +1386,9 @@
 		border: none;
 		background: transparent;
 		color: var(--color-fg-muted);
+		opacity: 0.45;
 		z-index: 2;
+		transition: color 0.12s ease, opacity 0.12s ease;
 	}
 
 	.settings-resize-handle.resize-n,
@@ -1453,13 +1458,12 @@
 	.settings-resize-handle.resize-se::before {
 		content: '';
 		position: absolute;
-		right: 4px;
-		bottom: 4px;
-		width: 9px;
-		height: 9px;
+		right: 5px;
+		bottom: 5px;
+		width: 7px;
+		height: 7px;
 		border-right: 1px solid currentColor;
 		border-bottom: 1px solid currentColor;
-		opacity: 0.7;
 	}
 
 	.settings-resize-handle.resize-se::after {
@@ -1467,23 +1471,25 @@
 		position: absolute;
 		right: 8px;
 		bottom: 8px;
-		width: 5px;
-		height: 5px;
+		width: 3px;
+		height: 3px;
 		border-right: 1px solid currentColor;
 		border-bottom: 1px solid currentColor;
-		opacity: 0.55;
 	}
 
 	.settings-resize-handle:hover {
 		color: var(--color-fg-default);
+		opacity: 0.9;
 	}
 
 	.settings-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 16px 20px;
-		border-bottom: 1px solid var(--color-border-default);
+		min-height: 64px;
+		padding: 0 18px 0 24px;
+		gap: 20px;
+		border-bottom: 1px solid var(--workbench-border);
 		cursor: grab;
 		user-select: none;
 	}
@@ -1493,26 +1499,100 @@
 	}
 
 	.settings-header h1 {
-		font-size: 16px;
+		font-size: 18px;
 		font-weight: 600;
+		letter-spacing: -0.02em;
 		margin: 0;
+	}
+
+	.settings-search {
+		position: relative;
+		display: flex;
+		align-items: center;
+		width: min(320px, 42%);
+		margin-left: auto;
+		color: var(--color-fg-muted);
+	}
+
+	.settings-search > svg {
+		position: absolute;
+		left: 13px;
+		z-index: 1;
+		pointer-events: none;
+	}
+
+	.settings-search input {
+		box-sizing: border-box;
+		width: 100%;
+		height: 42px;
+		padding: 0 14px 0 40px;
+		border: 1px solid var(--workbench-border);
+		border-radius: var(--workbench-control-radius);
+		background: color-mix(in srgb, var(--settings-control-bg) 88%, transparent);
+		color: var(--color-fg-default);
+		font: inherit;
+		font-size: 13px;
+		outline: none;
+	}
+
+	.settings-search input:focus {
+		border-color: var(--color-accent-fg);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent-fg) 22%, transparent);
+	}
+
+	.settings-search input::-webkit-search-cancel-button {
+		display: none;
+	}
+
+	.settings-search-results {
+		position: absolute;
+		top: calc(100% + 7px);
+		left: 0;
+		right: 0;
+		z-index: 10;
+		display: flex;
+		flex-direction: column;
+		padding: 5px;
+		border: 1px solid var(--workbench-border-strong);
+		border-radius: 9px;
+		background: var(--workbench-surface-base);
+		box-shadow: 0 16px 40px rgb(0 0 0 / 0.28);
+	}
+
+	.settings-search-results button,
+	.settings-search-results span {
+		padding: 9px 10px;
+		border: 0;
+		border-radius: 5px;
+		background: transparent;
+		color: var(--color-fg-default);
+		font: inherit;
+		font-size: 12px;
+		text-align: left;
+	}
+
+	.settings-search-results button:hover {
+		background: var(--color-neutral-muted);
+		cursor: pointer;
 	}
 
 	.close-btn {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 28px;
-		height: 28px;
+		width: 32px;
+		height: 32px;
 		border: none;
 		background: transparent;
 		cursor: pointer;
-		border-radius: 4px;
-		color: var(--color-fg-default);
+		border-radius: 6px;
+		color: var(--color-fg-muted);
+		transition: background-color 0.12s ease, color 0.12s ease;
 	}
 
 	.close-btn:hover {
 		background: var(--color-neutral-muted);
+		color: var(--color-fg-default);
 	}
 
 	.settings-content {
@@ -1522,45 +1602,84 @@
 	}
 
 	.settings-nav {
-		width: 140px;
-		padding: 12px 8px;
-		border-right: 1px solid var(--color-border-default);
+		box-sizing: border-box;
+		width: 224px;
+		padding: 16px 12px 12px;
+		border-right: 1px solid var(--workbench-border);
+		background: var(--workbench-surface-raised);
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: 4px;
+		flex-shrink: 0;
 	}
 
 	.nav-item {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 8px 12px;
-		line-height: 1;
+		gap: 10px;
+		min-height: 38px;
+		padding: 8px 10px;
+		line-height: 1.25;
 		border: none;
 		background: transparent;
 		cursor: pointer;
-		border-radius: 6px;
+		border: 1px solid transparent;
+		border-radius: var(--workbench-control-radius);
 		font-size: 13px;
-		color: var(--color-fg-default);
+		font-weight: 500;
+		color: var(--color-fg-muted);
 		text-align: left;
+		transition: background-color 0.12s ease, color 0.12s ease;
 	}
 
 	.nav-item svg {
 		width: 16px;
 		height: 16px;
+		flex-shrink: 0;
 	}
 
 	.nav-item:hover {
 		background: var(--color-neutral-muted);
+		color: var(--color-fg-default);
 	}
 
 	.nav-item.active {
-		background: var(--color-accent-fg);
-		color: var(--color-btn-fg);
+		background: var(--workbench-accent-soft);
+		border-color: color-mix(in srgb, var(--color-accent-fg) 18%, transparent);
+		box-shadow: inset 2px 0 0 var(--color-accent-fg);
+		color: color-mix(in srgb, var(--color-accent-fg) 72%, var(--color-fg-default));
+		font-weight: 600;
+	}
+
+	.nav-item:focus-visible {
+		outline: none;
+		box-shadow:
+			0 0 0 1px color-mix(in srgb, var(--color-accent-fg) 52%, transparent),
+			inset 3px 0 0 color-mix(in srgb, var(--color-accent-fg) 76%, transparent);
+	}
+
+	.github-btn:focus-visible,
+	.check-updates-btn:focus-visible,
+	.reset-text-btn:focus-visible,
+	.import-btn:focus-visible,
+	.spin-btn:focus-visible,
+	.toolbar-settings-summary:focus-visible,
+	.toolbar-drag-handle:focus-visible,
+	.toolbar-placement-controls button:focus-visible,
+	.toolbar-order-controls button:focus-visible {
+		outline: 2px solid var(--color-accent-fg);
+		outline-offset: 2px;
+	}
+
+	.close-btn:focus-visible {
+		outline: none;
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent-fg) 48%, transparent);
 	}
 
 	.nav-footer {
 		margin-top: auto;
+		padding-top: 10px;
+		border-top: 1px solid var(--color-border-muted);
 		display: flex;
 		flex-direction: column;
 	}
@@ -1569,23 +1688,25 @@
 	.check-updates-btn {
 		display: flex;
 		align-items: center;
-		padding: 8px 12px;
+		min-height: 34px;
+		padding: 7px 10px;
 		border: none;
 		background: transparent;
 		cursor: pointer;
-		border-radius: 6px;
-		opacity: 0.5;
-		font-size: 13px;
-		color: var(--color-fg-default);
+		border-radius: 7px;
+		opacity: 1;
+		font-size: 12px;
+		color: var(--color-fg-muted);
 		text-align: left;
-		transition: all 0.1s;
+		transition: background-color 0.12s ease, color 0.12s ease;
 		gap: 8px;
 		font-family: inherit;
 	}
 
 	.github-btn:hover,
 	.check-updates-btn:hover {
-		opacity: 1;
+		background: var(--color-neutral-muted);
+		color: var(--color-fg-default);
 	}
 
 	.check-updates-btn svg {
@@ -1616,28 +1737,71 @@
 
 	.settings-panel {
 		flex: 1;
-		padding: 20px;
+		padding: 26px 28px 40px;
 		overflow-y: auto;
+		overflow-x: hidden;
 		min-height: 0;
+		scrollbar-gutter: stable;
+		scrollbar-color: color-mix(in srgb, var(--color-fg-muted) 42%, transparent) transparent;
+		scrollbar-width: thin;
+	}
+
+	.settings-panel::-webkit-scrollbar {
+		width: 10px;
+	}
+
+	.settings-panel::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	.settings-panel::-webkit-scrollbar-thumb {
+		background: color-mix(in srgb, var(--color-fg-muted) 42%, transparent);
+		background-clip: padding-box;
+		border: 3px solid transparent;
+		border-radius: 999px;
+	}
+
+	.settings-panel::-webkit-scrollbar-thumb:hover {
+		background: color-mix(in srgb, var(--color-fg-muted) 68%, transparent);
+		background-clip: padding-box;
 	}
 
 	.settings-group h2 {
-		font-size: 16px;
+		font-size: 19px;
 		font-weight: 600;
-		margin: 0 0 16px 0;
+		letter-spacing: -0.015em;
+		margin: 0 0 22px 0;
 		color: var(--color-fg-default);
+	}
+
+	.theme-import-control {
+		display: flex;
+		width: min(370px, 58%);
+		gap: 8px;
+	}
+
+	.theme-import-control .text-input {
+		min-width: 0;
+		flex: 1;
+	}
+
+	.toggle.disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
 	}
 
 	.settings-group-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin-bottom: 16px;
+		margin-bottom: 20px;
+		min-height: 28px;
 	}
 
 	.settings-group-header h2 {
-		font-size: 16px;
+		font-size: 19px;
 		font-weight: 600;
+		letter-spacing: -0.015em;
 		margin: 0;
 		color: var(--color-fg-default);
 	}
@@ -1646,32 +1810,63 @@
 		background: transparent;
 		border: none;
 		color: var(--color-fg-muted);
-		font-size: 13px;
+		font-size: 12px;
 		cursor: pointer;
-		padding: 0;
-		transition: all 0.1s;
+		padding: 5px 7px;
+		border-radius: 5px;
+		transition: background-color 0.12s ease, color 0.12s ease;
 		text-decoration: none;
 	}
 
 	.reset-text-btn:hover:not(.disabled) {
 		color: var(--color-accent-fg);
+		background: color-mix(in srgb, var(--color-accent-fg) 10%, transparent);
 	}
 
 	.reset-text-btn.disabled {
-		opacity: 0.5;
+		opacity: 0.38;
 		cursor: default;
+	}
+
+	.settings-group > :is(.setting-item, .toolbar-settings) {
+		padding-inline: 14px;
+		border-right: 1px solid var(--workbench-border);
+		border-left: 1px solid var(--workbench-border);
+		background: var(--settings-row-bg);
+	}
+
+	.settings-group > :is(.setting-item, .toolbar-settings):nth-child(2) {
+		border-top: 1px solid var(--workbench-border);
+		border-radius: var(--workbench-panel-radius) var(--workbench-panel-radius) 0 0;
+	}
+
+	.settings-group > :is(.setting-item, .toolbar-settings):last-child {
+		border-bottom: 1px solid var(--workbench-border);
+		border-radius: 0 0 var(--workbench-panel-radius) var(--workbench-panel-radius);
+	}
+
+	.settings-group > :is(.setting-item, .toolbar-settings):only-child {
+		border-radius: var(--workbench-panel-radius);
 	}
 
 	.setting-item {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 10px 0;
-		border-bottom: 1px solid var(--color-border-muted);
+		gap: 24px;
+		min-height: 50px;
+		padding: 8px 0;
+		border-bottom: 1px solid var(--workbench-border);
+		transition: background-color 0.12s ease;
+	}
+
+	.settings-group > .setting-item:hover {
+		background: var(--workbench-surface-hover);
 	}
 
 	.setting-item label:first-child {
-		font-size: 13px;
+		font-size: 13.5px;
+		font-weight: 500;
 		color: var(--color-fg-default);
 		display: flex;
 		align-items: center;
@@ -1679,15 +1874,17 @@
 	}
 
 	.toolbar-settings {
+		position: relative;
 		padding: 0;
-		border-bottom: 1px solid var(--color-border-muted);
+		border-bottom: 1px solid var(--workbench-border);
 	}
 
 	.toolbar-settings-summary {
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		padding: 12px 0;
+		min-height: 50px;
+		padding: 12px 118px 12px 0;
 		list-style: none;
 		color: var(--color-fg-default);
 		font-size: 13px;
@@ -1718,21 +1915,26 @@
 	}
 
 	.toolbar-settings-body {
-		padding-bottom: 12px;
+		padding: 0 0 12px;
 	}
 
-	.toolbar-settings-header {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 12px;
-		margin-bottom: 8px;
+	.toolbar-settings-reset {
+		position: absolute;
+		top: 8px;
+		right: 0;
+	}
+
+	.toolbar-settings:not([open]) > .toolbar-settings-reset {
+		display: none;
 	}
 
 	.toolbar-settings-list {
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
+		gap: 0;
+		border: 1px solid var(--workbench-border);
+		border-radius: 8px;
+		overflow: hidden;
 	}
 
 	.toolbar-tool-row {
@@ -1740,11 +1942,19 @@
 		grid-template-columns: 18px minmax(0, 1fr) auto;
 		align-items: center;
 		gap: 8px;
-		min-height: 34px;
-		padding: 4px 6px;
-		border: 1px solid var(--color-border-muted);
-		border-radius: 6px;
-		background: var(--color-canvas-subtle);
+		min-height: 42px;
+		padding: 5px 8px;
+		border: 0;
+		border-bottom: 1px solid var(--workbench-border);
+		background: color-mix(in srgb, var(--settings-control-bg) 78%, transparent);
+	}
+
+	.toolbar-tool-row:last-child {
+		border-bottom: 0;
+	}
+
+	.toolbar-tool-row:hover {
+		background: var(--workbench-surface-hover);
 	}
 
 	.titlebar-toolbar-row {
@@ -1810,10 +2020,10 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		border: 1px solid var(--color-border-muted);
-		border-radius: 4px;
+		border: 1px solid var(--workbench-border);
+		border-radius: 5px;
 		color: var(--color-fg-muted);
-		background: var(--color-canvas-default);
+		background: var(--settings-control-bg);
 		font-size: 12px;
 		font-weight: 600;
 	}
@@ -1828,9 +2038,9 @@
 		display: inline-flex;
 		align-items: center;
 		padding: 2px;
-		border: 1px solid var(--color-border-default);
-		border-radius: 5px;
-		background: var(--color-canvas-default);
+		border: 1px solid var(--workbench-border);
+		border-radius: 6px;
+		background: var(--settings-control-bg);
 	}
 
 	.toolbar-placement-controls button {
@@ -1857,9 +2067,9 @@
 	.toolbar-order-controls button {
 		height: 24px;
 		padding: 0 8px;
-		border: 1px solid var(--color-border-default);
-		border-radius: 4px;
-		background: var(--color-canvas-default);
+		border: 1px solid var(--workbench-border);
+		border-radius: 5px;
+		background: var(--settings-control-bg);
 		color: var(--color-fg-default);
 		font-size: 11px;
 		cursor: pointer;
@@ -1888,13 +2098,15 @@
 	}
 
 	.setting-item select {
-		padding: 6px 32px 6px 12px;
-		border: 1px solid var(--color-border-default);
-		border-radius: 6px;
-		background-color: var(--color-canvas-default);
+		box-sizing: border-box;
+		height: 34px;
+		padding: 6px 32px 6px 11px;
+		border: 1px solid var(--workbench-border);
+		border-radius: var(--workbench-control-radius);
+		background-color: var(--settings-control-bg);
 		color: var(--color-fg-default);
 		font-size: 13px;
-		min-width: 160px;
+		min-width: 190px;
 		cursor: pointer;
 		appearance: none;
 		-webkit-appearance: none;
@@ -1906,9 +2118,135 @@
 		color: var(--color-fg-default);
 	}
 
-	.setting-item select:focus {
+	.setting-item select:disabled {
+		opacity: 0.48;
+		cursor: not-allowed;
+	}
+
+	.range-control {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-width: 190px;
+	}
+
+	.range-control.disabled {
+		opacity: 0.48;
+	}
+
+	.range-control input[type='range'] {
+		width: 142px;
+		margin: 0;
+		height: 18px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: pointer;
+		appearance: none;
+		-webkit-appearance: none;
+		color-scheme: normal;
+	}
+
+	.range-control input[type='range']::-webkit-slider-runnable-track {
+		height: 4px;
+		border: 0;
+		border-radius: 999px;
+		background: linear-gradient(
+			to right,
+			var(--color-accent-fg) 0 var(--range-progress, 0%),
+			color-mix(in srgb, var(--color-fg-muted) 34%, transparent) var(--range-progress, 0%) 100%
+		);
+	}
+
+	.range-control input[type='range']::-webkit-slider-thumb {
+		width: 16px;
+		height: 16px;
+		margin-top: -6px;
+		border: 2px solid var(--color-accent-fg);
+		border-radius: 50%;
+		background: var(--color-canvas-overlay);
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+		appearance: none;
+		-webkit-appearance: none;
+	}
+
+	.range-control input[type='range']::-moz-range-track {
+		height: 4px;
+		border: 0;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--color-fg-muted) 34%, transparent);
+	}
+
+	.range-control input[type='range']::-moz-range-progress {
+		height: 4px;
+		border-radius: 999px;
+		background: var(--color-accent-fg);
+	}
+
+	.range-control input[type='range']::-moz-range-thumb {
+		width: 12px;
+		height: 12px;
+		border: 2px solid var(--color-accent-fg);
+		border-radius: 50%;
+		background: var(--color-canvas-overlay);
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+	}
+
+	.range-control input[type='range']:focus-visible {
 		outline: none;
+	}
+
+	.range-control input[type='range']:focus-visible::-webkit-slider-thumb {
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent-fg) 28%, transparent);
+	}
+
+	.range-control input[type='range']:disabled {
+		cursor: not-allowed;
+	}
+
+	.range-control output {
+		min-width: 38px;
+		color: var(--color-fg-muted);
+		font-size: 12px;
+		font-variant-numeric: tabular-nums;
+		text-align: right;
+	}
+
+	.setting-item select:focus-visible {
+		outline: 2px solid color-mix(in srgb, var(--color-accent-fg) 45%, transparent);
+		outline-offset: 1px;
 		border-color: var(--color-accent-fg);
+	}
+
+	.setting-item.unavailable {
+		opacity: 0.52;
+	}
+
+	.font-preview {
+		display: grid;
+		gap: 10px;
+		min-width: 0;
+		padding: 14px;
+		border: 1px solid var(--workbench-border);
+		border-radius: var(--workbench-panel-radius) var(--workbench-panel-radius) 0 0;
+		background: var(--settings-row-bg);
+		overflow: hidden;
+	}
+
+	.font-preview-text,
+	.font-preview code {
+		display: block;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.font-preview code {
+		padding: 8px 10px;
+		border-radius: 6px;
+		background: color-mix(in srgb, var(--color-canvas-default) 74%, transparent);
+		color: var(--color-fg-default);
 	}
 
 	.slider-container {
@@ -1920,15 +2258,16 @@
 	.number-input-wrapper {
 		display: flex;
 		align-items: stretch;
-		background: var(--color-canvas-default);
-		border: 1px solid var(--color-border-default);
-		border-radius: 4px;
+		background: var(--settings-control-bg);
+		border: 1px solid var(--workbench-border);
+		border-radius: var(--workbench-control-radius);
 		overflow: hidden;
 		transition: border-color 0.1s;
 	}
 
 	.number-input-wrapper:focus-within {
 		border-color: var(--color-accent-fg);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent-fg) 28%, transparent);
 	}
 
 	.number-input {
@@ -1953,7 +2292,7 @@
 
 	.number-input-wrapper.horizontal {
 		align-items: center;
-		height: 28px;
+		height: 34px;
 	}
 
 	.number-input-wrapper.horizontal .number-input {
@@ -1988,29 +2327,38 @@
 	}
 
 	.text-input {
-		background: var(--color-canvas-default);
-		border: 1px solid var(--color-border-default);
-		border-radius: 6px;
+		box-sizing: border-box;
+		background: var(--settings-control-bg);
+		border: 1px solid var(--workbench-border);
+		border-radius: var(--workbench-control-radius);
 		color: var(--color-fg-default);
+		height: 34px;
 		padding: 6px 10px;
 		font-size: 13px;
 		outline: none;
 	}
 
-	.text-input:focus {
+	.setting-item .text-input {
+		min-width: 0;
+	}
+
+	.text-input:focus-visible {
 		border-color: var(--color-accent-fg);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent-fg) 28%, transparent);
 	}
 
 	.import-btn {
-		background: var(--color-canvas-subtle);
-		border: 1px solid var(--color-border-default);
-		border-radius: 6px;
+		box-sizing: border-box;
+		background: var(--settings-control-bg);
+		border: 1px solid var(--workbench-border);
+		border-radius: var(--workbench-control-radius);
 		color: var(--color-fg-default);
+		min-height: 34px;
 		padding: 6px 12px;
 		font-size: 13px;
 		cursor: pointer;
 		outline: none;
-		transition: all 0.1s;
+		transition: background-color 0.12s ease, border-color 0.12s ease;
 	}
 
 	.import-btn:hover:not(:disabled) {
@@ -2038,15 +2386,16 @@
 	.toggle {
 		position: relative;
 		display: inline-block;
-		width: 40px;
-		height: 20px;
+		width: 38px;
+		height: 22px;
 		cursor: pointer;
 	}
 
 	.toggle input {
+		position: absolute;
 		opacity: 0;
-		width: 0;
-		height: 0;
+		width: 1px;
+		height: 1px;
 	}
 
 	.toggle-slider {
@@ -2061,17 +2410,17 @@
 		transition:
 			background-color 0.2s,
 			border-color 0.2s;
-		border-radius: 20px;
+		border-radius: 999px;
 	}
 
 	.toggle-slider:before {
 		position: absolute;
 		content: '';
-		height: 12px;
-		width: 12px;
+		height: 14px;
+		width: 14px;
 		left: 3px;
 		bottom: 3px;
-		background-color: #abb2bf; 
+		background-color: var(--color-fg-muted);
 		transition:
 			transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
 			height 0.2s,
@@ -2088,80 +2437,117 @@
 	}
 
 	.toggle input:checked + .toggle-slider:before {
-		transform: translateX(20px);
+		transform: translateX(16px);
 		background-color: #fff;
 	}
-	.custom-dropdown-wrapper {
-		position: relative;
-		min-width: 140px;
+
+	.toggle input:focus-visible + .toggle-slider {
+		outline: 2px solid var(--color-accent-fg);
+		outline-offset: 2px;
 	}
 
-	.custom-dropdown-btn {
-		width: 100%;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 4px 8px;
-		background-color: var(--color-canvas-default);
-		border: 1px solid var(--color-border-default);
-		border-radius: 4px;
-		color: var(--color-fg-default);
-		font-size: 13px;
-		font-family: inherit;
-		cursor: pointer;
-		outline: none;
-	}
-	.custom-dropdown-btn:hover {
-		background-color: var(--color-canvas-subtle);
+	@media (max-width: 680px) {
+		.settings-modal {
+			min-width: min(360px, 94vw);
+			width: 94vw;
+			max-width: 94vw;
+		}
+
+		.settings-nav {
+			width: 62px;
+			padding-inline: 8px;
+		}
+
+		.nav-item {
+			justify-content: center;
+			padding-inline: 8px;
+		}
+
+		.nav-label,
+		.nav-footer button > span {
+			display: none;
+		}
+
+		.github-btn,
+		.check-updates-btn {
+			justify-content: center;
+		}
+
+		.settings-panel {
+			padding: 24px 20px 32px;
+		}
+
+		.setting-item {
+			gap: 14px;
+		}
+
+		.setting-item select {
+			min-width: 150px;
+		}
 	}
 
-	.custom-dropdown-menu {
-		position: absolute;
-		top: 100%;
-		right: 0;
-		margin-top: 4px;
-		background-color: var(--color-canvas-default);
-		border: 1px solid var(--color-border-default);
-		border-radius: 6px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-		padding: 4px;
-		display: flex;
-		flex-direction: column;
-		min-width: 140px;
-		z-index: 10005;
-		gap: 1px;
+	@media (max-width: 460px) {
+		.settings-group-header {
+			align-items: flex-start;
+			flex-direction: column;
+			gap: 2px;
+			margin-bottom: 16px;
+		}
+
+		.reset-text-btn {
+			padding-left: 0;
+		}
+
+		.range-control {
+			gap: 8px;
+			min-width: 150px;
+		}
+
+		.range-control input[type='range'] {
+			width: 108px;
+		}
+
+		.range-control output {
+			min-width: 32px;
+		}
 	}
 
-	.custom-dropdown-option {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		background: transparent;
-		border: none;
-		text-align: left;
-		padding: 6px 12px;
-		font-size: 13px;
-		color: var(--color-fg-default);
-		cursor: pointer;
-		border-radius: 4px;
-		font-family: inherit;
-		width: 100%;
+	@media (max-width: 380px) {
+		.surface-preference {
+			align-items: flex-start;
+			flex-direction: column;
+			gap: 8px;
+		}
+
+		.surface-preference .select-wrapper,
+		.surface-preference .range-control {
+			width: 100%;
+			min-width: 0;
+		}
+
+		.surface-preference select {
+			width: 100%;
+			min-width: 0;
+		}
+
+		.surface-preference .range-control input[type='range'] {
+			flex: 1;
+			width: auto;
+		}
 	}
 
-	.custom-dropdown-option:hover {
-		background-color: var(--color-canvas-subtle);
+	@media (prefers-reduced-motion: reduce) {
+		.settings-modal *,
+		.settings-modal *::before,
+		.settings-modal *::after {
+			transition-duration: 0.01ms !important;
+		}
 	}
 
-	.custom-dropdown-option.selected {
-		background-color: var(--color-canvas-subtle);
-		font-weight: 500;
-	}
-
-	.color-circle {
-		width: 12px;
-		height: 12px;
-		border-radius: 50%;
-		flex-shrink: 0;
-		border: 1px solid rgba(128, 128, 128, 0.4);
+	@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+		.settings-modal.translucent,
+		.settings-modal.translucent .settings-nav {
+			background: var(--color-canvas-default);
+		}
 	}
 </style>

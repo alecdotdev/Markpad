@@ -3,12 +3,15 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { getSupportedLanguages, translations, type LanguageCode } from '../src/lib/utils/i18n.js';
+import { EDITOR_TOOLBAR_TOOLS } from '../src/lib/utils/editorToolbar.js';
+import { settingsRedesignTranslationKeys } from '../src/lib/utils/settingsRedesignTranslations.js';
 
 const markdownViewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 const settingsComponent = readFileSync('src/lib/components/Settings.svelte', 'utf8');
 const settingsStore = readFileSync('src/lib/stores/settings.svelte.ts', 'utf8');
 const titleBar = readFileSync('src/lib/components/TitleBar.svelte', 'utf8');
 const toastComponent = readFileSync('src/lib/components/Toast.svelte', 'utf8');
+const globalStyles = readFileSync('src/styles.css', 'utf8');
 
 function getDirectTranslation(lang: LanguageCode, key: string): string | undefined {
 	let current: unknown = translations[lang];
@@ -93,6 +96,45 @@ test('toolbar settings use collapsed accordions for application and editor toolb
 	}
 	assert.match(settingsComponent, /\.toolbar-settings\[open\]\s+\.toolbar-settings-chevron/);
 	assert.match(settingsComponent, /\.toolbar-settings-summary::-webkit-details-marker/);
+	assert.doesNotMatch(settingsComponent, /class="toolbar-settings-header"/);
+	assert.match(settingsComponent, /\.toolbar-settings-reset\s*\{[\s\S]*?position:\s*absolute/);
+});
+
+test('appearance uses the shared settings group and native controls', () => {
+	const appearanceBlock = settingsComponent.match(
+		/{:else if activeCategory === 'appearance'}([\s\S]*?){:else if activeCategory === 'toolbars'}/,
+	);
+	assert.ok(appearanceBlock);
+	assert.match(appearanceBlock[1], /<div class="settings-group">/);
+	assert.match(appearanceBlock[1], /<div class="settings-group-header">/);
+	assert.match(appearanceBlock[1], /<select id="appearance-theme"/);
+	assert.match(appearanceBlock[1], /<select id="appearance-highlight-color"/);
+	assert.doesNotMatch(appearanceBlock[1], /settings-section|appearance-group|theme-segmented|custom-dropdown/);
+	assert.doesNotMatch(settingsComponent, /\.settings-section|\.appearance-group|\.theme-segmented|\.custom-dropdown/);
+});
+
+test('settings and menus share the Markpad workbench visual system', () => {
+	for (const token of [
+		'--workbench-surface-base',
+		'--workbench-surface-raised',
+		'--workbench-border',
+		'--workbench-panel-radius',
+		'--workbench-shadow',
+	]) {
+		assert.match(globalStyles, new RegExp(token));
+		assert.match(`${settingsComponent}\n${titleBar}`, new RegExp(token));
+	}
+	assert.match(settingsComponent, /\.toolbar-settings-list\s*\{[\s\S]*?gap:\s*0;[\s\S]*?overflow:\s*hidden;/);
+	assert.match(settingsComponent, /\.toolbar-tool-row:last-child\s*\{[\s\S]*?border-bottom:\s*0;/);
+});
+
+test('titlebar overflow menu preserves translated labels and aligns shortcuts', () => {
+	assert.match(titleBar, /\.title-actions\.show-dropdown\s*\{[\s\S]*?width:\s*min\(278px, calc\(100vw - 16px\)\)/);
+	assert.match(titleBar, /grid-template-columns:\s*16px minmax\(0, 1fr\) max-content/);
+	const overflowLabelRule = titleBar.match(/\.title-actions\.show-dropdown \.action-label\s*\{([^}]*)\}/);
+	assert.ok(overflowLabelRule);
+	assert.match(overflowLabelRule[1], /text-overflow:\s*clip/);
+	assert.doesNotMatch(overflowLabelRule[1], /text-overflow:\s*ellipsis/);
 });
 
 test('interactive button labels are directly translated for every supported language', () => {
@@ -121,6 +163,27 @@ test('interactive button labels are directly translated for every supported lang
 	assert.doesNotMatch(settingsComponent, />\s*(?:Up|Down)\s*</);
 	assert.doesNotMatch(markdownViewer, /aria-label="Resize table of contents"/);
 	assert.doesNotMatch(toastComponent, /aria-label="Close"/);
+});
+
+test('every settings translation is available directly in every supported language', () => {
+	const staticKeys = Array.from(
+		settingsComponent.matchAll(/(?:^|[^\w.])t\('((?:settings|menu|tooltip|common)\.[^']+)'/gm),
+		(match) => match[1]
+	);
+	const settingsKeys = new Set([
+		...staticKeys,
+		...settingsRedesignTranslationKeys,
+		...EDITOR_TOOLBAR_TOOLS.map((tool) => tool.nameKey),
+		...['default', 'yellow', 'orange', 'red', 'pink', 'purple', 'blue', 'cyan', 'green'].map((color) => `colors.${color}`),
+		'tooltip.showTableOfContents'
+	]);
+	const missing = getSupportedLanguages().flatMap(({ code }) =>
+		Array.from(settingsKeys)
+			.filter((key) => getDirectTranslation(code, key) === undefined)
+			.map((key) => `${code}:${key}`)
+	);
+
+	assert.deepEqual(missing, []);
 });
 
 test('top toolbar overflow no longer includes Open file location action', () => {

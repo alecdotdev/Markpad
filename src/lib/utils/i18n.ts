@@ -1,3 +1,8 @@
+import {
+	settingsRedesignTranslationKeys,
+	settingsRedesignTranslationValues
+} from './settingsRedesignTranslations';
+
 export type LanguageCode =
 	| 'en' // English
 	| 'ja' // Japanese
@@ -73,14 +78,26 @@ export const translations: Record<LanguageCode, Translation> = {
             editorSettings: 'Editor Settings',
             previewSettings: 'Preview Settings',
             appearanceSettings: 'Appearance Settings',
+			appearanceDescription: 'Personalize language, theme, and app surfaces',
+			searchPlaceholder: 'Search settings...',
+			noSearchResults: 'No settings found',
+			resetSection: 'Reset section',
+			interfaceSection: 'Interface',
+			markpadWindowSection: 'Markpad window',
+			behaviorSection: 'Behavior',
             toolbarsSettings: 'Toolbar Settings',
             fileSettings: 'File Settings',
             autoSave: 'Auto-save edits',
             confirmBeforeSave: 'Ask for confirmation before saving',
             resetEditorSettings: 'Reset editor settings',
-            resetFontSettings: 'Reset font settings',
-            font: 'Font',
-            fontSize: 'Font Size',
+			resetFontSettings: 'Reset font settings',
+			font: 'Font',
+			previewTextFont: 'Preview text font',
+			previewCodeFont: 'Code font',
+			fontPreview: 'Live font preview',
+			fontPreviewText: 'Markpad text preview',
+			editorFontPreview: 'Live editor font preview',
+			fontSize: 'Font Size',
             wrapColumn: 'Wrap Column',
             wordWrap: 'Word Wrap',
             lineNumbers: 'Line Numbers',
@@ -98,6 +115,28 @@ export const translations: Record<LanguageCode, Translation> = {
             showTableOfContents: 'Show Table of Contents',
             zenMode: 'Zen Mode',
             theme: 'Theme',
+            settingsSurface: 'Settings Surface',
+			windowSurface: 'Surface',
+			windowSurfaceDescription: 'Visual style for the entire app',
+			surfaceSolid: 'Solid',
+			surfaceTranslucent: 'Translucent',
+            surfaceOpacity: 'Surface Opacity',
+			surfaceOpacityDescription: 'Transparency across settings and editor',
+			surfaceBlur: 'Background Blur',
+			surfaceBlurDescription: 'Soften content behind the Markpad window',
+			surfaceControlRequiresTranslucent: 'Available with the Translucent surface',
+			surfaceBlurRequiresTransparency: 'Available when surface opacity is below 100%',
+			surfaceBlurUnavailableLinux: 'Unavailable on Linux because Tauri does not support native window effects',
+            blurOff: 'Off',
+            blurSubtle: 'Subtle',
+            blurStrong: 'Strong',
+            backdropDimming: 'Backdrop Dimming',
+			backdropDimmingDescription: 'Reduce distractions behind the window',
+			languageDescription: 'Application language',
+			themeDescription: 'Interface appearance',
+			themeLight: 'Light',
+			themeSystem: 'System',
+			themeDark: 'Dark',
             importVSCodeTheme: 'Import VS Code Theme',
             import: 'Import',
             importing: 'Importing...',
@@ -115,7 +154,21 @@ export const translations: Record<LanguageCode, Translation> = {
             toolbarPlacement: 'Toolbar placement',
             toolbarOnBar: 'Bar',
             toolbarInMenu: 'Menu',
-            resetToolbar: 'Reset toolbar',
+			resetToolbar: 'Reset toolbar',
+			toolbarToolBold: 'Bold',
+			toolbarToolItalic: 'Italic',
+			toolbarToolUnderline: 'Underline',
+			toolbarToolInlineCode: 'Inline code',
+			toolbarToolCodeBlock: 'Code block',
+			toolbarToolQuote: 'Quote',
+			toolbarToolHeading1: 'Heading 1',
+			toolbarToolHeading2: 'Heading 2',
+			toolbarToolHeading3: 'Heading 3',
+			toolbarToolBulletList: 'Bullet list',
+			toolbarToolNumberedList: 'Numbered list',
+			toolbarToolChecklist: 'Checklist',
+			toolbarToolLink: 'Link',
+			toolbarToolTable: 'Table',
             move: 'Move',
             moveUp: 'Move up',
             moveDown: 'Move down',
@@ -2570,10 +2623,22 @@ export const translations: Record<LanguageCode, Translation> = {
             editorSettings: 'Impostazioni Editor',
             previewSettings: 'Impostazioni Anteprima',
             appearanceSettings: 'Impostazioni Aspetto',
+			appearanceDescription: 'Personalizza lingua, tema e superfici',
+			searchPlaceholder: 'Cerca impostazioni...',
+			noSearchResults: 'Nessuna impostazione trovata',
+			resetSection: 'Ripristina sezione',
+			interfaceSection: 'Interfaccia',
+			markpadWindowSection: 'Finestra Markpad',
+			behaviorSection: 'Comportamento',
             resetEditorSettings: 'Reimposta impostazioni editor',
-            resetFontSettings: 'Reimposta impostazioni font',
-            font: 'Font',
-            fontSize: 'Dimensione font',
+			resetFontSettings: 'Reimposta impostazioni font',
+			font: 'Font',
+			previewTextFont: 'Font testo anteprima',
+			previewCodeFont: 'Font codice',
+			fontPreview: 'Anteprima font dal vivo',
+			fontPreviewText: 'Anteprima testo Markpad',
+			editorFontPreview: 'Anteprima dal vivo del font editor',
+			fontSize: 'Dimensione font',
             wrapColumn: 'Colonna a capo',
             wordWrap: 'A capo automatico',
             lineNumbers: 'Numeri riga',
@@ -2591,6 +2656,28 @@ export const translations: Record<LanguageCode, Translation> = {
             showTableOfContents: 'Mostra indice',
             zenMode: 'Modalità Zen',
             theme: 'Tema',
+            settingsSurface: 'Superficie impostazioni',
+			windowSurface: 'Superficie',
+			windowSurfaceDescription: 'Stile visivo per tutta l’app',
+			surfaceSolid: 'Solida',
+			surfaceTranslucent: 'Traslucida',
+            surfaceOpacity: 'Opacità superficie',
+			surfaceOpacityDescription: 'Trasparenza di impostazioni ed editor',
+			surfaceBlur: 'Sfocatura sfondo',
+			surfaceBlurDescription: 'Sfoca ciò che si trova dietro la finestra Markpad',
+			surfaceControlRequiresTranslucent: 'Disponibile con la superficie Traslucida',
+			surfaceBlurRequiresTransparency: 'Disponibile quando l’opacità della superficie è inferiore al 100%',
+			surfaceBlurUnavailableLinux: 'Non disponibile su Linux: Tauri non supporta gli effetti finestra nativi',
+            blurOff: 'Disattivata',
+            blurSubtle: 'Leggera',
+            blurStrong: 'Intensa',
+            backdropDimming: 'Oscuramento sfondo',
+			backdropDimmingDescription: 'Riduce le distrazioni dietro la finestra',
+			languageDescription: 'Lingua dell’applicazione',
+			themeDescription: 'Aspetto dell’interfaccia',
+			themeLight: 'Chiaro',
+			themeSystem: 'Sistema',
+			themeDark: 'Scuro',
             importVSCodeTheme: 'Importa tema VS Code',
             import: 'Importa',
             importing: 'Importazione...',
@@ -2599,9 +2686,28 @@ export const translations: Record<LanguageCode, Translation> = {
             vsCodeThemes: 'Temi VS Code',
             language: 'Lingua',
             highlightColor: 'Colore evidenziazione',
-            imageDirectory: 'Directory immagini',
-            scaleMacOSScreenshots: 'Riduci screenshot macOS',
-            reduceSizeBy50: 'Riduci del 50%',
+			imageDirectory: 'Directory immagini',
+			scaleMacOSScreenshots: 'Riduci screenshot macOS',
+			reduceSizeBy50: 'Riduci del 50%',
+			toolbar: 'Barra degli strumenti',
+			toolbars: 'Barre strumenti',
+			toolbarsSettings: 'Impostazioni barre degli strumenti',
+			editorToolbar: 'Barra dell’editor',
+			applicationToolbar: 'Barra dell’applicazione',
+			toolbarToolBold: 'Grassetto',
+			toolbarToolItalic: 'Corsivo',
+			toolbarToolUnderline: 'Sottolineato',
+			toolbarToolInlineCode: 'Codice in linea',
+			toolbarToolCodeBlock: 'Blocco di codice',
+			toolbarToolQuote: 'Citazione',
+			toolbarToolHeading1: 'Titolo 1',
+			toolbarToolHeading2: 'Titolo 2',
+			toolbarToolHeading3: 'Titolo 3',
+			toolbarToolBulletList: 'Elenco puntato',
+			toolbarToolNumberedList: 'Elenco numerato',
+			toolbarToolChecklist: 'Elenco attività',
+			toolbarToolLink: 'Collegamento',
+			toolbarToolTable: 'Tabella',
             default: 'Predefinito',
             cancel: 'Annulla',
             save: 'Salva',
@@ -2610,27 +2716,29 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Chiaro predefinito',
             themeDefaultDark: 'Scuro predefinito',
             themeFollowSystem: 'Segui sistema',
-            colors: {
-                default: 'Predefinito',
-                yellow: 'Giallo',
-                orange: 'Arancione',
-                red: 'Rosso',
-                pink: 'Rosa',
-                purple: 'Viola',
-                blue: 'Blu',
-                cyan: 'Ciano',
-                green: 'Verde'
-            },
-            files: 'File',
-            fileSettings: 'Impostazioni file',
-            autoSave: 'Salvataggio automatico delle modifiche',
-            confirmBeforeSave: 'Chiedi conferma prima di salvare'
-        },
-        menu: {
-            file: 'File',
-            edit: 'Modifica',
-            view: 'Visualizza',
-            help: 'Aiuto',
+			files: 'File',
+			fileSettings: 'Impostazioni file',
+			autoSave: 'Salvataggio automatico delle modifiche',
+			confirmBeforeSave: 'Chiedi conferma prima di salvare'
+		},
+		colors: {
+			default: 'Predefinito',
+			yellow: 'Giallo',
+			orange: 'Arancione',
+			red: 'Rosso',
+			pink: 'Rosa',
+			purple: 'Viola',
+			blue: 'Blu',
+			cyan: 'Ciano',
+			green: 'Verde'
+		},
+		menu: {
+			file: 'File',
+			edit: 'Modifica',
+			view: 'Visualizza',
+			help: 'Aiuto',
+			back: 'Indietro',
+			forward: 'Avanti',
             newFile: 'Nuovo file',
             openFile: 'Apri file',
             save: 'Salva',
@@ -2651,9 +2759,10 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Zoom avanti',
             zoomOut: 'Zoom indietro',
             resetZoom: 'Reimposta zoom',
-            settings: 'Impostazioni',
-            about: 'Informazioni',
-            github: 'GitHub',
+			settings: 'Impostazioni',
+			about: 'Informazioni',
+			checkForUpdates: 'Controlla aggiornamenti…',
+			github: 'GitHub',
             documentation: 'Documentazione',
             home: 'Home',
             exportHtml: 'Esporta come HTML',
@@ -2738,10 +2847,12 @@ export const translations: Record<LanguageCode, Translation> = {
             defaultLight: 'Chiaro predefinito',
             defaultDark: 'Scuro predefinito'
         },
-        tooltip: {
-            menu: 'Menu',
-            more: 'Altro',
-            moreActions: 'Altre azioni',
+		tooltip: {
+			menu: 'Menu',
+			more: 'Altro',
+			moreActions: 'Altre azioni',
+			reloadFromDisk: 'Ricarica dal disco',
+			showTableOfContents: 'Mostra indice',
             settings: 'Impostazioni',
             resetZoom: 'Reimposta zoom',
             reset: 'Reimposta',
@@ -6540,6 +6651,64 @@ for (const [language, sections] of Object.entries(interactiveLabelTranslations) 
             translations[language][section] = { ...values };
         }
     }
+}
+
+function setTranslationValue(language: LanguageCode, key: string, value: string) {
+	const parts = key.split('.');
+	const property = parts.pop();
+	if (!property) return;
+
+	let section: Translation = translations[language];
+	for (const part of parts) {
+		const current = section[part];
+		if (!current || typeof current === 'string') section[part] = {};
+		section = section[part] as Translation;
+	}
+	section[property] = value;
+}
+
+for (const [language, values] of Object.entries(settingsRedesignTranslationValues) as [LanguageCode, readonly string[]][]) {
+	if (values.length !== settingsRedesignTranslationKeys.length) {
+		throw new Error(
+			`Settings redesign translations for ${language} contain ${values.length} values; expected ${settingsRedesignTranslationKeys.length}`
+		);
+	}
+
+	settingsRedesignTranslationKeys.forEach((key, index) => {
+		setTranslationValue(language, key, values[index]);
+	});
+}
+
+const redesignTranslationAliases = [
+	['settings.toolbarToolBold', 'menu.bold'],
+	['settings.toolbarToolItalic', 'menu.italic'],
+	['settings.toolbarToolUnderline', 'menu.underline'],
+	['settings.toolbarToolTable', 'menu.insertTable'],
+	['tooltip.showTableOfContents', 'settings.showTableOfContents']
+] as const;
+
+for (const { code: language } of getSupportedLanguages()) {
+	for (const [targetKey, sourceKey] of redesignTranslationAliases) {
+		const sourceParts = sourceKey.split('.');
+		let value: string | Translation | undefined = translations[language];
+		for (const part of sourceParts) {
+			value = value && typeof value !== 'string' ? value[part] : undefined;
+		}
+		if (typeof value === 'string') setTranslationValue(language, targetKey, value);
+	}
+}
+
+const highlightColorTranslationKeys = ['default', 'yellow', 'orange', 'red', 'pink', 'purple', 'blue', 'cyan', 'green'] as const;
+
+for (const { code: language } of getSupportedLanguages()) {
+	const settingsSection = translations[language].settings;
+	const nestedColors = settingsSection && typeof settingsSection !== 'string' ? settingsSection.colors : undefined;
+	if (!nestedColors || typeof nestedColors === 'string') continue;
+
+	for (const color of highlightColorTranslationKeys) {
+		const value = nestedColors[color];
+		if (typeof value === 'string') setTranslationValue(language, `colors.${color}`, value);
+	}
 }
 
 export function t(key: string, lang: LanguageCode = 'en'): string {

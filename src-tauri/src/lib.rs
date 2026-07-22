@@ -997,6 +997,15 @@ pub fn run() {
             .shadow(false)
             .center();
 
+            // Keep the main host window alpha-capable on every supported platform.
+            // Solid mode is painted by CSS, so changing surface mode does not require
+            // recreating the native window. The installer remains fully opaque.
+            if !is_installer_mode {
+                window_builder = window_builder
+                    .transparent(true)
+                    .background_color(tauri::window::Color(0, 0, 0, 0));
+            }
+
             #[cfg(target_os = "macos")]
             {
                 window_builder = window_builder
@@ -1124,22 +1133,23 @@ pub fn run() {
 
             let window = app.get_webview_window(label).unwrap();
 
-            let bg_color = match theme_pref.as_str() {
-                "dark" => Some(tauri::window::Color(24, 24, 24, 255)),
-                "light" => Some(tauri::window::Color(253, 253, 253, 255)),
-                _ => {
-                    if let Ok(t) = window.theme() {
-                        match t {
-                            tauri::Theme::Dark => Some(tauri::window::Color(24, 24, 24, 255)),
-                            _ => Some(tauri::window::Color(253, 253, 253, 255)),
+            if is_installer_mode {
+                let bg_color = match theme_pref.as_str() {
+                    "dark" => Some(tauri::window::Color(24, 24, 24, 255)),
+                    "light" => Some(tauri::window::Color(253, 253, 253, 255)),
+                    _ => {
+                        if let Ok(t) = window.theme() {
+                            match t {
+                                tauri::Theme::Dark => Some(tauri::window::Color(24, 24, 24, 255)),
+                                _ => Some(tauri::window::Color(253, 253, 253, 255)),
+                            }
+                        } else {
+                            Some(tauri::window::Color(253, 253, 253, 255))
                         }
-                    } else {
-                        Some(tauri::window::Color(253, 253, 253, 255))
                     }
-                }
-            };
-
-            let _ = window.set_background_color(bg_color);
+                };
+                let _ = window.set_background_color(bg_color);
+            }
 
             let _ = _window.set_shadow(true);
 

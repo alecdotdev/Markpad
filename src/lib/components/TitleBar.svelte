@@ -1003,13 +1003,13 @@
 		top: 100%;
 		right: 0;
 		margin-top: 4px;
-		background-color: var(--color-canvas-default);
-		border: 1px solid var(--color-border-default);
-		border-radius: 6px;
-		padding: 4px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+		background-color: var(--workbench-surface-base);
+		border: 1px solid var(--workbench-border-strong);
+		border-radius: 10px;
+		padding: 6px;
+		box-shadow: var(--workbench-shadow);
 		z-index: 10006;
-		width: 200px;
+		width: min(278px, calc(100vw - 16px));
 	}
 
 	.theme-dropdown-container {
@@ -1018,15 +1018,18 @@
 	}
 
 	.title-actions.show-dropdown .title-action-btn {
+		display: grid;
+		grid-template-columns: 16px minmax(0, 1fr) max-content;
 		width: 100%;
-		justify-content: flex-start;
 		align-items: center;
-		padding: 6px 12px;
+		padding: 7px 9px;
+		min-height: 34px;
 		height: auto;
 		font-size: 13px;
 		color: var(--color-fg-default);
 		font-family: var(--win-font);
-		gap: 8px;
+		gap: 9px;
+		border-radius: 6px;
 	}
 
 	.title-actions.show-dropdown .title-action-btn svg {
@@ -1053,9 +1056,9 @@
 		font-size: 13px;
 		text-align: left;
 		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		flex: 1;
+		overflow: visible;
+		text-overflow: clip;
+		min-width: 0;
 	}
 
 	.action-label {
@@ -1083,18 +1086,19 @@
 
 	.title-actions.show-dropdown .menu-zoom-item {
 		width: 100%;
-		display: flex;
-		justify-content: flex-start;
+		display: grid;
+		grid-template-columns: 16px minmax(0, 1fr) max-content;
 		align-items: center;
-		padding: 6px 12px;
+		padding: 7px 9px;
+		min-height: 34px;
 		height: auto;
 		font-size: 13px;
 		color: var(--color-fg-default);
 		font-family: var(--win-font);
-		gap: 8px;
+		gap: 9px;
 		background: transparent;
 		border: none;
-		border-radius: 4px;
+		border-radius: 6px;
 		cursor: pointer;
 	}
 
@@ -1113,7 +1117,7 @@
 	}
 
 	:global(.title-actions.show-dropdown .menu-zoom-item .zoom-value) {
-		width: 32px;
+		width: auto;
 		text-align: left;
 		color: var(--color-fg-default);
 		display: inline-block;
@@ -1391,17 +1395,17 @@
 
 	.theme-menu {
 		position: absolute;
-		top: 100%;
-		right: 0;
-		margin-top: 4px;
-		background-color: var(--color-canvas-default);
-		border: 1px solid var(--color-border-default);
-		border-radius: 6px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-		padding: 4px;
+		top: -6px;
+		right: calc(100% + 8px);
+		margin-top: 0;
+		background-color: var(--workbench-surface-base);
+		border: 1px solid var(--workbench-border-strong);
+		border-radius: 10px;
+		box-shadow: var(--workbench-shadow);
+		padding: 6px;
 		display: flex;
 		flex-direction: column;
-		width: 120px;
+		width: 184px;
 		z-index: 10005;
 		gap: 1px;
 	}
@@ -1417,11 +1421,12 @@
 		background: transparent;
 		border: none;
 		text-align: left;
-		padding: 6px 12px;
-		font-size: 12px;
+		padding: 7px 9px;
+		min-height: 34px;
+		font-size: 13px;
 		color: var(--color-fg-default);
 		cursor: pointer;
-		border-radius: 4px;
+		border-radius: 6px;
 		font-family: var(--win-font);
 	}
 
@@ -1436,7 +1441,7 @@
 
 	.menu-shortcut {
 		display: none;
-		margin-left: auto;
+		margin-left: 12px;
 		font-size: 11px;
 		color: var(--color-fg-muted);
 		white-space: nowrap;
@@ -1460,29 +1465,31 @@
 		top: 100%;
 		left: 0;
 		margin-top: 4px;
-		background-color: var(--color-canvas-default);
-		border: 1px solid var(--color-border-default);
-		border-radius: 6px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-		padding: 4px;
+		background-color: var(--workbench-surface-base);
+		border: 1px solid var(--workbench-border-strong);
+		border-radius: 10px;
+		box-shadow: var(--workbench-shadow);
+		padding: 6px;
 		display: flex;
 		flex-direction: column;
-		width: 200px;
+		width: 246px;
 		z-index: 10006;
 		gap: 1px;
 	}
 
 	.home-menu-item {
-		display: flex;
+		display: grid;
+		grid-template-columns: 16px minmax(0, 1fr) max-content;
 		align-items: center;
 		background: transparent;
 		border: none;
 		text-align: left;
-		padding: 6px 12px;
+		padding: 7px 9px;
+		min-height: 34px;
 		font-size: 13px;
 		color: var(--color-fg-default);
 		cursor: pointer;
-		border-radius: 4px;
+		border-radius: 6px;
 		font-family: var(--win-font);
 		gap: 8px;
 		white-space: nowrap;
