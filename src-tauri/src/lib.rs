@@ -132,6 +132,73 @@ mod tests {
             "data:image/png;base64,TWFya3BhZA==",
         );
     }
+
+    #[test]
+    fn embed_protection_survives_longer_backtick_runs_earlier_in_the_doc() {
+        // A 4-backtick inline sample desynchronized the old regex pairing and
+        // exposed every later code span to rewriting.
+        let input = "```` ```mermaid ```` fence sample\n\ncode: `![[not-an-embed.md]]`\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("`![[not-an-embed.md]]`"), "got: {out}");
+        assert!(!out.contains("<img"), "got: {out}");
+    }
+
+    #[test]
+    fn embeds_inside_tilde_fences_are_protected() {
+        // The old pattern only knew ``` fences; ~~~ was not protected at all.
+        let input = "~~~\n![[inside.md]]\n~~~\n\n![[outside.md]]\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("![[inside.md]]"), "got: {out}");
+        assert!(out.contains("<img src=\"outside.md\""), "got: {out}");
+    }
+
+    #[test]
+    fn fence_closes_only_on_a_run_at_least_as_long() {
+        let input = "````\n```\n![[still-code.md]]\n````\n![[after.md]]\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("![[still-code.md]]"), "got: {out}");
+        assert!(out.contains("<img src=\"after.md\""), "got: {out}");
+    }
+
+    #[test]
+    fn unclosed_fence_protects_to_end_of_input() {
+        let input = "```\n![[never-closed.md]]\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("![[never-closed.md]]"), "got: {out}");
+    }
+
+    #[test]
+    fn double_backtick_span_pairs_only_with_double_backticks() {
+        // `` a ` b `` is ONE span; the inner single backtick does not close it.
+        let input = "`` a ` ![[in-span.md]] `` then ![[outside.md]]\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("![[in-span.md]]"), "got: {out}");
+        assert!(out.contains("<img src=\"outside.md\""), "got: {out}");
+    }
+
+    #[test]
+    fn embeds_outside_code_are_still_rewritten_with_sizes() {
+        let out = process_internal_embeds("![[pic.png|300x200]]\n");
+        assert!(out.contains("width=\"300\""), "got: {out}");
+        assert!(out.contains("height=\"200\""), "got: {out}");
+    }
+
+    #[test]
+    fn highlight_protection_survives_quadruple_backtick_inline_code() {
+        let input = "```` ``` ```` intro\n\n`==not highlighted==` but ==this is==\n";
+        let out = process_wikilinks(input);
+        assert!(out.contains("`==not highlighted==`"), "got: {out}");
+        assert!(out.contains("<mark>this is</mark>"), "got: {out}");
+    }
+
+    #[test]
+    fn wikilinks_and_inline_footnotes_in_code_spans_stay_literal() {
+        let input = "`[[#heading]]` and `^[not a footnote]` but [[#real|jump]]\n";
+        let out = process_wikilinks(input);
+        assert!(out.contains("`[[#heading]]`"), "got: {out}");
+        assert!(out.contains("`^[not a footnote]`"), "got: {out}");
+        assert!(out.contains("[jump](#real)"), "got: {out}");
+    }
 }
 
 struct WatcherState {
@@ -153,13 +220,133 @@ fn bring_webview_window_to_front(window: &tauri::WebviewWindow) {
     let _ = window.set_focus();
 }
 
+/// Byte ranges of code regions — fenced code blocks and inline code spans —
+/// paired with CommonMark's rules. The regex alternation previously used for
+/// protection (```` ```.*?```|`.*?` ````) cannot express them: a fence closes
+/// only on a line-leading run of the same character at least as long as the
+/// opener, and a span opened by N backticks closes only on a run of exactly
+/// N. One mismatched pairing (e.g. a 4-backtick inline sample, or a ~~~
+/// fence, which the old pattern did not know at all) desynchronized the
+/// protection for the entire rest of the document.
+fn code_region_ranges(content: &str) -> Vec<(usize, usize)> {
+    let len = content.len();
+    let mut regions: Vec<(usize, usize)> = Vec::new();
+    let mut plain_segments: Vec<(usize, usize)> = Vec::new();
+    // (fence char, opener run length, region start)
+    let mut fence: Option<(u8, usize, usize)> = None;
+    let mut seg_start = 0usize;
+
+    let mut line_start = 0usize;
+    while line_start < len {
+        let line_end = content[line_start..]
+            .find('\n')
+            .map(|i| line_start + i + 1)
+            .unwrap_or(len);
+        let line = &content[line_start..line_end];
+        let trimmed = line.trim_start_matches(' ');
+        let indent = line.len() - trimmed.len();
+        let marker = trimmed.as_bytes().first().copied();
+        let run_len = trimmed
+            .as_bytes()
+            .iter()
+            .take_while(|&&b| Some(b) == marker)
+            .count();
+        let is_fence_line = indent <= 3
+            && matches!(marker, Some(b'`') | Some(b'~'))
+            && run_len >= 3;
+
+        match fence {
+            Some((ch, opener_len, start)) => {
+                let only_spaces_after = trimmed[run_len..].trim().is_empty();
+                if is_fence_line
+                    && marker == Some(ch)
+                    && run_len >= opener_len
+                    && only_spaces_after
+                {
+                    regions.push((start, line_end));
+                    fence = None;
+                    seg_start = line_end;
+                }
+            }
+            None => {
+                // The info string of a backtick fence may not contain backticks.
+                let info_ok = marker != Some(b'`') || !trimmed[run_len..].contains('`');
+                if is_fence_line && info_ok {
+                    if seg_start < line_start {
+                        plain_segments.push((seg_start, line_start));
+                    }
+                    fence = Some((marker.unwrap(), run_len, line_start));
+                }
+            }
+        }
+        line_start = line_end;
+    }
+    match fence {
+        // An unclosed fence runs to the end of the input.
+        Some((_, _, start)) => regions.push((start, len)),
+        None => {
+            if seg_start < len {
+                plain_segments.push((seg_start, len));
+            }
+        }
+    }
+
+    // Inline code spans in the text between fences: a run of N backticks
+    // pairs with the next run of exactly N; runs that never pair are literal.
+    for (seg_s, seg_e) in plain_segments {
+        let seg = content[seg_s..seg_e].as_bytes();
+        let mut runs: Vec<(usize, usize)> = Vec::new(); // (offset in seg, len)
+        let mut i = 0usize;
+        while i < seg.len() {
+            if seg[i] == b'`' {
+                let start = i;
+                while i < seg.len() && seg[i] == b'`' {
+                    i += 1;
+                }
+                runs.push((start, i - start));
+            } else {
+                i += 1;
+            }
+        }
+        let mut r = 0usize;
+        while r < runs.len() {
+            let (open_start, open_len) = runs[r];
+            if let Some(close) = (r + 1..runs.len()).find(|&j| runs[j].1 == open_len) {
+                let (close_start, close_len) = runs[close];
+                regions.push((seg_s + open_start, seg_s + close_start + close_len));
+                r = close + 1;
+            } else {
+                r += 1;
+            }
+        }
+    }
+
+    regions.sort_unstable();
+    regions
+}
+
+fn in_code_region(regions: &[(usize, usize)], pos: usize) -> bool {
+    regions
+        .binary_search_by(|&(s, e)| {
+            if pos < s {
+                std::cmp::Ordering::Greater
+            } else if pos >= e {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
+}
+
 fn process_internal_embeds(content: &str) -> Cow<'_, str> {
-    let re = Regex::new(r"(?s)```.*?```|`.*?`|!\[\[(.*?)\]\]").unwrap();
+    let regions = code_region_ranges(content);
+    let re = Regex::new(r"(?s)!\[\[(.*?)\]\]").unwrap();
 
     re.replace_all(content, |caps: &Captures| {
-        let full_match = caps.get(0).unwrap().as_str();
-        if full_match.starts_with('`') {
-            return full_match.to_string();
+        let full = caps.get(0).unwrap();
+        if in_code_region(&regions, full.start()) {
+            return full.as_str().to_string();
         }
 
         let inner = caps.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -194,12 +381,13 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
     let mut processed = Cow::Borrowed(content);
 
     // 1. Process [[#target]] or [[#target|alias]]
-    let re_links = Regex::new(r"(?s)```.*?```|`.*?`|\[\[#([^\|\]]+)(?:\|([^\]]+))?\]\]").unwrap();
+    let re_links = Regex::new(r"(?s)\[\[#([^\|\]]+)(?:\|([^\]]+))?\]\]").unwrap();
     if re_links.is_match(&processed) {
+        let regions = code_region_ranges(&processed);
         let replaced = re_links.replace_all(&processed, |caps: &Captures| {
-            let full_match = caps.get(0).unwrap().as_str();
-            if full_match.starts_with('`') {
-                return full_match.to_string();
+            let full = caps.get(0).unwrap();
+            if in_code_region(&regions, full.start()) {
+                return full.as_str().to_string();
             }
             let target = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             let alias = caps.get(2).map(|m| m.as_str()).unwrap_or(target);
@@ -211,12 +399,13 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
 
     // 2. Process ^block-id at the end of lines
     // For block IDs, they are trailing. We skip code blocks but also need to be careful with inline code at EOL.
-    let re_ids = Regex::new(r"(?s)```.*?```|`.*?`|(?m)\s+\^([a-zA-Z0-9_-]+)$").unwrap();
+    let re_ids = Regex::new(r"(?m)\s+\^([a-zA-Z0-9_-]+)$").unwrap();
     if re_ids.is_match(&processed) {
+        let regions = code_region_ranges(&processed);
         let replaced = re_ids.replace_all(&processed, |caps: &Captures| {
-            let full_match = caps.get(0).unwrap().as_str();
-            if full_match.starts_with('`') {
-                return full_match.to_string();
+            let full = caps.get(0).unwrap();
+            if in_code_region(&regions, full.start()) {
+                return full.as_str().to_string();
             }
             let id = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             format!(
@@ -228,12 +417,13 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
     }
 
     // 3. Convert ==highlight== to <mark>highlight</mark>
-    let re_highlight = Regex::new(r"(?s)```.*?```|`.*?`|==([^=\n]+)==").unwrap();
+    let re_highlight = Regex::new(r"==([^=\n]+)==").unwrap();
     if re_highlight.is_match(&processed) {
+        let regions = code_region_ranges(&processed);
         let replaced = re_highlight.replace_all(&processed, |caps: &Captures| {
-            let full_match = caps.get(0).unwrap().as_str();
-            if full_match.starts_with('`') {
-                return full_match.to_string();
+            let full = caps.get(0).unwrap();
+            if in_code_region(&regions, full.start()) {
+                return full.as_str().to_string();
             }
             format!("<mark>{}</mark>", caps.get(1).unwrap().as_str())
         });
@@ -241,14 +431,15 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
     }
 
     // 4. Convert ^[inline footnote] to a footnote reference
-    let re_inline_fn = Regex::new(r"(?s)```.*?```|`.*?`|\^\[([^\]]+)\]").unwrap();
+    let re_inline_fn = Regex::new(r"\^\[([^\]]+)\]").unwrap();
     if re_inline_fn.is_match(&processed) {
+        let regions = code_region_ranges(&processed);
         let mut footnote_defs = String::new();
         let mut fn_count = 0usize;
         let replaced = re_inline_fn.replace_all(&processed, |caps: &Captures| {
-            let full_match = caps.get(0).unwrap().as_str();
-            if full_match.starts_with('`') {
-                return full_match.to_string();
+            let full = caps.get(0).unwrap();
+            if in_code_region(&regions, full.start()) {
+                return full.as_str().to_string();
             }
             fn_count += 1;
             let label = format!("ifn-{}", fn_count);
