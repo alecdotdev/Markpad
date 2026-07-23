@@ -683,6 +683,18 @@ export function processMarkdownHtml(
 
 	const headings = Array.from(doc.querySelectorAll("h1, h2, h3, h4, h5, h6"));
 	for (const h of headings) {
+		// comrak puts the deduplicated heading id ("title", "title-1", ...)
+		// on an empty inner <a class="anchor">, so h.id is empty and every
+		// consumer that keys folds by `h.id || textContent` falls back to
+		// the heading text — which collides for duplicate titles and never
+		// matches the ToC's id-based keys. Promote the id onto the heading
+		// itself (and off the anchor, so the document keeps unique ids).
+		const headingAnchor = h.querySelector("a.anchor");
+		if (headingAnchor && headingAnchor.id && !h.id) {
+			h.id = headingAnchor.id;
+			headingAnchor.removeAttribute("id");
+		}
+
 		const chevron = doc.createElement("span");
 		chevron.className = "header-fold-icon";
 		chevron.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
