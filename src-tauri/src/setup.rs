@@ -25,6 +25,60 @@ pub struct InstallStatus {
     pub version: String,
 }
 
+#[cfg(any(target_os = "windows", test))]
+#[derive(Debug, PartialEq, Eq)]
+enum AssociationRestore<'a> {
+    KeepCurrent,
+    SetPrevious(&'a str),
+    Clear,
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn association_restore_action<'a>(
+    current: Option<&str>,
+    had_previous: bool,
+    previous: Option<&'a str>,
+) -> AssociationRestore<'a> {
+    if current != Some("Markpad.File") {
+        AssociationRestore::KeepCurrent
+    } else if had_previous {
+        previous
+            .map(AssociationRestore::SetPrevious)
+            .unwrap_or(AssociationRestore::Clear)
+    } else {
+        AssociationRestore::Clear
+    }
+}
+
+#[cfg(test)]
+mod association_restore_tests {
+    use super::*;
+
+    #[test]
+    fn restores_the_previous_association_when_markpad_still_owns_it() {
+        assert_eq!(
+            association_restore_action(Some("Markpad.File"), true, Some("Other.Editor")),
+            AssociationRestore::SetPrevious("Other.Editor"),
+        );
+    }
+
+    #[test]
+    fn preserves_an_association_taken_over_after_markpad_installation() {
+        assert_eq!(
+            association_restore_action(Some("Other.Editor"), true, Some("Earlier.Editor")),
+            AssociationRestore::KeepCurrent,
+        );
+    }
+
+    #[test]
+    fn clears_markpad_association_when_there_was_no_previous_owner() {
+        assert_eq!(
+            association_restore_action(Some("Markpad.File"), false, None),
+            AssociationRestore::Clear,
+        );
+    }
+}
+
 #[cfg(target_os = "windows")]
 pub fn get_install_path(all_users: bool) -> PathBuf {
     if all_users {
@@ -327,8 +381,8 @@ pub async fn uninstall_app(
 ) -> Result<(), String> {
     let current_exe = env::current_exe().map_err(|e| e.to_string())?;
 
-    let install_dir = if let Some(all_users) = target_all_users {
-        get_install_path(all_users)
+    let all_users = if let Some(all_users) = target_all_users {
+        all_users
     } else {
         // Auto-detect based on running location
         let machine_path = get_install_path(true);
@@ -336,11 +390,12 @@ pub async fn uninstall_app(
         let machine_str = machine_path.to_string_lossy().to_lowercase();
 
         if current_str.starts_with(&machine_str) {
-            machine_path
+            true
         } else {
-            get_install_path(false)
+            false
         }
     };
+    let install_dir = get_install_path(all_users);
 
     // 1. Delete shortcuts
     let desktop_user = env::var("USERPROFILE").unwrap() + "\\Desktop";
@@ -355,17 +410,19 @@ pub async fn uninstall_app(
     let _ = fs::remove_file(PathBuf::from(start_user).join(format!("{}.lnk", APP_NAME)));
     let _ = fs::remove_file(PathBuf::from(start_machine).join(format!("{}.lnk", APP_NAME)));
 
-    // 2. Delete Registry Keys (try both just in case)
-    for root_h in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
-        let root = RegKey::predef(root_h);
-        let _ = root.delete_subkey(format!(
-            "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}",
-            APP_NAME
-        ));
-        let _ = root.delete_subkey_all("Software\\Classes\\.md");
-        let _ = root.delete_subkey_all("Software\\Classes\\.markdown");
-        let _ = root.delete_subkey_all("Software\\Classes\\Markpad.File");
-    }
+    // 2. Delete only this installation's registry entries. Preserve an
+    // association another application chose after Markpad was installed.
+    let root_h = if all_users {
+        HKEY_LOCAL_MACHINE
+    } else {
+        HKEY_CURRENT_USER
+    };
+    let root = RegKey::predef(root_h);
+    let _ = root.delete_subkey(format!(
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}",
+        APP_NAME
+    ));
+    let _ = unregister_file_associations(&root);
 
     // 3. Self-destruction
     // We create a batch file to delete the app, but run it via VBScript to keep it invisible
@@ -433,6 +490,9 @@ fn register_file_association(exe_path: &Path, all_users: bool) -> Result<(), std
     };
     let root = RegKey::predef(root_h);
 
+    backup_file_association(&root, ".md")?;
+    backup_file_association(&root, ".markdown")?;
+
     // .md
     let (md_key, _) = root.create_subkey("Software\\Classes\\.md")?;
     md_key.set_value("", &"Markpad.File")?;
@@ -444,6 +504,7 @@ fn register_file_association(exe_path: &Path, all_users: bool) -> Result<(), std
     // Markpad.File
     let (file_key, _) = root.create_subkey("Software\\Classes\\Markpad.File")?;
     file_key.set_value("", &"Markpad File")?;
+    file_key.set_value("MarkpadOwner", &1u32)?;
 
     let (icon_key, _) = file_key.create_subkey("DefaultIcon")?;
     icon_key.set_value("", &format!("\"{}\",0", exe_path.display()))?;
@@ -451,5 +512,87 @@ fn register_file_association(exe_path: &Path, all_users: bool) -> Result<(), std
     let (shell_key, _) = file_key.create_subkey("shell\\open\\command")?;
     shell_key.set_value("", &format!("\"{}\" \"%1\"", exe_path.display()))?;
 
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+const CLASSES_PREFIX: &str = "Software\\Classes\\";
+
+#[cfg(target_os = "windows")]
+const MARKPAD_PROG_ID: &str = "Markpad.File";
+
+#[cfg(target_os = "windows")]
+const ASSOCIATION_BACKUP_KEY: &str = "Software\\Classes\\Markpad.File\\PreviousAssociations";
+
+#[cfg(target_os = "windows")]
+fn association_backup_name(extension: &str) -> &str {
+    extension.trim_start_matches('.')
+}
+
+#[cfg(target_os = "windows")]
+fn extension_key_path(extension: &str) -> String {
+    format!("{CLASSES_PREFIX}{extension}")
+}
+
+#[cfg(target_os = "windows")]
+fn backup_file_association(root: &RegKey, extension: &str) -> Result<(), std::io::Error> {
+    let association = root
+        .open_subkey(extension_key_path(extension))
+        .ok()
+        .and_then(|key| key.get_value::<String, _>("").ok());
+    // An update/reinstall sees Markpad as the current owner. Keep the first
+    // backup instead of replacing it with our own ProgID.
+    if association.as_deref() == Some(MARKPAD_PROG_ID) {
+        return Ok(());
+    }
+    let (backup, _) = root.create_subkey(ASSOCIATION_BACKUP_KEY)?;
+    let name = association_backup_name(extension);
+    backup.set_value(&format!("{name}.present"), &(association.is_some() as u32))?;
+    if let Some(association) = association {
+        backup.set_value(name, &association)?;
+    } else {
+        let _ = backup.delete_value(name);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn unregister_file_associations(root: &RegKey) -> Result<(), std::io::Error> {
+    for extension in [".md", ".markdown"] {
+        restore_file_association(root, extension)?;
+    }
+
+    let Ok(file_key) = root.open_subkey("Software\\Classes\\Markpad.File") else {
+        return Ok(());
+    };
+    let owned_by_markpad = file_key.get_value::<u32, _>("MarkpadOwner").ok() == Some(1);
+    drop(file_key);
+    if owned_by_markpad {
+        let _ = root.delete_subkey_all("Software\\Classes\\Markpad.File");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn restore_file_association(root: &RegKey, extension: &str) -> Result<(), std::io::Error> {
+    let key_path = extension_key_path(extension);
+    let Ok((key, _)) = root.create_subkey(&key_path) else {
+        return Ok(());
+    };
+    let current = key.get_value::<String, _>("").ok();
+    let name = association_backup_name(extension);
+    let backup = root.open_subkey(ASSOCIATION_BACKUP_KEY).ok();
+    let had_previous = backup
+        .as_ref()
+        .and_then(|key| key.get_value::<u32, _>(&format!("{name}.present")).ok())
+        == Some(1);
+    let previous = backup.and_then(|key| key.get_value::<String, _>(name).ok());
+    match association_restore_action(current.as_deref(), had_previous, previous.as_deref()) {
+        AssociationRestore::KeepCurrent => {}
+        AssociationRestore::SetPrevious(previous) => key.set_value("", &previous)?,
+        AssociationRestore::Clear => {
+            let _ = key.delete_value("");
+        }
+    }
     Ok(())
 }
