@@ -210,6 +210,7 @@ import { t } from './utils/i18n.js';
 	let canGoForwardInFileHistory = $derived(tabManager.activeTabId ? tabManager.canGoForward(tabManager.activeTabId) : false);
 
 	let loadingTabs = $state<string[]>([]);
+	const loadRevisionByTab = new Map<string, number>();
 	let isAtBottom = $state(false);
 
 	let showHome = $state(false);
@@ -785,6 +786,8 @@ import { t } from './utils/i18n.js';
 			}
 			const activeId = tabManager.activeTabId;
 			if (!activeId) return;
+			const fullLoadRevision = (loadRevisionByTab.get(activeId) ?? 0) + 1;
+			loadRevisionByTab.set(activeId, fullLoadRevision);
 
 			const isMarkdown = hasMarkdownLinkExtension(filePath);
 			const tab = tabManager.tabs.find((t) => t.id === activeId);
@@ -794,6 +797,8 @@ import { t } from './utils/i18n.js';
 				if (tab && !options.preserveEditState && !existing) {
 					tab.isEditing = settings.startInEditor;
 				}
+				const initialIsEditing = tab?.isEditing ?? false;
+				const initialIsSplit = tab?.isSplit ?? false;
 				const [, content, isFull] = await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 }) as [string, string, boolean];
 				if (pendingNavigateTabId) {
 					tabManager.navigate(pendingNavigateTabId, filePath);
@@ -803,6 +808,16 @@ import { t } from './utils/i18n.js';
 				tabManager.setTabRawContent(activeId, content);
 
 				if (!isFull) {
+					const canApplyFullLoad = () => {
+						const targetTab = tabManager.tabs.find((t) => t.id === activeId);
+						return (
+							targetTab?.path === filePath &&
+							loadRevisionByTab.get(activeId) === fullLoadRevision &&
+							!targetTab.isDirty &&
+							targetTab.isEditing === initialIsEditing &&
+							targetTab.isSplit === initialIsSplit
+						);
+					};
 					loadingTabs = [...loadingTabs, activeId];
 					tick().then(() => {
 						if (markdownBody) isAtBottom = markdownBody.scrollHeight <= markdownBody.clientHeight + 100;
@@ -814,9 +829,13 @@ import { t } from './utils/i18n.js';
 									setTimeout(applyFull, 100);
 									return;
 								}
-								if (tabManager.tabs.find((t) => t.id === activeId)?.path === filePath) {
+								if (canApplyFullLoad()) {
 									renderMarkdownPreview(fullContent, filePath)
 										.then((fullProcessed) => {
+											if (!canApplyFullLoad()) {
+												loadingTabs = loadingTabs.filter((id) => id !== activeId);
+												return;
+											}
 											tabManager.updateTabContent(activeId, fullProcessed);
 											tabManager.setTabRawContent(activeId, fullContent);
 											loadingTabs = loadingTabs.filter((id) => id !== activeId);
