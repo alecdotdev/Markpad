@@ -2353,17 +2353,33 @@ import { t } from './utils/i18n.js';
 		}
 	}
 
-	let debounceTimer: number;
+	let previewRenderRevision = 0;
 
 	$effect(() => {
 		const tab = tabManager.activeTab;
+		const renderRevision = ++previewRenderRevision;
 		if (tab && (tab.isSplit || (isEditing && settings.showToc)) && tab.rawContent !== undefined) {
-			if ((tab as any)._lastRenderedRawContent === tab.rawContent) return;
+			const tabId = tab.id;
+			const rawContent = tab.rawContent;
+			if ((tab as any)._lastRenderedRawContent === rawContent) return;
 
-			clearTimeout(debounceTimer);
-			debounceTimer = setTimeout(() => {
-				renderTabPreviewFromRaw(tab).catch(console.error);
+			const timer = setTimeout(() => {
+				renderMarkdownPreview(rawContent, tab.path)
+					.then((processed) => {
+						const currentTab = tabManager.activeTab;
+						if (
+							previewRenderRevision !== renderRevision ||
+							tabManager.activeTabId !== tabId ||
+							currentTab?.rawContent !== rawContent
+						) return;
+						tabManager.updateTabContent(tabId, processed);
+						(currentTab as any)._lastRenderedRawContent = rawContent;
+						tick().then(renderRichContent);
+					})
+					.catch(console.error);
 			}, 16);
+
+			return () => clearTimeout(timer);
 		}
 	});
 
