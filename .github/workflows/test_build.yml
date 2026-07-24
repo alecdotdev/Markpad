@@ -1,6 +1,9 @@
 name: Test Build (No Release)
 
 on:
+  # Keep release packaging changes from reaching a draft release without a
+  # platform build check.
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -30,6 +33,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
+          cache: npm
 
       - name: install rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -43,12 +47,12 @@ jobs:
             sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm
 
       - name: install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build app
         env:
           NODE_OPTIONS: "--max_old_space_size=4096"
-        run: npm run tauri build -- ${{ matrix.args }}
+        run: npm run tauri build -- --no-sign ${{ matrix.args }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

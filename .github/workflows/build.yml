@@ -250,9 +250,9 @@ jobs:
   generate-update-feed:
     needs: [create-release, build]
     runs-on: ubuntu-latest
-    # Run even when one matrix leg failed (the existing sig_count > 0 sanity
-    # check inside still gates publication on at least one platform succeeding).
-    if: ${{ always() && needs.create-release.result == 'success' }}
+    # The updater feed must describe a complete release. Do not publish an
+    # update if any platform build failed or was cancelled.
+    if: ${{ always() && needs.create-release.result == 'success' && needs.build.result == 'success' }}
     steps:
       - name: Generate latest.json
         env:
@@ -266,18 +266,17 @@ jobs:
           # publish an empty latest.json that would overwrite a previously-good one.
           gh release download "v$VERSION" --repo "$REPO" --pattern "*.sig" --dir ./sigs
 
-          sig_count=$(find ./sigs -maxdepth 1 -name "*.sig" -type f | wc -l)
-          if [ "$sig_count" -eq 0 ]; then
-            echo "ERROR: no .sig files in release v${VERSION} — every matrix build either failed or didn't produce updater artifacts. Aborting before overwriting latest.json with an empty feed." >&2
-            exit 1
-          fi
-
           # Default Tauri v2 updater mode: macOS .app.tar.gz, Windows NSIS *-setup.exe, Linux *.AppImage
           # (NOT v1Compatible mode — which would use .nsis.zip / .AppImage.tar.gz wrappers)
           MAC_SIG=$(ls ./sigs/*.app.tar.gz.sig 2>/dev/null | head -1 || true)
           WIN_X64_SIG=$(ls ./sigs/*x64*-setup.exe.sig 2>/dev/null | head -1 || true)
           WIN_ARM_SIG=$(ls ./sigs/*arm64*-setup.exe.sig 2>/dev/null | head -1 || true)
           LINUX_SIG=$(ls ./sigs/*.AppImage.sig 2>/dev/null | head -1 || true)
+
+          if [ -z "$MAC_SIG" ] || [ -z "$WIN_X64_SIG" ] || [ -z "$WIN_ARM_SIG" ] || [ -z "$LINUX_SIG" ]; then
+            echo "ERROR: release v${VERSION} is missing one or more required updater signatures. Aborting before publishing latest.json." >&2
+            exit 1
+          fi
 
           platform_entry() {
             local sig_file="$1"
