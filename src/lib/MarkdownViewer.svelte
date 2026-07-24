@@ -412,6 +412,7 @@ import { t } from './utils/i18n.js';
 	// makes old and new builds invisible to each other.
 	const WINDOW_STATE_KEY = 'savedTabsDataV2';
 	const LEGACY_STATE_KEY = 'savedTabsData';
+	const RESTORE_IN_PROGRESS_KEY = 'markpad-window-restore-in-progress';
 
 	// localStorage is origin-scoped, so every window shares the one snapshot
 	// slot. Only the main window persists and restores tabs: secondary window
@@ -419,6 +420,17 @@ import { t } from './utils/i18n.js';
 	// be restored under the same label again, and letting N windows write the
 	// shared key means the last window closed overwrites everyone else.
 	const isMainWindow = appWindow.label === 'main';
+
+	async function discardPersistedWindowState() {
+		localStorage.removeItem(WINDOW_STATE_KEY);
+		localStorage.removeItem(LEGACY_STATE_KEY);
+		if (!isMainWindow) return;
+		try {
+			await invoke('clear_window_state');
+		} catch (e) {
+			console.error('Failed to clear window state:', e);
+		}
+	}
 
 	// Persisted through Rust, not localStorage: setItem is an async message
 	// to the WebKit storage process that dies in transit when the last
@@ -451,16 +463,8 @@ import { t } from './utils/i18n.js';
 				});
 				if (response !== 'discard') return;
 			}
+			await discardPersistedWindowState();
 			isForceExiting = true;
-			if (isMainWindow) {
-				try {
-					await invoke('clear_window_state');
-				} catch (e) {
-					console.error('Failed to clear window state:', e);
-				}
-				localStorage.removeItem(WINDOW_STATE_KEY);
-				localStorage.removeItem(LEGACY_STATE_KEY);
-			}
 		}
 		appWindow.close();
 	}
@@ -2802,12 +2806,21 @@ import { t } from './utils/i18n.js';
 					localStorage.getItem(WINDOW_STATE_KEY) ??
 					localStorage.getItem(LEGACY_STATE_KEY) ??
 					((await invoke('load_window_state').catch(() => null)) as string | null);
-				if (savedData) {
-					tabManager.restoreState(savedData);
+				if (localStorage.getItem(RESTORE_IN_PROGRESS_KEY)) {
+					// A previous startup was interrupted while restoring its tabs.
+					// Drop only the snapshot so an unprocessable document cannot
+					// make every subsequent launch unusable.
+					console.warn('Skipping interrupted Markpad session restore');
+					await discardPersistedWindowState();
+					localStorage.removeItem(RESTORE_IN_PROGRESS_KEY);
+				} else if (savedData) {
+					localStorage.setItem(RESTORE_IN_PROGRESS_KEY, 'true');
+					try {
+						tabManager.restoreState(savedData);
 					// The snapshot carries window state only — content always
 					// comes from disk, so restored tabs show the file's real
 					// current bytes. A file that no longer exists drops its tab.
-					for (const tab of [...tabManager.tabs]) {
+						for (const tab of [...tabManager.tabs]) {
 						try {
 							const raw = (await invoke('read_file_content', { path: tab.path })) as string;
 							if (disposed) return;
@@ -2824,6 +2837,12 @@ import { t } from './utils/i18n.js';
 							console.warn('Restore: dropping tab for unreadable file', tab.path, e);
 							tabManager.closeTab(tab.id);
 						}
+						}
+					} catch (e) {
+						console.error('Failed to restore Markpad session:', e);
+						await discardPersistedWindowState();
+					} finally {
+						localStorage.removeItem(RESTORE_IN_PROGRESS_KEY);
 					}
 				}
 			}
