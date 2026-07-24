@@ -14,6 +14,7 @@ use winreg::enums::*;
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
 
+#[cfg(target_os = "windows")]
 const APP_NAME: &str = "Markpad";
 #[cfg(target_os = "windows")]
 const EXE_NAME: &str = "Markpad.exe";
@@ -26,6 +27,16 @@ pub struct InstallStatus {
 }
 
 #[cfg(target_os = "windows")]
+fn user_profile() -> String {
+    env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn roaming_app_data() -> String {
+    env::var("APPDATA").unwrap_or_else(|_| format!("{}\\AppData\\Roaming", user_profile()))
+}
+
+#[cfg(target_os = "windows")]
 pub fn get_install_path(all_users: bool) -> PathBuf {
     if all_users {
         // Program Files
@@ -35,9 +46,7 @@ pub fn get_install_path(all_users: bool) -> PathBuf {
     } else {
         // AppData/Local/Markpad
         let local_app_data = env::var("LOCALAPPDATA").unwrap_or_else(|_| {
-            let user_profile =
-                env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".to_string());
-            format!("{}\\AppData\\Local", user_profile)
+            format!("{}\\AppData\\Local", user_profile())
         });
         PathBuf::from(local_app_data).join(APP_NAME)
     }
@@ -204,7 +213,7 @@ pub async fn install_app(
         let desktop = if all_users {
             env::var("PUBLIC").unwrap_or_else(|_| "C:\\Users\\Public".to_string()) + "\\Desktop"
         } else {
-            env::var("USERPROFILE").unwrap() + "\\Desktop"
+            user_profile() + "\\Desktop"
         };
         let lnk = PathBuf::from(desktop).join(format!("{}.lnk", APP_NAME));
         let sl = ShellLink::new(&target_exe).map_err(|e| e.to_string())?;
@@ -216,7 +225,7 @@ pub async fn install_app(
             env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string())
                 + "\\Microsoft\\Windows\\Start Menu\\Programs"
         } else {
-            env::var("APPDATA").unwrap() + "\\Microsoft\\Windows\\Start Menu\\Programs"
+            roaming_app_data() + "\\Microsoft\\Windows\\Start Menu\\Programs"
         };
         let lnk = PathBuf::from(start_menu_path).join(format!("{}.lnk", APP_NAME));
         let sl = ShellLink::new(&target_exe).map_err(|e| e.to_string())?;
@@ -260,7 +269,8 @@ pub async fn install_app(
         &format!("\"{}\" --uninstall", target_exe.display()),
     )
     .map_err(|e| e.to_string())?;
-    key.set_value("DisplayIcon", &target_exe.to_str().unwrap())
+    let target_exe_string = target_exe.to_string_lossy().into_owned();
+    key.set_value("DisplayIcon", &target_exe_string)
         .map_err(|e| e.to_string())?;
     key.set_value("Publisher", &"alecdotdev")
         .map_err(|e| e.to_string())?;
@@ -269,7 +279,8 @@ pub async fn install_app(
     key.set_value("DisplayVersion", &version)
         .map_err(|e| e.to_string())?;
 
-    key.set_value("InstallLocation", &install_dir.to_str().unwrap())
+    let install_dir_string = install_dir.to_string_lossy().into_owned();
+    key.set_value("InstallLocation", &install_dir_string)
         .map_err(|e| e.to_string())?;
     key.set_value("NoModify", &1u32)
         .map_err(|e| e.to_string())?;
@@ -343,13 +354,13 @@ pub async fn uninstall_app(
     };
 
     // 1. Delete shortcuts
-    let desktop_user = env::var("USERPROFILE").unwrap() + "\\Desktop";
+    let desktop_user = user_profile() + "\\Desktop";
     let desktop_public =
         env::var("PUBLIC").unwrap_or_else(|_| "C:\\Users\\Public".to_string()) + "\\Desktop";
     let _ = fs::remove_file(PathBuf::from(desktop_user).join(format!("{}.lnk", APP_NAME)));
     let _ = fs::remove_file(PathBuf::from(desktop_public).join(format!("{}.lnk", APP_NAME)));
 
-    let start_user = env::var("APPDATA").unwrap() + "\\Microsoft\\Windows\\Start Menu\\Programs";
+    let start_user = roaming_app_data() + "\\Microsoft\\Windows\\Start Menu\\Programs";
     let start_machine = env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string())
         + "\\Microsoft\\Windows\\Start Menu\\Programs";
     let _ = fs::remove_file(PathBuf::from(start_user).join(format!("{}.lnk", APP_NAME)));
