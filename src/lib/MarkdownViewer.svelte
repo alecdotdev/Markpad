@@ -2800,6 +2800,7 @@ import { t } from './utils/i18n.js';
 						const transferred = tabManager.tabs.find((t) => t.id === id);
 						if (transferred) {
 							await renderTabPreviewFromRaw(transferred);
+							await invoke('complete_detached_tab', { token: claimToken });
 						}
 					} else {
 						console.warn('Tab transfer claim failed or payload invalid; opening empty window');

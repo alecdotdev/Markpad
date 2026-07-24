@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, State};
 /// evicted first so an abandoned drag can never grow the map unbounded.
 const MAX_PENDING_TRANSFERS: usize = 16;
 
+#[derive(Clone)]
 pub struct PendingTransfer {
     pub payload: String,
     pub source_label: String,
@@ -53,13 +54,13 @@ impl TabTransferBroker {
     }
 
     fn claim(&self, token: &str) -> Option<PendingTransfer> {
-        let mut inner = self.inner.lock().unwrap();
-        inner.insertion_order.retain(|t| t != token);
-        inner.entries.remove(token)
+        self.inner.lock().unwrap().entries.get(token).cloned()
     }
 
     fn cancel(&self, token: &str) {
-        self.claim(token);
+        let mut inner = self.inner.lock().unwrap();
+        inner.insertion_order.retain(|entry| entry != token);
+        inner.entries.remove(token);
     }
 }
 
@@ -74,17 +75,26 @@ pub fn stage_detached_tab(
 
 #[tauri::command]
 pub fn claim_detached_tab(
-    app: AppHandle,
     state: State<'_, TabTransferBroker>,
     token: String,
 ) -> Option<String> {
-    let transfer = state.claim(&token)?;
-    let _ = app.emit_to(
-        transfer.source_label.as_str(),
-        "tab-transfer-claimed",
-        token,
-    );
-    Some(transfer.payload)
+    state.claim(&token).map(|transfer| transfer.payload)
+}
+
+#[tauri::command]
+pub fn complete_detached_tab(
+    app: AppHandle,
+    state: State<'_, TabTransferBroker>,
+    token: String,
+) {
+    if let Some(transfer) = state.claim(&token) {
+        state.cancel(&token);
+        let _ = app.emit_to(
+            transfer.source_label.as_str(),
+            "tab-transfer-claimed",
+            token,
+        );
+    }
 }
 
 #[tauri::command]

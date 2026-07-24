@@ -1338,6 +1338,7 @@ pub fn run() {
             list_directory_contents,
             tab_transfer::stage_detached_tab,
             tab_transfer::claim_detached_tab,
+            tab_transfer::complete_detached_tab,
             tab_transfer::cancel_detached_tab,
             create_transfer_window,
             save_window_state,

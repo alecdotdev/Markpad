@@ -217,3 +217,13 @@ test('serializeState still persists window shape only (untouched by transfer)', 
 	assert.doesNotMatch(fn, /rawContent/);
 	assert.doesNotMatch(fn, /TransferableTab/);
 });
+
+test('source removal waits for destination completion', () => {
+	const broker = readFileSync('src-tauri/src/tab_transfer.rs', 'utf8');
+	const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+
+	assert.match(broker, /pub fn complete_detached_tab/);
+	const claim = broker.slice(broker.indexOf('pub fn claim_detached_tab'), broker.indexOf('pub fn complete_detached_tab'));
+	assert.doesNotMatch(claim, /tab-transfer-claimed/);
+	assert.match(viewer, /invoke\('complete_detached_tab', \{ token: claimToken \}\)/);
+});
