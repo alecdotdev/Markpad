@@ -2755,9 +2755,11 @@ import { t } from './utils/i18n.js';
 
 	onMount(() => {
 		loadRecentFiles();
+		let disposed = false;
 
 		// @ts-ignore
 		Promise.all([import('highlight.js'), import('highlightjs-svelte'), import('katex'), import('mermaid')]).then(async ([hljsModule, svelteModule, katexMainModule, mermaidModule]) => {
+			if (disposed) return;
 			hljs = hljsModule.default;
 			try {
 				svelteModule.default(hljs);
@@ -2773,6 +2775,7 @@ import { t } from './utils/i18n.js';
 				import('katex/dist/contrib/mhchem.js'),
 				import('katex/dist/contrib/copy-tex.js')
 			]);
+			if (disposed) return;
 			
 			renderMathInElement = autoRenderModule.default;
 			mermaid = mermaidModule.default;
@@ -2785,6 +2788,7 @@ import { t } from './utils/i18n.js';
 			const init = async () => {
 				const appWindow = getCurrentWindow();
 				const appMode = (await invoke('get_app_mode')) as any;
+				if (disposed) return;
 
 			if (isMainWindow && settings.restoreStateOnReopen) {
 				// localStorage first, Rust file as fallback. Startup always
@@ -2806,14 +2810,17 @@ import { t } from './utils/i18n.js';
 					for (const tab of [...tabManager.tabs]) {
 						try {
 							const raw = (await invoke('read_file_content', { path: tab.path })) as string;
+							if (disposed) return;
 							tab.rawContent = raw;
 							tab.originalContent = raw;
 							const processed = await renderMarkdownPreview(raw, tab.path);
+							if (disposed) return;
 							tabManager.updateTabContent(tab.id, processed);
 							if (tabManager.activeTabId === tab.id) {
 								tick().then(renderRichContent);
 							}
 						} catch (e) {
+							if (disposed) return;
 							console.warn('Restore: dropping tab for unreadable file', tab.path, e);
 							tabManager.closeTab(tab.id);
 						}
@@ -2870,7 +2877,9 @@ import { t } from './utils/i18n.js';
 			const fileParam = urlParams.get('file');
 			if (fileParam) {
 				const decodedPath = decodeURIComponent(fileParam);
+				if (disposed) return;
 				await loadMarkdown(decodedPath);
+				if (disposed) return;
 			}
 
 			unlisteners.push(
@@ -3150,6 +3159,11 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 
+			if (disposed) {
+				unlisteners.forEach((unlisten) => unlisten());
+				return;
+			}
+
 			// Startup-file delivery (argv / macOS Opened-before-ready stash) is
 			// a boot-time channel that belongs to the FIRST window only. It is
 			// process-global state: letting every window consume it meant each
@@ -3157,7 +3171,7 @@ import { t } from './utils/i18n.js';
 			if (isMainWindow) {
 				try {
 					const args: string[] = await invoke('send_markdown_path');
-					if (args?.length > 0) {
+					if (!disposed && args?.length > 0) {
 						await loadMarkdown(args[0]);
 					}
 				} catch (error) {
@@ -3165,12 +3179,13 @@ import { t } from './utils/i18n.js';
 				}
 			}
 
-			mode = appMode;
+			if (!disposed) mode = appMode;
 		};
 
 		init();
 
 		return () => {
+			disposed = true;
 			unlisteners.forEach((u) => u());
 		};
 	});
