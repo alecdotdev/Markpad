@@ -316,6 +316,39 @@ import { t } from './utils/i18n.js';
 		});
 	}
 
+	// window.prompt() is a silent no-op inside the webview (wry does not
+	// implement the native JS dialogs), so text input goes through our own
+	// modal. Resolves with the entered string, or null on cancel.
+	let promptModal = $state<{
+		show: boolean;
+		title: string;
+		message: string;
+		value: string;
+		resolve: ((v: string | null) => void) | null;
+	}>({ show: false, title: '', message: '', value: '', resolve: null });
+
+	function promptCustom(message: string, options: { title: string; initial?: string }): Promise<string | null> {
+		return new Promise((resolve) => {
+			promptModal = {
+				show: true,
+				title: options.title,
+				message,
+				value: options.initial ?? '',
+				resolve,
+			};
+		});
+	}
+
+	function handlePromptConfirm() {
+		if (promptModal.resolve) promptModal.resolve(promptModal.value);
+		promptModal.show = false;
+	}
+
+	function handlePromptCancel() {
+		if (promptModal.resolve) promptModal.resolve(null);
+		promptModal.show = false;
+	}
+
 	function handleModalSave() {
 		if (modalState.resolve) modalState.resolve('save');
 		modalState.show = false;
@@ -2761,7 +2794,10 @@ import { t } from './utils/i18n.js';
 					const tab = tabManager.tabs.find((t) => t.id === tabId);
 					if (!tab || !tab.path) return;
 
-					const newName = window.prompt(t('menu.renameFile', settings.language), tab.title);
+					const newName = await promptCustom(t('menu.renameFile', settings.language), {
+						title: t('menu.rename', settings.language),
+						initial: tab.title,
+					});
 					if (newName && newName !== tab.title) {
 						const oldPath = tab.path;
 						const newPath = oldPath.replace(/[/\\][^/\\]+$/, (m) => m.charAt(0) + newName);
@@ -3407,6 +3443,16 @@ import { t } from './utils/i18n.js';
 		onconfirm={handleModalConfirm}
 		onsave={handleModalSave}
 		oncancel={handleModalCancel} />
+
+	<Modal
+		show={promptModal.show}
+		title={promptModal.title}
+		message={promptModal.message}
+		kind="info"
+		showInput={true}
+		bind:inputValue={promptModal.value}
+		onconfirm={handlePromptConfirm}
+		oncancel={handlePromptCancel} />
 
 	<UpdateDialog />
 
