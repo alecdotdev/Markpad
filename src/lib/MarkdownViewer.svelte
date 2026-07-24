@@ -1465,15 +1465,7 @@ import { t } from './utils/i18n.js';
 	async function toggleTaskCheckbox(checkbox: HTMLInputElement) {
 		const tab = tabManager.activeTab;
 		if (!tab || !tab.path) return;
-
-		// always read latest from disk to avoid stale state
-		let raw: string;
-		try {
-			raw = (await invoke('read_file_content', { path: tab.path })) as string;
-		} catch (e) {
-			console.error('failed to read file for task toggle', e);
-			return;
-		}
+		const raw = tab.rawContent;
 
 		// find which task item this is by counting checkboxes in DOM
 		const allBoxes = Array.from(markdownBody?.querySelectorAll('[data-task-checkbox]') || []);
@@ -1496,15 +1488,10 @@ import { t } from './utils/i18n.js';
 
 		if (updated === raw) return;
 
-		// save file
-		try {
-			await invoke('save_file_content', { path: tab.path, content: updated });
-			tab.rawContent = updated;
-			tab.originalContent = updated;
-		} catch (e) {
-			console.error('failed to save task toggle', e);
-			return;
-		}
+		// Update the single in-memory source before saving. saveContent keeps the
+		// tab dirty if its write fails, so a disk error cannot discard this edit.
+		tabManager.updateTabRawContent(tab.id, updated);
+		await saveContent(tab.id);
 
 		// update DOM optimistically
 		checkbox.checked = nowChecked;
