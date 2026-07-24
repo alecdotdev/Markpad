@@ -107,7 +107,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stage_then_claim_returns_payload_and_removes_entry() {
+    fn stage_claim_then_complete_removes_entry() {
         let broker = TabTransferBroker::new();
         let token = broker.stage("{\"tab\":1}".to_string(), "main".to_string());
 
@@ -115,6 +115,10 @@ mod tests {
         assert_eq!(transfer.payload, "{\"tab\":1}");
         assert_eq!(transfer.source_label, "main");
 
+        // Claim is a non-destructive reservation read: the source stays intact
+        // until the destination has completed validation and rendering.
+        assert!(broker.claim(&token).is_some());
+        broker.cancel(&token);
         assert!(broker.claim(&token).is_none());
     }
 
