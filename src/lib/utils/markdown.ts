@@ -682,6 +682,10 @@ export function processMarkdownHtml(
 	processInlineMath(doc.body);
 
 	const headings = Array.from(doc.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+	// The heading↔wrapper pairing only needs to be unique within this
+	// render's output (the previous DOM is replaced wholesale), so a
+	// counter keeps the HTML deterministic for identical input.
+	let nextFoldId = 0;
 	for (const h of headings) {
 		// comrak puts the deduplicated heading id ("title", "title-1", ...)
 		// on an empty inner <a class="anchor">, so h.id is empty and every
@@ -721,7 +725,7 @@ export function processMarkdownHtml(
 		}
 		if (h.parentNode) h.parentNode.insertBefore(wrapper, h.nextSibling);
 
-		const mappingId = "wrap-" + Math.random().toString(36).substr(2, 9);
+		const mappingId = "wrap-" + nextFoldId++;
 		h.setAttribute("data-fold-target", mappingId);
 		wrapper.id = mappingId;
 
