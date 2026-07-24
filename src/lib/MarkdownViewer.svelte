@@ -2073,6 +2073,13 @@ import { t } from './utils/i18n.js';
 		await destroyWindowAfterTabsClosed();
 	}
 
+	async function closeTabsWithConfirmation(tabIds: string[]) {
+		for (const tabId of tabIds) {
+			if (!(await canCloseTab(tabId))) return;
+			tabManager.closeTab(tabId);
+		}
+	}
+
 	async function destroyWindowAfterTabsClosed() {
 		if (settings.restoreStateOnReopen) {
 			await persistWindowState();
@@ -2940,19 +2947,19 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 			unlisteners.push(
-				await appWindow.listen('menu-tab-close-others', (event) => {
+				await appWindow.listen('menu-tab-close-others', async (event) => {
 					const tabId = event.payload as string;
 					const tabsToClose = tabManager.tabs.filter((t) => t.id !== tabId).map((t) => t.id);
-					tabsToClose.forEach((id) => tabManager.closeTab(id));
+					await closeTabsWithConfirmation(tabsToClose);
 				}),
 			);
 			unlisteners.push(
-				await appWindow.listen('menu-tab-close-right', (event) => {
+				await appWindow.listen('menu-tab-close-right', async (event) => {
 					const tabId = event.payload as string;
 					const index = tabManager.tabs.findIndex((t) => t.id === tabId);
 					if (index !== -1) {
 						const tabsToClose = tabManager.tabs.slice(index + 1).map((t) => t.id);
-						tabsToClose.forEach((id) => tabManager.closeTab(id));
+						await closeTabsWithConfirmation(tabsToClose);
 					}
 				}),
 			);
