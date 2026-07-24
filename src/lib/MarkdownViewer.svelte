@@ -2093,6 +2093,7 @@ import { t } from './utils/i18n.js';
 	}
 
 	function handleContextMenu(e: MouseEvent) {
+		if (modalState.show) return;
 		if (mode !== 'app') return;
 		e.preventDefault();
 

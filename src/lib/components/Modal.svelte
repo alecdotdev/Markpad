@@ -97,7 +97,12 @@
 </script>
 
 {#if show}
-	<div class="modal-backdrop" transition:fade={{ duration: 150 }} onclick={handleBackdropClick} role="presentation">
+	<div
+		class="modal-backdrop"
+		transition:fade={{ duration: 150 }}
+		onclick={handleBackdropClick}
+		oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+		role="presentation">
 		<div
 			class="modal-content {kind}"
 			bind:this={modalContent}

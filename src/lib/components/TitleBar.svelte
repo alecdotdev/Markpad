@@ -275,17 +275,22 @@
 		themeMenuOpen = false;
 	}
 
+	function handleGlobalDismiss() {
+		themeMenuOpen = false;
+		kebabMenuOpen = false;
+		homeMenuOpen = false;
+	}
+
 	$effect(() => {
-		const handleGlobalClick = () => {
-			themeMenuOpen = false;
-			kebabMenuOpen = false;
-			homeMenuOpen = false;
-		};
 		if (themeMenuOpen || kebabMenuOpen || homeMenuOpen) {
-			window.addEventListener('click', handleGlobalClick);
+			window.addEventListener('click', handleGlobalDismiss);
+			window.addEventListener('contextmenu', handleGlobalDismiss);
+			window.addEventListener('blur', handleGlobalDismiss);
 		}
 		return () => {
-			window.removeEventListener('click', handleGlobalClick);
+			window.removeEventListener('click', handleGlobalDismiss);
+			window.removeEventListener('contextmenu', handleGlobalDismiss);
+			window.removeEventListener('blur', handleGlobalDismiss);
 		};
 	});
 </script>
