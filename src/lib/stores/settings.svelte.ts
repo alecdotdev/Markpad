@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { Effect, getCurrentWindow } from '@tauri-apps/api/window';
 import {
 	DEFAULT_EDITOR_TOOLBAR_ORDER,
 	applyEditorToolbarMove,
@@ -20,6 +21,7 @@ import {
 } from '../utils/titlebarToolbar.js';
 
 export type OSType = 'macos' | 'windows' | 'linux' | 'unknown';
+export type SettingsSurface = 'solid' | 'translucent';
 export type LanguageCode =
 	| 'en' // English
 	| 'ja' // Japanese
@@ -168,6 +170,10 @@ export class SettingsStore {
 	startInEditor = $state(false);
 	newFileDefaultMode = $state(true);
 	showRecentFiles = $state(true);
+	windowSurface = $state<SettingsSurface>('solid');
+	windowOpacity = $state(92);
+	windowBlur = $state(true);
+	windowBackdropDim = $state(48);
 	editorMaxWidth = $state(80);
 	pinnedToc = $state(false);
 	tocSide = $state<'left' | 'right'>('left');
@@ -188,6 +194,7 @@ export class SettingsStore {
 	previewFontSize = $state(16);
 	codeFont = $state('Consolas');
 	codeFontSize = $state(14);
+	private appliedWindowEffectKey = '';
 
 	// File-save behavior. autoSave = silently persist edits without Cmd+S.
 	// confirmBeforeSave = if true, keep the unsaved-changes modals on close/toggle
@@ -216,6 +223,10 @@ export class SettingsStore {
 			const savedStartInEditor = localStorage.getItem('editor.startInEditor');
 			const savedNewFileDefaultMode = localStorage.getItem('editor.newFileDefaultMode');
 			const savedShowRecentFiles = localStorage.getItem('editor.showRecentFiles');
+			const savedWindowSurface = localStorage.getItem('appearance.windowSurface') ?? localStorage.getItem('appearance.settingsSurface');
+			const savedWindowOpacity = localStorage.getItem('appearance.windowOpacity') ?? localStorage.getItem('appearance.settingsSurfaceOpacity');
+			const savedWindowBlur = localStorage.getItem('appearance.windowBlur') ?? localStorage.getItem('appearance.settingsSurfaceBlur');
+			const savedWindowBackdropDim = localStorage.getItem('appearance.windowBackdropDim') ?? localStorage.getItem('appearance.settingsBackdropDim');
 			const savedEditorMaxWidth = localStorage.getItem('editor.maxWidth');
 			const savedPinnedToc = localStorage.getItem('editor.pinnedToc');
 			const savedTocSide = localStorage.getItem('editor.tocSide');
@@ -284,6 +295,14 @@ export class SettingsStore {
 			if (savedStartInEditor !== null) this.startInEditor = savedStartInEditor === 'true';
 			if (savedNewFileDefaultMode !== null) this.newFileDefaultMode = savedNewFileDefaultMode === 'true';
 			if (savedShowRecentFiles !== null) this.showRecentFiles = savedShowRecentFiles === 'true';
+			if (savedWindowSurface === 'solid' || savedWindowSurface === 'translucent') {
+				this.windowSurface = savedWindowSurface;
+			}
+			this.windowOpacity = parseFontSize(savedWindowOpacity, 92, 72, 100);
+			if (savedWindowBlur !== null) {
+				this.windowBlur = savedWindowBlur === 'true' || savedWindowBlur === 'subtle' || savedWindowBlur === 'strong';
+			}
+			this.windowBackdropDim = parseFontSize(savedWindowBackdropDim, 48, 0, 70);
 			if (savedEditorMaxWidth !== null) this.editorMaxWidth = parseFontSize(savedEditorMaxWidth, 80, 20, 500);
 			if (savedPinnedToc !== null) this.pinnedToc = savedPinnedToc === 'true';
 			if (savedTocSide !== null) this.tocSide = savedTocSide as 'left' | 'right';
@@ -357,6 +376,17 @@ export class SettingsStore {
 					localStorage.setItem('editor.startInEditor', String(this.startInEditor));
 					localStorage.setItem('editor.newFileDefaultMode', String(this.newFileDefaultMode));
 					localStorage.setItem('editor.showRecentFiles', String(this.showRecentFiles));
+					localStorage.setItem('appearance.windowSurface', this.windowSurface);
+					localStorage.setItem('appearance.windowOpacity', String(this.windowOpacity));
+					localStorage.setItem('appearance.windowBlur', String(this.windowBlur));
+					localStorage.setItem('appearance.windowBackdropDim', String(this.windowBackdropDim));
+
+					const root = document.documentElement;
+					root.dataset.windowSurface = this.windowSurface;
+					root.style.setProperty('--window-surface-opacity', `${this.windowOpacity}%`);
+					root.style.setProperty('--window-surface-blur', this.windowBlur ? '18px' : '0px');
+					root.style.setProperty('--window-backdrop-dim-opacity', String(this.windowBackdropDim / 200));
+					void this.syncWindowEffects();
 					localStorage.setItem('editor.maxWidth', String(this.editorMaxWidth));
 					localStorage.setItem('editor.pinnedToc', String(this.pinnedToc));
 					localStorage.setItem('editor.tocSide', this.tocSide);
@@ -511,6 +541,29 @@ export class SettingsStore {
 		this.language = lang;
 	}
 
+	setWindowSurface(surface: SettingsSurface) {
+		this.windowSurface = surface;
+	}
+
+	setWindowOpacity(opacity: number) {
+		this.windowOpacity = Math.min(100, Math.max(72, Math.round(opacity)));
+	}
+
+	toggleWindowBlur() {
+		this.windowBlur = !this.windowBlur;
+	}
+
+	setWindowBackdropDim(dim: number) {
+		this.windowBackdropDim = Math.min(70, Math.max(0, Math.round(dim)));
+	}
+
+	resetWindowAppearance() {
+		this.windowSurface = 'solid';
+		this.windowOpacity = 92;
+		this.windowBlur = true;
+		this.windowBackdropDim = 48;
+	}
+
 	setEditorToolbarToolVisible(id: string, visible: boolean) {
 		const hidden = normalizeEditorToolbarHidden(this.editorToolbarHidden);
 		if (visible) {
@@ -582,6 +635,30 @@ export class SettingsStore {
 		} catch (e) {
 			console.error('Failed to get OS type:', e);
 			this.osType = 'unknown';
+		}
+	}
+
+	private async syncWindowEffects() {
+		const osType = this.osType;
+		const enabled = this.windowSurface === 'translucent' && this.windowOpacity < 100 && this.windowBlur;
+		if (osType === 'unknown') return;
+		const effectKey = `${osType}:${enabled}`;
+		if (effectKey === this.appliedWindowEffectKey) return;
+
+		try {
+			const window = getCurrentWindow();
+			if (!enabled || osType === 'linux') {
+				await window.clearEffects();
+				this.appliedWindowEffectKey = effectKey;
+				return;
+			}
+
+			await window.setEffects({
+				effects: [osType === 'windows' ? Effect.Blur : Effect.UnderWindowBackground],
+			});
+			this.appliedWindowEffectKey = effectKey;
+		} catch (error) {
+			console.warn('Failed to update native window effects:', error);
 		}
 	}
 

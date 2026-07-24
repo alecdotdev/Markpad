@@ -3455,11 +3455,11 @@ import { t } from './utils/i18n.js';
 	:root {
 		--animation: cubic-bezier(0.05, 0.95, 0.05, 0.95);
 		scroll-behavior: smooth !important;
-		background-color: var(--color-canvas-default);
+		background-color: transparent;
 	}
 
 	:global(body) {
-		background-color: var(--color-canvas-default);
+		background-color: transparent;
 		margin: 0;
 		padding: 0;
 		color: var(--color-fg-default);

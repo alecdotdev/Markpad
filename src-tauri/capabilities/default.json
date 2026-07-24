@@ -21,6 +21,7 @@
     "core:window:allow-show",
     "core:window:allow-hide",
     "core:window:allow-destroy",
+    "core:window:allow-set-effects",
     "updater:default",
     "process:default"
   ]

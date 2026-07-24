@@ -4,6 +4,7 @@ export type EditorToolbarTool = {
 	id: string;
 	label: string;
 	name: string;
+	nameKey: string;
 	shortcut?: (modifier: 'Ctrl' | 'Cmd') => string;
 	group: EditorToolbarGroup;
 };
@@ -14,20 +15,20 @@ export type EditorToolbarMove = {
 };
 
 export const EDITOR_TOOLBAR_TOOLS: EditorToolbarTool[] = [
-	{ id: 'fmt-bold', label: 'B', name: 'Bold', shortcut: (modifier) => `${modifier}+B`, group: 'inline' },
-	{ id: 'fmt-italic', label: 'I', name: 'Italic', shortcut: (modifier) => `${modifier}+I`, group: 'inline' },
-	{ id: 'fmt-underline', label: 'U', name: 'Underline', shortcut: (modifier) => `${modifier}+U`, group: 'inline' },
-	{ id: 'fmt-inline-code', label: '`', name: 'Inline Code', group: 'inline' },
-	{ id: 'fmt-code-block', label: '{}', name: 'Code Block', group: 'block' },
-	{ id: 'fmt-quote', label: '>', name: 'Quote', group: 'block' },
-	{ id: 'fmt-heading-1', label: 'H1', name: 'Heading 1', group: 'block' },
-	{ id: 'fmt-heading-2', label: 'H2', name: 'Heading 2', group: 'block' },
-	{ id: 'fmt-heading-3', label: 'H3', name: 'Heading 3', group: 'block' },
-	{ id: 'fmt-bullet-list', label: '-', name: 'Bullet List', group: 'list' },
-	{ id: 'fmt-numbered-list', label: '1.', name: 'Numbered List', group: 'list' },
-	{ id: 'fmt-checklist', label: '[ ]', name: 'Checklist', group: 'list' },
-	{ id: 'fmt-link', label: '[]', name: 'Link', group: 'insert' },
-	{ id: 'insert-table-simple', label: '#', name: 'Table', shortcut: (modifier) => `${modifier}+K T`, group: 'insert' },
+	{ id: 'fmt-bold', label: 'B', name: 'Bold', nameKey: 'settings.toolbarToolBold', shortcut: (modifier) => `${modifier}+B`, group: 'inline' },
+	{ id: 'fmt-italic', label: 'I', name: 'Italic', nameKey: 'settings.toolbarToolItalic', shortcut: (modifier) => `${modifier}+I`, group: 'inline' },
+	{ id: 'fmt-underline', label: 'U', name: 'Underline', nameKey: 'settings.toolbarToolUnderline', shortcut: (modifier) => `${modifier}+U`, group: 'inline' },
+	{ id: 'fmt-inline-code', label: '`', name: 'Inline Code', nameKey: 'settings.toolbarToolInlineCode', group: 'inline' },
+	{ id: 'fmt-code-block', label: '{}', name: 'Code Block', nameKey: 'settings.toolbarToolCodeBlock', group: 'block' },
+	{ id: 'fmt-quote', label: '>', name: 'Quote', nameKey: 'settings.toolbarToolQuote', group: 'block' },
+	{ id: 'fmt-heading-1', label: 'H1', name: 'Heading 1', nameKey: 'settings.toolbarToolHeading1', group: 'block' },
+	{ id: 'fmt-heading-2', label: 'H2', name: 'Heading 2', nameKey: 'settings.toolbarToolHeading2', group: 'block' },
+	{ id: 'fmt-heading-3', label: 'H3', name: 'Heading 3', nameKey: 'settings.toolbarToolHeading3', group: 'block' },
+	{ id: 'fmt-bullet-list', label: '-', name: 'Bullet List', nameKey: 'settings.toolbarToolBulletList', group: 'list' },
+	{ id: 'fmt-numbered-list', label: '1.', name: 'Numbered List', nameKey: 'settings.toolbarToolNumberedList', group: 'list' },
+	{ id: 'fmt-checklist', label: '[ ]', name: 'Checklist', nameKey: 'settings.toolbarToolChecklist', group: 'list' },
+	{ id: 'fmt-link', label: '[]', name: 'Link', nameKey: 'settings.toolbarToolLink', group: 'insert' },
+	{ id: 'insert-table-simple', label: '#', name: 'Table', nameKey: 'settings.toolbarToolTable', shortcut: (modifier) => `${modifier}+K T`, group: 'insert' },
 ];
 
 export const DEFAULT_EDITOR_TOOLBAR_ORDER = EDITOR_TOOLBAR_TOOLS.map((tool) => tool.id);

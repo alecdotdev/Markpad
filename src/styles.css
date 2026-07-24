@@ -5,8 +5,7 @@
 
 html,
 body {
-	/* background-color: var(--color-canvas-default); */
-	background-color: var(--color-canvas-default);
+	background-color: transparent;
 	margin: 0;
 	padding: 0;
 	height: 100%;
@@ -18,8 +17,15 @@ body {
 }
 
 #app {
+	display: block;
+	position: relative;
+	width: 100%;
+	height: 100%;
 	overflow: hidden;
 	border-radius: 8px !important;
+	background:
+		linear-gradient(var(--app-window-surface, var(--color-canvas-default)), var(--app-window-surface, var(--color-canvas-default))),
+		rgb(0 0 0 / var(--app-window-dim-opacity, 0));
 }
 
 :root {
@@ -48,6 +54,20 @@ body {
 	--color-window-border-top: #B5B5B5;
 	--color-canvas-overlay: #FDFDFD;
 	--tab-active-bg: #dee1e6;
+	--app-window-surface: var(--color-canvas-default);
+	--app-window-blur: 0px;
+	--app-window-dim-opacity: 0;
+
+	/* Markpad workbench surfaces */
+	--workbench-surface-base: color-mix(in srgb, var(--color-canvas-default) 96%, var(--color-canvas-subtle));
+	--workbench-surface-raised: color-mix(in srgb, var(--color-canvas-default) 82%, var(--color-canvas-subtle));
+	--workbench-surface-hover: color-mix(in srgb, var(--color-canvas-default) 68%, var(--color-canvas-subtle));
+	--workbench-border: color-mix(in srgb, var(--color-border-default) 82%, transparent);
+	--workbench-border-strong: color-mix(in srgb, var(--color-border-default) 72%, var(--color-fg-muted));
+	--workbench-accent-soft: color-mix(in srgb, var(--color-accent-fg) 12%, transparent);
+	--workbench-control-radius: 7px;
+	--workbench-panel-radius: 11px;
+	--workbench-shadow: 0 22px 64px rgb(0 0 0 / 0.32), 0 3px 12px rgb(0 0 0 / 0.16);
 
 	/* Light Syntax Highlighting */
 	--hljs-bg: #f6f8fa;
@@ -57,6 +77,45 @@ body {
 	--hljs-title: #953800;
 	--hljs-variable: #953800;
 	--hljs-type: #953800;
+}
+
+:root[data-window-surface="translucent"] {
+	--app-window-surface: color-mix(
+		in srgb,
+		var(--color-canvas-default) var(--window-surface-opacity, 92%),
+		transparent
+	);
+	--app-window-blur: var(--window-surface-blur, 18px);
+	--app-window-dim-opacity: var(--window-backdrop-dim-opacity, 0.24);
+}
+
+:root[data-window-surface="translucent"] :is(
+	.markdown-body,
+	.custom-title-bar,
+	.editor-outer,
+	.editor-toolbar,
+	.pane.editor-pane,
+	.pane.viewer-pane,
+	.toc-overlay-wrapper,
+	.pinned-toc
+) {
+	background-color: transparent !important;
+	background-image: none !important;
+}
+
+:root[data-window-surface="translucent"] :is(
+	.monaco-editor,
+	.monaco-editor-background,
+	.monaco-editor .margin,
+	.monaco-editor .overflow-guard
+) {
+	background-color: transparent !important;
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+	:root[data-window-surface="translucent"] {
+		--app-window-blur: 0px;
+	}
 }
 
 :root[data-theme="light"] {
