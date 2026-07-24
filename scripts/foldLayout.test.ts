@@ -25,3 +25,9 @@ test('preview lifecycle starts and cleans up fold observation', () => {
 	assert.match(viewer, /observeFoldLayout\((?:markdownBody|body)\)/);
 	assert.match(viewer, /stopObservingFoldLayout\?\.\(\)/);
 });
+
+test('fold measurement pauses while the preview pane is hidden by edit mode', () => {
+	const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+
+	assert.match(viewer, /if \(!html \|\| !body \|\| \(isEditing && !isSplit\)\) return;/);
+});

@@ -1016,7 +1016,7 @@ import { t } from './utils/i18n.js';
 	$effect(() => {
 		const html = sanitizedHtml;
 		const body = markdownBody;
-		if (!html || !body) return;
+		if (!html || !body || (isEditing && !isSplit)) return;
 
 		let cancelled = false;
 		tick().then(() => {
