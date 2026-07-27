@@ -12,4 +12,6 @@ test('batch tab-close commands use the existing dirty-tab confirmation flow', ()
 	);
 	assert.match(viewer, /menu-tab-close-others[\s\S]*await closeTabsWithConfirmation\(tabsToClose\)/);
 	assert.match(viewer, /menu-tab-close-right[\s\S]*await closeTabsWithConfirmation\(tabsToClose\)/);
+	assert.match(viewer, /appWindow\.listen\('menu-tab-close-others', async \(event\)/);
+	assert.match(viewer, /appWindow\.listen\('menu-tab-close-right', async \(event\)/);
 });
