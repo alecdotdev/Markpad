@@ -2175,11 +2175,12 @@ import { t } from './utils/i18n.js';
 	function handleContextMenu(e: MouseEvent) {
 		if (modalState.show) return;
 		if (mode !== 'app') return;
+		const isInsideEditor = (e.target as HTMLElement).closest('.editor-container');
+		if (isInsideEditor) return;
 		e.preventDefault();
 
 		const selection = window.getSelection();
 		const hasSelection = selection ? selection.toString().length > 0 : false;
-		const isInsideEditor = (e.target as HTMLElement).closest('.editor-container');
 		const link = (e.target as HTMLElement).closest('a') as HTMLAnchorElement | null;
 		const linkTarget = link ? getRelativeMarkdownTarget(link.getAttribute('href') || '') : null;
 		const linkItems: ContextMenuItem[] =
@@ -2229,13 +2230,6 @@ import { t } from './utils/i18n.js';
 				...linkItems,
 				...copyRefItem,
 				...mediaItems,
-				...(isEditing && isInsideEditor
-					? [
-							{ label: t('menu.undo', uiLanguage), shortcut: 'Ctrl+Z', onClick: () => editorPane?.undo() },
-							{ label: t('menu.redo', uiLanguage), shortcut: 'Ctrl+Y', onClick: () => editorPane?.redo() },
-							{ separator: true }
-						]
-					: []),
 				...(hasSelection ? [{ label: t('menu.copy', uiLanguage), onClick: () => {
 					const selection = window.getSelection()?.toString();
 					if (selection) invoke('clipboard_write_text', { text: selection });

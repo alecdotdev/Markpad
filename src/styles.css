@@ -1386,6 +1386,17 @@ body {
 		size: auto;
 	}
 
+	.foldable-content-wrapper {
+		height: auto !important;
+		transition: none !important;
+		overflow: visible !important;
+	}
+
+	.foldable-content-wrapper.is-collapsed {
+		height: 0 !important;
+		overflow: hidden !important;
+	}
+
 	.custom-title-bar,
 	.tab-area,
 	.window-controls-left,
