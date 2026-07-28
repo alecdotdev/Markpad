@@ -90,12 +90,18 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 		viewer,
 		/localStorage\.getItem\(WINDOW_STATE_KEY\) \?\?\n?\s*localStorage\.getItem\(LEGACY_STATE_KEY\)/,
 	);
-	// explicit exit clears the file and both keys
+	// The shared helper clears the Rust snapshot and both localStorage keys;
+	// explicit exit and interrupted restore both use this same cleanup path.
+	const discardStart = viewer.indexOf('async function discardPersistedWindowState');
+	const discardScope = viewer.slice(discardStart, viewer.indexOf('\n\t}\n\n\t// Persisted', discardStart));
+	assert.match(discardScope, /clear_window_state/);
+	assert.match(discardScope, /removeItem\(WINDOW_STATE_KEY\)/);
+	assert.match(discardScope, /removeItem\(LEGACY_STATE_KEY\)/);
+	assert.match(viewer, /if \(localStorage\.getItem\(RESTORE_IN_PROGRESS_KEY\)\)[\s\S]*?await discardPersistedWindowState\(\)/);
+	// Explicit exit delegates to the same cleanup path.
 	const exitFn = viewer.slice(viewer.indexOf('async function appExit'));
 	const exitScope = exitFn.slice(0, exitFn.indexOf('\n\t}'));
-	assert.match(exitScope, /clear_window_state/);
-	assert.match(exitScope, /removeItem\(WINDOW_STATE_KEY\)/);
-	assert.match(exitScope, /removeItem\(LEGACY_STATE_KEY\)/);
+	assert.match(exitScope, /await discardPersistedWindowState\(\)/);
 });
 
 test('with restore enabled resolved titled tabs stay open for the snapshot', () => {
