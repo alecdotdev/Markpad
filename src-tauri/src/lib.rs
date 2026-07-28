@@ -199,6 +199,16 @@ mod tests {
         assert!(out.contains("`^[not a footnote]`"), "got: {out}");
         assert!(out.contains("[jump](#real)"), "got: {out}");
     }
+
+    #[test]
+    fn multibyte_content_inside_a_fence_does_not_panic() {
+        let input = "```text\n中文开头的一行\n```\n\n![[outside.png]]\n";
+        let result = std::panic::catch_unwind(|| process_internal_embeds(input));
+
+        let out = result.expect("fenced multibyte content must not panic");
+        assert!(out.contains("中文开头的一行"), "got: {out}");
+        assert!(out.contains("<img src=\"outside.png\""), "got: {out}");
+    }
 }
 
 struct WatcherState {
@@ -291,11 +301,10 @@ fn code_region_ranges(content: &str) -> Vec<(usize, usize)> {
 
         match fence {
             Some((ch, opener_len, start)) => {
-                let only_spaces_after = trimmed[run_len..].trim().is_empty();
                 if is_fence_line
                     && marker == Some(ch)
                     && run_len >= opener_len
-                    && only_spaces_after
+                    && trimmed[run_len..].trim().is_empty()
                 {
                     regions.push((start, line_end));
                     fence = None;
