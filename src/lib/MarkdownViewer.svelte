@@ -49,7 +49,7 @@ import {
 	import DOMPurify from 'dompurify';
 	import HomePage from './components/HomePage.svelte';
 import { tabManager } from './stores/tabs.svelte.js';
-import { snapshotTab, validateTransferPayload } from './utils/tabTransfer.js';
+import { snapshotTab } from './utils/tabTransfer.js';
 import { settings } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
 import { createWindowSession } from './sessions/windowSession.svelte.js';
@@ -64,6 +64,7 @@ import { createWindowSession } from './sessions/windowSession.svelte.js';
 	import 'katex/dist/katex.min.css';
 
 	let mode = $state<'loading' | 'app' | 'installer' | 'uninstall'>('loading');
+	let isDisposed = false;
 
 	let showSettings = $state(false);
 
@@ -425,7 +426,23 @@ import { createWindowSession } from './sessions/windowSession.svelte.js';
 		isMainWindow,
 		windowStateKey: WINDOW_STATE_KEY,
 		legacyStateKey: LEGACY_STATE_KEY,
+		restoreInProgressKey: RESTORE_IN_PROGRESS_KEY,
 		serializeState: () => tabManager.serializeState(),
+		shouldRestoreState: () => settings.restoreStateOnReopen,
+		isDisposed: () => isDisposed,
+		restoreState: (json) => tabManager.restoreState(json),
+		restoredTabs: () => tabManager.tabs.map((tab) => ({ id: tab.id, path: tab.path })),
+		applyRestoredContent: async (tabId, raw) => {
+			const tab = tabManager.tabs.find((item) => item.id === tabId);
+			if (!tab) return;
+			tab.rawContent = raw;
+			tab.originalContent = raw;
+			const processed = await renderMarkdownPreview(raw, tab.path);
+			if (isDisposed) return;
+			tabManager.updateTabContent(tab.id, processed);
+			if (tabManager.activeTabId === tab.id) tick().then(renderRichContent);
+		},
+		dropRestoredTab: (tabId) => tabManager.closeTab(tabId),
 		canDetach: (tabId) => {
 			const tab = tabManager.tabs.find((item) => item.id === tabId);
 			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME' && tabManager.tabs.length >= 2;
@@ -436,10 +453,18 @@ import { createWindowSession } from './sessions/windowSession.svelte.js';
 			return JSON.stringify(snapshotTab(tab));
 		},
 		onTransferClaimed: (tabId) => tabManager.closeTab(tabId),
+		acceptTransferredTab: async (snapshot) => {
+			const id = tabManager.insertTransferredTab(snapshot);
+			const transferred = tabManager.tabs.find((tab) => tab.id === id);
+			if (!transferred) return false;
+			await renderTabPreviewFromRaw(transferred);
+			return !isDisposed;
+		},
 		onError: (message, error) => {
 			console.error(message, error);
 			addToast(`${message}: ${String(error)}`, 'error');
 		},
+		onWarning: (message, error) => console.warn(message, error),
 	});
 
 	async function discardPersistedWindowState() {
@@ -2732,11 +2757,11 @@ import { createWindowSession } from './sessions/windowSession.svelte.js';
 
 	onMount(() => {
 		loadRecentFiles();
-		let disposed = false;
+		isDisposed = false;
 
 		// @ts-ignore
 		Promise.all([import('highlight.js'), import('highlightjs-svelte'), import('katex'), import('mermaid')]).then(async ([hljsModule, svelteModule, katexMainModule, mermaidModule]) => {
-			if (disposed) return;
+			if (isDisposed) return;
 			hljs = hljsModule.default;
 			try {
 				svelteModule.default(hljs);
@@ -2752,7 +2777,7 @@ import { createWindowSession } from './sessions/windowSession.svelte.js';
 				import('katex/dist/contrib/mhchem.js'),
 				import('katex/dist/contrib/copy-tex.js')
 			]);
-			if (disposed) return;
+			if (isDisposed) return;
 			
 			renderMathInElement = autoRenderModule.default;
 			mermaid = mermaidModule.default;
@@ -2765,113 +2790,21 @@ import { createWindowSession } from './sessions/windowSession.svelte.js';
 			const init = async () => {
 				const appWindow = getCurrentWindow();
 				const appMode = (await invoke('get_app_mode')) as any;
-				if (disposed) return;
+				if (isDisposed) return;
 
-			if (isMainWindow && settings.restoreStateOnReopen) {
-				// localStorage first, Rust file as fallback. Startup always
-				// deletes the localStorage keys after migrating, so their
-				// presence means an OLDER build wrote them since our last
-				// run (fresh install upgrade, or a downgrade period) — in
-				// either case they are newer than the Rust file. Reading the
-				// file first would resurrect a pre-downgrade snapshot over
-				// the one the older build just wrote.
-				const savedData =
-					localStorage.getItem(WINDOW_STATE_KEY) ??
-					localStorage.getItem(LEGACY_STATE_KEY) ??
-					((await invoke('load_window_state').catch(() => null)) as string | null);
-				if (localStorage.getItem(RESTORE_IN_PROGRESS_KEY)) {
-					// A previous startup was interrupted while restoring its tabs.
-					// Drop only the snapshot so an unprocessable document cannot
-					// make every subsequent launch unusable.
-					console.warn('Skipping interrupted Markpad session restore');
-					await discardPersistedWindowState();
-					localStorage.removeItem(RESTORE_IN_PROGRESS_KEY);
-				} else if (savedData) {
-					localStorage.setItem(RESTORE_IN_PROGRESS_KEY, 'true');
-					try {
-						tabManager.restoreState(savedData);
-					// The snapshot carries window state only — content always
-					// comes from disk, so restored tabs show the file's real
-					// current bytes. A file that no longer exists drops its tab.
-						for (const tab of [...tabManager.tabs]) {
-						try {
-							const raw = (await invoke('read_file_content', { path: tab.path })) as string;
-							if (disposed) return;
-							tab.rawContent = raw;
-							tab.originalContent = raw;
-							const processed = await renderMarkdownPreview(raw, tab.path);
-							if (disposed) return;
-							tabManager.updateTabContent(tab.id, processed);
-							if (tabManager.activeTabId === tab.id) {
-								tick().then(renderRichContent);
-							}
-						} catch (e) {
-							if (disposed) return;
-							console.warn('Restore: dropping tab for unreadable file', tab.path, e);
-							tabManager.closeTab(tab.id);
-						}
-						}
-					} catch (e) {
-						console.error('Failed to restore Markpad session:', e);
-						await discardPersistedWindowState();
-					} finally {
-						localStorage.removeItem(RESTORE_IN_PROGRESS_KEY);
-					}
-				}
-			}
-			if (isMainWindow) {
-				// Hand the snapshot over to the Rust file NOW, then drop the
-				// localStorage keys: write-through first so a crash between
-				// the two steps can never lose the snapshot, and delete at
-				// startup rather than at close so the stale copy cannot
-				// outlive the migration (the close-time removal never runs
-				// for users who disabled restore-on-reopen, which would
-				// leave the old snapshot on disk forever).
-				if (settings.restoreStateOnReopen && tabManager.tabs.length > 0) {
-					await persistWindowState();
-				}
-				localStorage.removeItem(WINDOW_STATE_KEY);
-				localStorage.removeItem(LEGACY_STATE_KEY);
-			}
+			await windowSession.restore();
+			if (isDisposed) return;
+			await windowSession.claimTransferredTab();
+			if (isDisposed) return;
 
 			const urlParams = new URLSearchParams(window.location.search);
-
-			// A window created by "Move to New Window" claims its tab from the
-			// Rust broker. The transfer token rides in the window label itself
-			// ("window-<token>") — a URL query would 404 in the asset protocol.
-			// The payload is validated strictly before any tab is built: a tab
-			// whose content fields are not strings must never be constructed
-			// (the editor would attribute a stale buffer to it and auto-save
-			// could destroy the file). A failed claim or invalid payload just
-			// yields an empty window — the source kept its tab.
-			const claimToken = appWindow.label.startsWith('window-')
-				? appWindow.label.slice('window-'.length)
-				: null;
-			if (claimToken) {
-				try {
-					const payload = (await invoke('claim_detached_tab', { token: claimToken })) as string | null;
-					const snap = payload ? validateTransferPayload(payload) : null;
-					if (snap) {
-						const id = tabManager.insertTransferredTab(snap);
-						const transferred = tabManager.tabs.find((t) => t.id === id);
-						if (transferred) {
-							await renderTabPreviewFromRaw(transferred);
-							await invoke('complete_detached_tab', { token: claimToken });
-						}
-					} else {
-						console.warn('Tab transfer claim failed or payload invalid; opening empty window');
-					}
-				} catch (e) {
-					console.error('Tab transfer claim error:', e);
-				}
-			}
 
 			const fileParam = urlParams.get('file');
 			if (fileParam) {
 				const decodedPath = decodeURIComponent(fileParam);
-				if (disposed) return;
+				if (isDisposed) return;
 				await loadMarkdown(decodedPath);
-				if (disposed) return;
+				if (isDisposed) return;
 			}
 
 			unlisteners.push(
@@ -3151,7 +3084,7 @@ import { createWindowSession } from './sessions/windowSession.svelte.js';
 				}),
 			);
 
-			if (disposed) {
+			if (isDisposed) {
 				unlisteners.forEach((unlisten) => unlisten());
 				return;
 			}
@@ -3163,7 +3096,7 @@ import { createWindowSession } from './sessions/windowSession.svelte.js';
 			if (isMainWindow) {
 				try {
 					const args: string[] = await invoke('send_markdown_path');
-					if (!disposed && args?.length > 0) {
+					if (!isDisposed && args?.length > 0) {
 						await loadMarkdown(args[0]);
 					}
 				} catch (error) {
@@ -3171,13 +3104,13 @@ import { createWindowSession } from './sessions/windowSession.svelte.js';
 				}
 			}
 
-			if (!disposed) mode = appMode;
+			if (!isDisposed) mode = appMode;
 		};
 
 		init();
 
 		return () => {
-			disposed = true;
+			isDisposed = true;
 			unlisteners.forEach((u) => u());
 		};
 	});

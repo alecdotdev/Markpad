@@ -44,10 +44,11 @@ test('restoreState rebuilds clean tabs and drops legacy untitled entries', () =>
 });
 
 test('startup restore reads content from disk, not from the snapshot', () => {
-	const init = slice(viewer, 'localStorage.getItem(WINDOW_STATE_KEY)', 'urlParams');
-	assert.match(init, /read_file_content/);
+	const restore = slice(session, 'async function restore', 'async function claimTransferredTab');
+	assert.match(restore, /read_file_content/);
 	// a missing file drops its tab instead of restoring a ghost
-	assert.match(init, /closeTab\(/);
+	assert.match(restore, /options\.dropRestoredTab\(tab\.id\);/);
+	assert.match(viewer, /await windowSession\.restore\(\);/);
 });
 
 test('the discard choice reverts the tab to its last saved content', () => {
@@ -74,7 +75,8 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 	// process and loses a flush race when the last window's close ends the
 	// process); both localStorage keys are removed on write, so a downgraded
 	// build starts a fresh session instead of misreading anything.
-	const scope = session.slice(session.indexOf('async function persistState'));
+	const persistStart = session.indexOf('async function persistState');
+	const scope = session.slice(persistStart, session.indexOf('async function restore', persistStart));
 	assert.match(scope, /invoke\('save_window_state'/);
 	assert.doesNotMatch(scope, /setItem\(/);
 	assert.match(scope, /removeItem\(options\.windowStateKey\)/);
@@ -85,10 +87,10 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 	assert.match(scope, /if \(!options\.isMainWindow\) return;/);
 	// startup prefers the Rust file and falls back to the localStorage keys
 	// (v2 first, then legacy) for one-time migration of older snapshots
-	assert.match(viewer, /invoke\('load_window_state'\)/);
+	assert.match(session, /invoke\('load_window_state'\)/);
 	assert.match(
-		viewer,
-		/localStorage\.getItem\(WINDOW_STATE_KEY\) \?\?\n?\s*localStorage\.getItem\(LEGACY_STATE_KEY\)/,
+		session,
+		/localStorage\.getItem\(options\.windowStateKey\) \?\?\n?\s*localStorage\.getItem\(options\.legacyStateKey\)/,
 	);
 	// The shared helper clears the Rust snapshot and both localStorage keys;
 	// explicit exit and interrupted restore both use this same cleanup path.
@@ -97,7 +99,10 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 	assert.match(discardScope, /clear_window_state/);
 	assert.match(discardScope, /removeItem\(options\.windowStateKey\)/);
 	assert.match(discardScope, /removeItem\(options\.legacyStateKey\)/);
-	assert.match(viewer, /if \(localStorage\.getItem\(RESTORE_IN_PROGRESS_KEY\)\)[\s\S]*?await discardPersistedWindowState\(\)/);
+	assert.match(
+		session,
+		/if \(localStorage\.getItem\(options\.restoreInProgressKey\)\)[\s\S]*?await discardPersistedState\(\)/,
+	);
 	// Explicit exit delegates to the same cleanup path.
 	const exitFn = viewer.slice(viewer.indexOf('async function appExit'));
 	const exitScope = exitFn.slice(0, exitFn.indexOf('\n\t}'));

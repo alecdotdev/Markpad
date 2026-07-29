@@ -7,13 +7,13 @@ const session = readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8')
 
 test('session restore records work in progress before restoring tabs', () => {
 	assert.match(viewer, /const RESTORE_IN_PROGRESS_KEY = 'markpad-window-restore-in-progress';/);
-	assert.match(viewer, /localStorage\.setItem\(RESTORE_IN_PROGRESS_KEY, 'true'\);/);
-	assert.match(viewer, /finally \{\s*localStorage\.removeItem\(RESTORE_IN_PROGRESS_KEY\);/s);
+	assert.match(session, /localStorage\.setItem\(options\.restoreInProgressKey, 'true'\);/);
+	assert.match(session, /finally \{\s*localStorage\.removeItem\(options\.restoreInProgressKey\);/s);
 });
 
 test('an interrupted restore discards saved tabs without deleting documents', () => {
-	assert.match(viewer, /if \(localStorage\.getItem\(RESTORE_IN_PROGRESS_KEY\)\)/);
-	assert.match(viewer, /await discardPersistedWindowState\(\);/);
+	assert.match(session, /if \(localStorage\.getItem\(options\.restoreInProgressKey\)\)/);
+	assert.match(session, /await discardPersistedState\(\);/);
 	assert.match(viewer, /await windowSession\.discardPersistedState\(\);/);
 	assert.match(session, /localStorage\.removeItem\(options\.windowStateKey\);/);
 	assert.match(session, /localStorage\.removeItem\(options\.legacyStateKey\);/);
