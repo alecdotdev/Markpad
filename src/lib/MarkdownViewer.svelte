@@ -53,6 +53,7 @@ import { snapshotTab } from './utils/tabTransfer.js';
 import { settings } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
 import { createWindowSession } from './sessions/windowSession.svelte.js';
+import { createDocumentSession, type LoadMarkdownOptions } from './sessions/documentSession.svelte.js';
 
 	// syntax highlighting & latex
 	let hljs: any = $state(null);
@@ -467,6 +468,32 @@ import { createWindowSession } from './sessions/windowSession.svelte.js';
 		onWarning: (message, error) => console.warn(message, error),
 	});
 
+	const documentSession = createDocumentSession({
+		setShowHome: (value) => (showHome = value),
+		currentFile: () => currentFile,
+		resetScrollHistory: () => {
+			scrollHistory = [];
+			scrollFuture = [];
+		},
+		renderMarkdown: renderMarkdownPreview,
+		isLiveMode: () => liveMode,
+		afterLoad: tick,
+		saveRecentFile,
+		deleteRecentFile,
+		setLoadingTabs: (tabIds) => (loadingTabs = tabIds),
+		measureInitialViewport: () => {
+			tick().then(() => {
+				if (markdownBody) isAtBottom = markdownBody.scrollHeight <= markdownBody.clientHeight + 100;
+			});
+		},
+		isScrolling: () => isScrolling,
+		renderRichContent,
+		onError: (message, error) => {
+			console.error(message, error);
+			addToast(`${message}: ${String(error)}`, 'error');
+		},
+	});
+
 	async function discardPersistedWindowState() {
 		await windowSession.discardPersistedState();
 	}
@@ -850,149 +877,8 @@ import { createWindowSession } from './sessions/windowSession.svelte.js';
 		}
 	}
 
-	type LoadMarkdownOptions = {
-		navigate?: boolean;
-		skipTabManagement?: boolean;
-		preserveEditState?: boolean;
-		resetScrollHistory?: boolean;
-	};
-
 	async function loadMarkdown(filePath: string, options: LoadMarkdownOptions = {}) {
-		showHome = false;
-		let existing = null;
-		let pendingNavigateTabId: string | null = null;
-		try {
-			if (options.resetScrollHistory || filePath !== currentFile) {
-				scrollHistory = [];
-				scrollFuture = [];
-			}
-			if (options.navigate && tabManager.activeTab) {
-				pendingNavigateTabId = tabManager.activeTab.id;
-			} else if (!options.skipTabManagement) {
-				existing = tabManager.tabs.find((t) => t.path === filePath);
-				if (existing) {
-					tabManager.setActive(existing.id);
-				} else if (tabManager.activeTab && tabManager.activeTab.path === '' && !tabManager.activeTab.isDirty && tabManager.activeTab.rawContent.trim() === '') {
-					tabManager.updateTabPath(tabManager.activeTab.id, filePath);
-				} else {
-					tabManager.addTab(filePath);
-				}
-			}
-			const activeId = tabManager.activeTabId;
-			if (!activeId) return;
-			const fullLoadRevision = (loadRevisionByTab.get(activeId) ?? 0) + 1;
-			loadRevisionByTab.set(activeId, fullLoadRevision);
-
-			const isMarkdown = hasMarkdownLinkExtension(filePath);
-			const tab = tabManager.tabs.find((t) => t.id === activeId);
-
-			if (isMarkdown) {
-				// Only set default edit mode if it's a brand new tab or we aren't preserving state
-				if (tab && !options.preserveEditState && !existing) {
-					tab.isEditing = settings.startInEditor;
-				}
-				const initialIsEditing = tab?.isEditing ?? false;
-				const initialIsSplit = tab?.isSplit ?? false;
-				const [, content, isFull] = await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 }) as [string, string, boolean];
-				if (pendingNavigateTabId) {
-					tabManager.navigate(pendingNavigateTabId, filePath);
-				}
-				const processedInfo = await renderMarkdownPreview(content, filePath);
-				tabManager.updateTabContent(activeId, processedInfo);
-				tabManager.setTabRawContent(activeId, content);
-
-				if (!isFull) {
-					const canApplyFullLoad = () => {
-						const targetTab = tabManager.tabs.find((t) => t.id === activeId);
-						return (
-							targetTab?.path === filePath &&
-							loadRevisionByTab.get(activeId) === fullLoadRevision &&
-							!targetTab.isDirty &&
-							targetTab.isEditing === initialIsEditing &&
-							targetTab.isSplit === initialIsSplit
-						);
-					};
-					loadingTabs = [...loadingTabs, activeId];
-					tick().then(() => {
-						if (markdownBody) isAtBottom = markdownBody.scrollHeight <= markdownBody.clientHeight + 100;
-					});
-					(invoke('read_file_content', { path: filePath }) as Promise<string>).then((fullContent) => {
-						const applyFull = () => {
-							try {
-								if (isScrolling) {
-									setTimeout(applyFull, 100);
-									return;
-								}
-								if (canApplyFullLoad()) {
-									renderMarkdownPreview(fullContent, filePath)
-										.then((fullProcessed) => {
-											if (!canApplyFullLoad()) {
-												loadingTabs = loadingTabs.filter((id) => id !== activeId);
-												return;
-											}
-											tabManager.updateTabContent(activeId, fullProcessed);
-											tabManager.setTabRawContent(activeId, fullContent);
-											loadingTabs = loadingTabs.filter((id) => id !== activeId);
-											if (tabManager.activeTabId === activeId) {
-												tick().then(() => {
-													setTimeout(renderRichContent, 10);
-												});
-											}
-										})
-										.catch((renderErr) => {
-											console.error("render full markdown error:", renderErr);
-											addToast('Error processing full markdown: ' + String(renderErr), 'error');
-											loadingTabs = loadingTabs.filter((id) => id !== activeId);
-										});
-								} else {
-									loadingTabs = loadingTabs.filter((id) => id !== activeId);
-								}
-							} catch (applyErr) {
-								console.error("applyFull error:", applyErr);
-								addToast('Error processing full markdown: ' + String(applyErr), 'error');
-								loadingTabs = loadingTabs.filter((id) => id !== activeId);
-							}
-						};
-						
-						if ('requestIdleCallback' in window) {
-							(window as any).requestIdleCallback(applyFull, { timeout: 2000 });
-						} else {
-							setTimeout(applyFull, 100);
-						}
-					}).catch((e) => {
-						console.error("read full markdown error:", e);
-						addToast('Backend Error loading full markdown: ' + String(e), 'error');
-						loadingTabs = loadingTabs.filter((id) => id !== activeId);
-					});
-				}
-			} else {
-				const content = (await invoke('read_file_content', { path: filePath })) as string;
-				if (pendingNavigateTabId) {
-					tabManager.navigate(pendingNavigateTabId, filePath);
-				}
-				if (tab) tab.isEditing = true;
-				tabManager.setTabRawContent(activeId, content);
-			}
-
-			if (liveMode) invoke('watch_file', { path: filePath }).catch(console.error);
-
-			await tick();
-			if (filePath) saveRecentFile(filePath);
-		} catch (error) {
-			console.error('Error loading file:', error);
-			const errStr = String(error);
-			if (errStr.includes('The system cannot find the file specified') || errStr.includes('No such file or directory')) {
-				deleteRecentFile(filePath);
-				if (tabManager.activeTab && tabManager.activeTab.path === filePath) {
-					tabManager.closeTab(tabManager.activeTab.id);
-				}
-			} else {
-				// Permission denials (macOS TCC) and other read failures used
-				// to die silently in the console, leaving an empty tab with no
-				// explanation. Surface them.
-				addToast('Error loading file: ' + errStr, 'error');
-			}
-		}
+		return documentSession.loadMarkdown(filePath, options);
 	}
 
 	async function renderRichContent() {
