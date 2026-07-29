@@ -21,7 +21,11 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
+      # 增加 Node.js 記憶體與將 Rust Stack 大小調整為 8MB (8388608 bytes)
       - name: Build Tauri App (No Sign)
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
+          RUSTFLAGS: "-C link-args=/STACK:8388608"
         run: npm run tauri build -- --no-sign
 
       - name: Prepare Executable File
