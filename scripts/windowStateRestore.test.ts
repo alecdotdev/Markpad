@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+const session = readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8');
 
 // Session restore persists WINDOW state only: which files are open, the
 // active tab, and per-tab UI (edit mode, split, scroll). Document content
@@ -73,16 +74,15 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 	// process and loses a flush race when the last window's close ends the
 	// process); both localStorage keys are removed on write, so a downgraded
 	// build starts a fresh session instead of misreading anything.
-	const helper = viewer.slice(viewer.indexOf('async function persistWindowState'));
-	const scope = helper.slice(0, helper.indexOf('\n\t}'));
+	const scope = session.slice(session.indexOf('async function persistState'));
 	assert.match(scope, /invoke\('save_window_state'/);
 	assert.doesNotMatch(scope, /setItem\(/);
-	assert.match(scope, /removeItem\(WINDOW_STATE_KEY\)/);
-	assert.match(scope, /removeItem\(LEGACY_STATE_KEY\)/);
+	assert.match(scope, /removeItem\(options\.windowStateKey\)/);
+	assert.match(scope, /removeItem\(options\.legacyStateKey\)/);
 	assert.match(viewer, /const WINDOW_STATE_KEY = 'savedTabsDataV2';/);
 	// only the main window persists: secondary labels are per-session, and a
 	// shared write slot would let the last window closed overwrite the rest
-	assert.match(scope, /if \(!isMainWindow\) return;/);
+	assert.match(scope, /if \(!options\.isMainWindow\) return;/);
 	// startup prefers the Rust file and falls back to the localStorage keys
 	// (v2 first, then legacy) for one-time migration of older snapshots
 	assert.match(viewer, /invoke\('load_window_state'\)/);
@@ -92,11 +92,11 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 	);
 	// The shared helper clears the Rust snapshot and both localStorage keys;
 	// explicit exit and interrupted restore both use this same cleanup path.
-	const discardStart = viewer.indexOf('async function discardPersistedWindowState');
-	const discardScope = viewer.slice(discardStart, viewer.indexOf('\n\t}\n\n\t// Persisted', discardStart));
+	const discardStart = session.indexOf('async function discardPersistedState');
+	const discardScope = session.slice(discardStart, session.indexOf('\n\t}\n\n\tasync function persistState', discardStart));
 	assert.match(discardScope, /clear_window_state/);
-	assert.match(discardScope, /removeItem\(WINDOW_STATE_KEY\)/);
-	assert.match(discardScope, /removeItem\(LEGACY_STATE_KEY\)/);
+	assert.match(discardScope, /removeItem\(options\.windowStateKey\)/);
+	assert.match(discardScope, /removeItem\(options\.legacyStateKey\)/);
 	assert.match(viewer, /if \(localStorage\.getItem\(RESTORE_IN_PROGRESS_KEY\)\)[\s\S]*?await discardPersistedWindowState\(\)/);
 	// Explicit exit delegates to the same cleanup path.
 	const exitFn = viewer.slice(viewer.indexOf('async function appExit'));

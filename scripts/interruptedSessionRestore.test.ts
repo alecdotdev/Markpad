@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+const session = readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8');
 
 test('session restore records work in progress before restoring tabs', () => {
 	assert.match(viewer, /const RESTORE_IN_PROGRESS_KEY = 'markpad-window-restore-in-progress';/);
@@ -13,6 +14,8 @@ test('session restore records work in progress before restoring tabs', () => {
 test('an interrupted restore discards saved tabs without deleting documents', () => {
 	assert.match(viewer, /if \(localStorage\.getItem\(RESTORE_IN_PROGRESS_KEY\)\)/);
 	assert.match(viewer, /await discardPersistedWindowState\(\);/);
-	assert.match(viewer, /async function discardPersistedWindowState\(\) \{\s*localStorage\.removeItem\(WINDOW_STATE_KEY\);\s*localStorage\.removeItem\(LEGACY_STATE_KEY\);/s);
-	assert.match(viewer, /await invoke\('clear_window_state'\);/);
+	assert.match(viewer, /await windowSession\.discardPersistedState\(\);/);
+	assert.match(session, /localStorage\.removeItem\(options\.windowStateKey\);/);
+	assert.match(session, /localStorage\.removeItem\(options\.legacyStateKey\);/);
+	assert.match(session, /await invoke\('clear_window_state'\);/);
 });

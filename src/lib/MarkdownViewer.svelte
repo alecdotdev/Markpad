@@ -52,6 +52,7 @@ import { tabManager } from './stores/tabs.svelte.js';
 import { snapshotTab, validateTransferPayload } from './utils/tabTransfer.js';
 import { settings } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
+import { createWindowSession } from './sessions/windowSession.svelte.js';
 
 	// syntax highlighting & latex
 	let hljs: any = $state(null);
@@ -420,16 +421,29 @@ import { t } from './utils/i18n.js';
 	// be restored under the same label again, and letting N windows write the
 	// shared key means the last window closed overwrites everyone else.
 	const isMainWindow = appWindow.label === 'main';
+	const windowSession = createWindowSession({
+		isMainWindow,
+		windowStateKey: WINDOW_STATE_KEY,
+		legacyStateKey: LEGACY_STATE_KEY,
+		serializeState: () => tabManager.serializeState(),
+		canDetach: (tabId) => {
+			const tab = tabManager.tabs.find((item) => item.id === tabId);
+			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME' && tabManager.tabs.length >= 2;
+		},
+		transferPayload: (tabId) => {
+			const tab = tabManager.tabs.find((item) => item.id === tabId);
+			if (!tab) throw new Error('Tab disappeared before transfer');
+			return JSON.stringify(snapshotTab(tab));
+		},
+		onTransferClaimed: (tabId) => tabManager.closeTab(tabId),
+		onError: (message, error) => {
+			console.error(message, error);
+			addToast(`${message}: ${String(error)}`, 'error');
+		},
+	});
 
 	async function discardPersistedWindowState() {
-		localStorage.removeItem(WINDOW_STATE_KEY);
-		localStorage.removeItem(LEGACY_STATE_KEY);
-		if (!isMainWindow) return;
-		try {
-			await invoke('clear_window_state');
-		} catch (e) {
-			console.error('Failed to clear window state:', e);
-		}
+		await windowSession.discardPersistedState();
 	}
 
 	// Persisted through Rust, not localStorage: setItem is an async message
@@ -442,14 +456,7 @@ import { t } from './utils/i18n.js';
 	// after the first successful Rust write; a downgraded build then starts
 	// a fresh session instead of misreading anything.
 	async function persistWindowState() {
-		if (!isMainWindow) return;
-		try {
-			await invoke('save_window_state', { json: tabManager.serializeState() });
-			localStorage.removeItem(WINDOW_STATE_KEY);
-			localStorage.removeItem(LEGACY_STATE_KEY);
-		} catch (e) {
-			console.error('Failed to save state on close:', e);
-		}
+		await windowSession.persistState();
 	}
 
 	async function appExit() {
@@ -2634,35 +2641,7 @@ import { t } from './utils/i18n.js';
 	// deleted only after the destination confirms the claim, so any failure —
 	// window creation error, timeout — leaves the tab exactly where it was.
 	async function handleDetach(tabId: string) {
-		if (isCloseWalkActive) return;
-		const tab = tabManager.tabs.find((t) => t.id === tabId);
-		if (!tab || tab.path === 'HOME' || tabManager.tabs.length < 2) return;
-
-		const payload = JSON.stringify(snapshotTab(tab));
-		const token = (await invoke('stage_detached_tab', { payload })) as string;
-
-		let settled = false;
-		const unlisten = await appWindow.listen<string>('tab-transfer-claimed', (event) => {
-			if (settled || event.payload !== token) return;
-			settled = true;
-			unlisten();
-			tabManager.closeTab(tabId);
-		});
-		const cancel = () => {
-			if (settled) return;
-			settled = true;
-			unlisten();
-			invoke('cancel_detached_tab', { token }).catch(console.error);
-		};
-		setTimeout(cancel, 15000);
-
-		try {
-			await invoke('create_transfer_window', { token });
-		} catch (e) {
-			console.error('create_transfer_window failed:', e);
-			addToast('Failed to open new window: ' + String(e), 'error');
-			cancel();
-		}
+		await windowSession.detach(tabId);
 	}
 
 	function startDrag(e: MouseEvent, tabId: string | null) {
