@@ -1065,7 +1065,7 @@ export const translations: Record<LanguageCode, Translation> = {
             toggleWordCount: '切換字數統計',
             toggleLineHighlight: '切換目前行高亮',
             toggleShowWhitespace: '切換顯示空白字元',
-            toggleShowTabs: '切換顯示定位字元',
+            toggleShowTabs: '切換顯示分頁',
             copyReference: '複製參照',
             saveImageAs: '圖片另存新檔...',
             saveDiagramAsSvg: '圖表另存為 SVG...',
