@@ -492,6 +492,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			console.error(message, error);
 			addToast(`${message}: ${String(error)}`, 'error');
 		},
+		markSelfWrite: (path) => selfWriteUntilByPath.set(path, Date.now() + SELF_WRITE_GRACE_MS),
+		clearSelfWrite: (path) => selfWriteUntilByPath.delete(path),
 	});
 
 	async function discardPersistedWindowState() {
@@ -1699,72 +1701,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	}
 
-	/**
-	 * Save the given (or active) tab to disk. Returns true on success.
-	 *
-	 * Important details:
-	 * - Operates on a snapshot of `rawContent` taken BEFORE the await, so further
-	 *   keystrokes during the in-flight invoke are not mistakenly marked clean
-	 *   (TOCTOU fix). The dirty flag is recomputed against the snapshot, not
-	 *   forced to false.
-	 * - Marks the destination path as a "self write" so the file-watcher does
-	 *   not bounce the change back into the editor and clobber unsaved input.
-	 * - Untitled tabs (empty path) are NOT silently auto-saved; they require an
-	 *   interactive save dialog (caller must come from a user gesture).
-	 */
 	async function saveContent(tabId?: string): Promise<boolean> {
-		const tab = tabId
-			? tabManager.tabs.find((t) => t.id === tabId)
-			: tabManager.activeTab;
-		if (!tab) return false;
-		// No further gating: explicit user-initiated saves should always
-		// work. Auto-save filters by `path !== '' && (isEditing || isSplit)`
-		// in the effect itself, so untitled or view-mode tabs can only
-		// reach this function through a modal "Save" choice or a hotkey,
-		// both of which are legitimate save triggers — including for
-		// untitled tabs in view mode (e.g. unsaved-changes modal at close).
-
-		let targetPath = tab.path;
-
-		if (!targetPath) {
-			// Special handling for new (untitled) files. Prefill the numbered
-			// tab title so the dialog itself names which tab is being saved.
-			const selected = await save({
-				filters: [
-					{ name: 'Markdown', extensions: ['md'] },
-					{ name: 'All Files', extensions: ['*'] },
-				],
-				defaultPath: tab.title,
-			});
-			if (selected) {
-				targetPath = selected;
-			} else {
-				return false; // User cancelled save dialog
-			}
-		}
-
-		const snapshot = tab.rawContent;
-		selfWriteUntilByPath.set(targetPath, Date.now() + SELF_WRITE_GRACE_MS);
-
-		try {
-			await invoke('save_file_content', { path: targetPath, content: snapshot });
-			// Refresh the grace window — the watcher event arrives after the write
-			// completes, not when it started.
-			selfWriteUntilByPath.set(targetPath, Date.now() + SELF_WRITE_GRACE_MS);
-			if (tab.path === '') {
-				// We just saved an untitled tab for the first time
-				tabManager.updateTabPath(tab.id, targetPath);
-				saveRecentFile(targetPath);
-			}
-			tab.originalContent = snapshot;
-			// If the user kept typing during the await, the buffer is still dirty.
-			tab.isDirty = tab.rawContent !== snapshot;
-			return true;
-		} catch (e) {
-			selfWriteUntilByPath.delete(targetPath);
-			console.error('Failed to save file', e);
-			return false;
-		}
+		return documentSession.saveContent(tabId);
 	}
 
 	async function saveContentAs(): Promise<boolean> {

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+const documentSessionPath = 'src/lib/sessions/documentSession.svelte.ts';
+const documentSession = existsSync(documentSessionPath) ? readFileSync(documentSessionPath, 'utf8') : '';
 
 // Window close (issue #189): instead of one aggregate "you have N unsaved
 // files" modal, the red close button walks the dirty tabs one at a time —
@@ -73,7 +75,7 @@ test('the walk proceeds in strict tab-strip order', () => {
 });
 
 test('the untitled save dialog prefills the numbered tab title', () => {
-	const fn = viewer.slice(viewer.indexOf('async function saveContent'));
+	const fn = documentSession.slice(documentSession.indexOf('async function saveContent'));
 	const scope = fn.slice(0, fn.indexOf('async function saveContentAs'));
 	assert.match(scope, /defaultPath: tab\.title/);
 });
