@@ -1,10 +1,10 @@
-name: Build Windows x64 (Artifact Only)
+name: Build Windows x64 Portable
 
 on:
-  workflow_dispatch: # 手動觸發按紐
+  workflow_dispatch:
 
 jobs:
-  build-windows:
+  build-portable:
     runs-on: windows-latest
 
     steps:
@@ -21,29 +21,17 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      # 預先下載 NSIS，防範 10054 網路斷線錯誤
-      - name: Pre-download NSIS
-        shell: powershell
-        run: |
-          $nsisDir = "$env:LOCALAPPDATA\tauri\NSIS"
-          $pluginsDir = "$nsisDir\Plugins\x86-unicode"
-          New-Item -ItemType Directory -Force -Path $nsisDir, $pluginsDir
-
-          $nsisZip = "$env:TEMP\nsis.zip"
-          Invoke-WebRequest -Uri "https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip" -OutFile $nsisZip
-          Expand-Archive -Path $nsisZip -DestinationPath $nsisDir -Force
-
-          Invoke-WebRequest -Uri "https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.2/nsis_tauri_utils.dll" -OutFile "$pluginsDir\nsis_tauri_utils.dll"
-
-      # 關閉簽名建置 (無須密鑰)
       - name: Build Tauri App (No Sign)
         run: npm run tauri build -- --no-sign
 
-      # 將打包結果上傳至 Artifacts 供直接下載
-      - name: Upload Artifacts
+      - name: Prepare Executable File
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          cp src-tauri/target/release/Markpad.exe "Markpad_${VERSION}_x64_Portable.exe"
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Markpad-Windows-x64
-          path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/Markpad.exe
+          name: Markpad-Windows-x64-Portable
+          path: Markpad_*_x64_Portable.exe
