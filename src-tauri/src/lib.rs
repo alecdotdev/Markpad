@@ -113,6 +113,73 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+fn safe_path_component<'a>(value: &'a str, label: &str) -> Result<&'a str, String> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.contains(['/', '\\'])
+        || Path::new(value).is_absolute()
+    {
+        return Err(format!("Invalid {}", label));
+    }
+    Ok(value)
+}
+
+fn resolve_image_directory(parent_dir: &str, image_directory: &str) -> Result<(PathBuf, PathBuf), String> {
+    let root = Path::new(parent_dir)
+        .canonicalize()
+        .map_err(|e| format!("Invalid image parent directory: {}", e))?;
+    let requested_dir = if image_directory.is_empty() {
+        root.clone()
+    } else {
+        root.join(safe_path_component(image_directory, "image directory")?)
+    };
+
+    fs::create_dir_all(&requested_dir).map_err(|e| e.to_string())?;
+    let image_dir = requested_dir.canonicalize().map_err(|e| e.to_string())?;
+    if !image_dir.starts_with(&root) {
+        return Err("Image directory must remain inside the document directory".to_string());
+    }
+    Ok((root, image_dir))
+}
+
+fn ensure_path_within_root(root: &Path, path: &Path) -> Result<(), String> {
+    let resolved = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => path.canonicalize().map_err(|e| e.to_string())?,
+        _ => path.to_path_buf(),
+    };
+    if resolved.starts_with(root) {
+        Ok(())
+    } else {
+        Err("Image path must remain inside the document directory".to_string())
+    }
+}
+
+const MAX_VSIX_DOWNLOAD_BYTES: usize = 20 * 1024 * 1024;
+const MAX_VSIX_ENTRIES: usize = 10_000;
+const MAX_VSIX_UNCOMPRESSED_BYTES: u64 = 100 * 1024 * 1024;
+const MAX_THEME_JSON_BYTES: u64 = 2 * 1024 * 1024;
+
+fn validate_vsix_archive_limits<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<(), String> {
+    if archive.len() > MAX_VSIX_ENTRIES {
+        return Err("VSIX contains too many files".to_string());
+    }
+
+    let mut total_size = 0_u64;
+    for index in 0..archive.len() {
+        let file = archive.by_index(index).map_err(|e| e.to_string())?;
+        total_size = total_size
+            .checked_add(file.size())
+            .ok_or("VSIX uncompressed size overflow")?;
+        if total_size > MAX_VSIX_UNCOMPRESSED_BYTES {
+            return Err("VSIX expands beyond the allowed size".to_string());
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,6 +275,35 @@ mod tests {
         let out = result.expect("fenced multibyte content must not panic");
         assert!(out.contains("中文开头的一行"), "got: {out}");
         assert!(out.contains("<img src=\"outside.png\""), "got: {out}");
+    }
+
+    #[test]
+    fn path_components_reject_traversal_separators_and_absolute_paths() {
+        for invalid in ["", ".", "..", "../theme", "folder/theme", "folder\\theme", "/tmp/theme"] {
+            assert!(safe_path_component(invalid, "test").is_err(), "{invalid}");
+        }
+        assert_eq!(safe_path_component("SynthWave '84", "test").unwrap(), "SynthWave '84");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn image_directory_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("markpad-path-root-{nonce}"));
+        let outside = std::env::temp_dir().join(format!("markpad-path-outside-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, root.join("images")).unwrap();
+
+        assert!(resolve_image_directory(root.to_str().unwrap(), "images").is_err());
+
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 }
 
@@ -789,7 +885,7 @@ fn save_theme(app: AppHandle, theme: String) -> Result<(), String> {
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
     let theme_path = config_dir.join("theme.txt");
-    fs::write(theme_path, theme).map_err(|e| e.to_string())
+    atomic_write(&theme_path, theme.as_bytes()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -845,14 +941,30 @@ async fn fetch_vscode_theme(app: AppHandle, url: String) -> Result<String, Strin
 
     let vsix_url = format!("https://{publisher}.gallery.vsassets.io/_apis/public/gallery/publisher/{publisher}/extension/{extension}/latest/assetbyname/Microsoft.VisualStudio.Services.VSIXPackage");
 
-    let response = reqwest::get(&vsix_url).await.map_err(|e| e.to_string())?;
-    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    let mut response = reqwest::get(&vsix_url).await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("VSIX download failed with HTTP {}", response.status()));
+    }
+    if response.content_length().is_some_and(|length| length > MAX_VSIX_DOWNLOAD_BYTES as u64) {
+        return Err("VSIX download exceeds the allowed size".to_string());
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+        if bytes.len() + chunk.len() > MAX_VSIX_DOWNLOAD_BYTES {
+            return Err("VSIX download exceeds the allowed size".to_string());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
 
-    let reader = Cursor::new(bytes.as_ref());
+    let reader = Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(reader).map_err(|e| e.to_string())?;
+    validate_vsix_archive_limits(&mut archive)?;
 
     let mut package_json_data = String::new();
     if let Ok(mut file) = archive.by_name("extension/package.json") {
+        if file.size() > MAX_THEME_JSON_BYTES {
+            return Err("VSIX package manifest exceeds the allowed size".to_string());
+        }
         file.read_to_string(&mut package_json_data)
             .map_err(|e| e.to_string())?;
     } else {
@@ -901,6 +1013,9 @@ async fn fetch_vscode_theme(app: AppHandle, url: String) -> Result<String, Strin
         }
         let full_path = format!("extension/{}", path).replace("\\", "/");
         let mut theme_file = archive.by_name(&full_path).map_err(|e| e.to_string())?;
+        if theme_file.size() > MAX_THEME_JSON_BYTES {
+            return Err("VSIX theme file exceeds the allowed size".to_string());
+        }
         let mut theme_json = String::new();
         theme_file
             .read_to_string(&mut theme_json)
@@ -915,10 +1030,11 @@ async fn fetch_vscode_theme(app: AppHandle, url: String) -> Result<String, Strin
         } else {
             matched_name_str.clone()
         };
+        let dest_name = safe_path_component(&dest_name, "theme name")?;
         let theme_file_path = themes_dir.join(format!("{}.json", dest_name));
-        fs::write(&theme_file_path, &theme_json).map_err(|e| e.to_string())?;
+        atomic_write(&theme_file_path, theme_json.as_bytes()).map_err(|e| e.to_string())?;
 
-        return Ok(dest_name);
+        return Ok(dest_name.to_string());
     }
 
     Err("Theme name not found in extension".to_string())
@@ -946,6 +1062,7 @@ fn get_saved_vscode_themes(app: AppHandle) -> Result<Vec<String>, String> {
 #[tauri::command]
 fn read_vscode_theme(app: AppHandle, name: String) -> Result<String, String> {
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let name = safe_path_component(&name, "theme name")?;
     let theme_file_path = config_dir.join("themes").join(format!("{}.json", name));
     fs::read_to_string(theme_file_path).map_err(|e| e.to_string())
 }
@@ -953,6 +1070,7 @@ fn read_vscode_theme(app: AppHandle, name: String) -> Result<String, String> {
 #[tauri::command]
 fn delete_vscode_theme(app: AppHandle, name: String) -> Result<(), String> {
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let name = safe_path_component(&name, "theme name")?;
     let theme_file_path = config_dir.join("themes").join(format!("{}.json", name));
     fs::remove_file(theme_file_path).map_err(|e| e.to_string())
 }
@@ -1109,12 +1227,10 @@ fn clipboard_read_image(macos_image_scaling: bool) -> Result<String, String> {
 
 #[tauri::command]
 fn save_image(parent_dir: String, filename: String, base64_data: String, image_directory: String) -> Result<String, String> {
-    let img_dir = Path::new(&parent_dir).join(&image_directory);
-    if !img_dir.exists() {
-        fs::create_dir_all(&img_dir).map_err(|e| e.to_string())?;
-    }
-
-    let file_path = img_dir.join(&filename);
+    let filename = safe_path_component(&filename, "image filename")?;
+    let (root, img_dir) = resolve_image_directory(&parent_dir, &image_directory)?;
+    let file_path = img_dir.join(filename);
+    ensure_path_within_root(&root, &file_path)?;
 
     // remove potential data:image/png;base64, prefix
     let b64 = if let Some(pos) = base64_data.find("base64,") {
@@ -1128,10 +1244,10 @@ fn save_image(parent_dir: String, filename: String, base64_data: String, image_d
         .decode(b64)
         .map_err(|e: base64::DecodeError| e.to_string())?;
 
-    fs::write(&file_path, bytes).map_err(|e| e.to_string())?;
+    atomic_write(&file_path, &bytes).map_err(|e| e.to_string())?;
 
     let rel_path = if image_directory.is_empty() {
-        filename
+        filename.to_string()
     } else {
         format!("{}/{}", image_directory, filename)
     };
@@ -1141,10 +1257,7 @@ fn save_image(parent_dir: String, filename: String, base64_data: String, image_d
 
 #[tauri::command]
 fn copy_file_to_img(src_path: String, parent_dir: String, image_directory: String) -> Result<String, String> {
-    let img_dir = Path::new(&parent_dir).join(&image_directory);
-    if !img_dir.exists() {
-        fs::create_dir_all(&img_dir).map_err(|e| e.to_string())?;
-    }
+    let (root, img_dir) = resolve_image_directory(&parent_dir, &image_directory)?;
 
     let src = Path::new(&src_path);
     if !src.exists() {
@@ -1166,6 +1279,7 @@ fn copy_file_to_img(src_path: String, parent_dir: String, image_directory: Strin
     }
 
     let final_dest = img_dir.join(&dest_name);
+    ensure_path_within_root(&root, &final_dest)?;
     fs::copy(src, &final_dest).map_err(|e| e.to_string())?;
 
     let rel_path = if image_directory.is_empty() {
