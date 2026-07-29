@@ -944,7 +944,7 @@ export const translations: Record<LanguageCode, Translation> = {
             wordCount: '字數統計',
             lineHighlight: '目前行高亮',
             showWhitespace: '顯示空白字元',
-            showTabs: '顯示定位字元',
+            showTabs: '顯示分頁欄',
             restoreStateOnReopen: '重新開啟時還原狀態',
             startInEditor: '以編輯器啟動',
             newFileDefaultMode: '新檔案以編輯器開啟',
