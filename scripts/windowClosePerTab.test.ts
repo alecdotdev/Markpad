@@ -80,6 +80,12 @@ test('the untitled save dialog prefills the numbered tab title', () => {
 	assert.match(scope, /defaultPath: tab\.title/);
 });
 
+test('save-as keeps snapshot-based dirty tracking in documentSession', () => {
+	const fn = documentSession.slice(documentSession.indexOf('async function saveContentAs'));
+	assert.match(fn, /const snapshot = tab\.rawContent;/);
+	assert.match(fn, /tab\.isDirty = tab\.rawContent !== snapshot;/);
+});
+
 test('the restore-on-reopen branch persists window state via the shared helper', () => {
 	const handler = closeHandler();
 	assert.match(handler, /persistWindowState\(\);/);

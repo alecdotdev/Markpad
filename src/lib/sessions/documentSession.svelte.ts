@@ -164,5 +164,33 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		}
 	}
 
-	return { loadMarkdown, saveContent };
+	async function saveContentAs(): Promise<boolean> {
+		const tab = tabManager.activeTab;
+		if (!tab) return false;
+		const selected = await save({
+			filters: [
+				{ name: 'Markdown', extensions: ['md'] },
+				{ name: 'All Files', extensions: ['*'] },
+			],
+			defaultPath: tab.path || undefined,
+		});
+		if (!selected) return false;
+		const snapshot = tab.rawContent;
+		options.markSelfWrite(selected);
+		try {
+			await invoke('save_file_content', { path: selected, content: snapshot });
+			options.markSelfWrite(selected);
+			tabManager.updateTabPath(tab.id, selected);
+			options.saveRecentFile(selected);
+			tab.originalContent = snapshot;
+			tab.isDirty = tab.rawContent !== snapshot;
+			return true;
+		} catch (error) {
+			options.clearSelfWrite(selected);
+			options.onError('Failed to save file as', error);
+			return false;
+		}
+	}
+
+	return { loadMarkdown, saveContent, saveContentAs };
 }

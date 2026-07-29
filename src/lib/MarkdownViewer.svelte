@@ -1706,35 +1706,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	}
 
 	async function saveContentAs(): Promise<boolean> {
-		const tab = tabManager.activeTab;
-		if (!tab) return false;
-
-		const selected = await save({
-			filters: [
-				{ name: 'Markdown', extensions: ['md'] },
-				{ name: 'All Files', extensions: ['*'] },
-			],
-			defaultPath: tab.path || undefined,
-		});
-
-		if (selected) {
-			const snapshot = tab.rawContent;
-			selfWriteUntilByPath.set(selected, Date.now() + SELF_WRITE_GRACE_MS);
-			try {
-				await invoke('save_file_content', { path: selected, content: snapshot });
-				selfWriteUntilByPath.set(selected, Date.now() + SELF_WRITE_GRACE_MS);
-				tabManager.updateTabPath(tab.id, selected);
-				saveRecentFile(selected);
-				tab.originalContent = snapshot;
-				tab.isDirty = tab.rawContent !== snapshot;
-				return true;
-			} catch (e) {
-				selfWriteUntilByPath.delete(selected);
-				console.error('Failed to save file as', e);
-				return false;
-			}
-		}
-		return false;
+		return documentSession.saveContentAs();
 	}
 
 	/**
