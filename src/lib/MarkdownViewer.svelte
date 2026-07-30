@@ -1469,37 +1469,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
     }
 
 	async function toggleTaskCheckbox(checkbox: HTMLInputElement) {
-		const tab = tabManager.activeTab;
-		if (!tab || !tab.path) return;
-		const raw = tab.rawContent;
-
-		// find which task item this is by counting checkboxes in DOM
 		const allBoxes = Array.from(markdownBody?.querySelectorAll('[data-task-checkbox]') || []);
 		const index = allBoxes.indexOf(checkbox);
 		if (index === -1) return;
-
-		// checkbox.checked is still the OLD state (e.preventDefault blocked the toggle)
 		const nowChecked = !checkbox.checked;
-
-		// replace the nth [ ] or [x] in the raw markdown
-		let count = 0;
-		const updated = raw.replace(/^(\s*[-*+] )\[( |x|X)\]/gm, (match, prefix) => {
-			if (count === index) {
-				count++;
-				return `${prefix}[${nowChecked ? 'x' : ' '}]`;
-			}
-			count++;
-			return match;
-		});
-
-		if (updated === raw) return;
-
-		// Update the single in-memory source before saving. saveContent keeps the
-		// tab dirty if its write fails, so a disk error cannot discard this edit.
-		tabManager.updateTabRawContent(tab.id, updated);
-		await saveContent(tab.id);
-
-		// update DOM optimistically
+		if (!(await documentSession.toggleTaskCheckbox(index, nowChecked))) return;
 		checkbox.checked = nowChecked;
 		const li = checkbox.closest('li');
 		if (li) {

@@ -192,5 +192,20 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		}
 	}
 
-	return { loadMarkdown, saveContent, saveContentAs };
+	async function toggleTaskCheckbox(index: number, nowChecked: boolean) {
+		const tab = tabManager.activeTab;
+		if (!tab || !tab.path) return false;
+		const raw = tab.rawContent;
+		let count = 0;
+		const updated = raw.replace(/^(\s*[-*+] )\[( |x|X)\]/gm, (match, prefix) => {
+			if (count++ === index) return `${prefix}[${nowChecked ? 'x' : ' '}]`;
+			return match;
+		});
+		if (updated === raw) return false;
+		tabManager.updateTabRawContent(tab.id, updated);
+		await saveContent(tab.id);
+		return true;
+	}
+
+	return { loadMarkdown, saveContent, saveContentAs, toggleTaskCheckbox };
 }
