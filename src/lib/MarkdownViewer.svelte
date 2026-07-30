@@ -492,6 +492,15 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			addToast(`${message}: ${String(error)}`, 'error');
 		},
 		selfWriteGraceMs: SELF_WRITE_GRACE_MS,
+		cancelPendingAutoSave,
+		askClose: (title) =>
+			askCustom(t('modal.youHaveUnsavedChanges', settings.language).replace('{title}', title), {
+				title: t('modal.unsavedChanges', settings.language),
+				kind: 'warning',
+				showSave: true,
+			}),
+		onCloseSaveNewerEdits: () => addToast(t('toast.savedNewerEdits', settings.language), 'info'),
+		onCloseAutoSaveFailed: () => addToast(t('toast.autoSaveFailed', settings.language), 'error'),
 	});
 
 	async function discardPersistedWindowState() {
@@ -1533,57 +1542,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	}
 
 	async function canCloseTab(tabId: string): Promise<boolean> {
-		const tab = tabManager.tabs.find((t) => t.id === tabId);
-		if (!tab || (!tab.isDirty && tab.path !== '')) return true;
-
-		if (!tab.isDirty) return true;
-
-		// Silent save path: only when auto-save is on, the user did NOT ask
-		// for confirmation, and the tab has a real path. Untitled tabs always
-		// need a save dialog, which means the modal flow is the right place
-		// for them. We cancel the pending timer right before the manual save
-		// to avoid a duplicate write from a timer that fires concurrently.
-		if (settings.autoSave && !settings.confirmBeforeSave && tab.path !== '') {
-			cancelPendingAutoSave(tabId);
-			const success = await saveContent(tabId);
-			// Only allow the close if the tab is fully clean afterwards.
-			// `saveContent` resolves true even when post-save `isDirty=true`
-			// (the user typed during the await — TOCTOU) — closing here
-			// would silently drop those new keystrokes.
-			if (success && !tab.isDirty) return true;
-			if (success) {
-				// Save succeeded but the tab is dirty again — let the user
-				// decide via the modal whether to save again, discard, or cancel.
-				addToast(t('toast.savedNewerEdits', settings.language), 'info');
-			} else {
-				// Silent save failed — surface and fall through to the modal.
-				addToast(t('toast.autoSaveFailed', settings.language), 'error');
-			}
-		}
-
-		const response = await askCustom(t('modal.youHaveUnsavedChanges', settings.language).replace('{title}', tab.title), {
-			title: t('modal.unsavedChanges', settings.language),
-			kind: 'warning',
-			showSave: true,
-		});
-
-		// Important: do NOT cancel the pending auto-save timer before this
-		// modal. If the user clicks Cancel, the tab remains dirty and we
-		// want background auto-save to keep firing on the existing schedule.
-		if (response === 'cancel') return false;
-		if (response === 'save') {
-			cancelPendingAutoSave(tabId);
-			return await saveContent(tabId);
-		}
-
-		// Discard: drop pending save so we don't write what the user just
-		// threw away, and revert to the last saved content so the tab is
-		// clean — callers either close it (tab close) or keep it open for the
-		// window-state snapshot (window close with restore enabled).
-		cancelPendingAutoSave(tabId);
-		tab.rawContent = tab.originalContent;
-		tab.isDirty = false;
-		return true;
+		return documentSession.canCloseTab(tabId);
 	}
 
 	async function toggleEdit(silentSave = false) {

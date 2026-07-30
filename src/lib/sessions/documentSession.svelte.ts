@@ -26,6 +26,10 @@ type DocumentSessionOptions = {
 	renderRichContent: () => void;
 	onError: (message: string, error: unknown) => void;
 	selfWriteGraceMs: number;
+	cancelPendingAutoSave: (tabId: string) => void;
+	askClose: (title: string) => Promise<'save' | 'discard' | 'cancel'>;
+	onCloseSaveNewerEdits: () => void;
+	onCloseAutoSaveFailed: () => void;
 };
 
 export function createDocumentSession(options: DocumentSessionOptions) {
@@ -223,5 +227,28 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		return true;
 	}
 
-	return { loadMarkdown, saveContent, saveContentAs, toggleTaskCheckbox, shouldReloadExternalChange };
+	async function canCloseTab(tabId: string): Promise<boolean> {
+		const tab = tabManager.tabs.find((item) => item.id === tabId);
+		if (!tab || (!tab.isDirty && tab.path !== '')) return true;
+		if (!tab.isDirty) return true;
+		if (settings.autoSave && !settings.confirmBeforeSave && tab.path !== '') {
+			options.cancelPendingAutoSave(tabId);
+			const success = await saveContent(tabId);
+			if (success && !tab.isDirty) return true;
+			if (success) options.onCloseSaveNewerEdits();
+			else options.onCloseAutoSaveFailed();
+		}
+		const response = await options.askClose(tab.title);
+		if (response === 'cancel') return false;
+		if (response === 'save') {
+			options.cancelPendingAutoSave(tabId);
+			return saveContent(tabId);
+		}
+		options.cancelPendingAutoSave(tabId);
+		tab.rawContent = tab.originalContent;
+		tab.isDirty = false;
+		return true;
+	}
+
+	return { loadMarkdown, saveContent, saveContentAs, toggleTaskCheckbox, shouldReloadExternalChange, canCloseTab };
 }

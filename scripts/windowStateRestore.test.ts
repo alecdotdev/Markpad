@@ -5,6 +5,7 @@ import test from 'node:test';
 const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 const session = readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8');
+const documentSession = readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8');
 
 // Session restore persists WINDOW state only: which files are open, the
 // active tab, and per-tab UI (edit mode, split, scroll). Document content
@@ -52,7 +53,7 @@ test('startup restore reads content from disk, not from the snapshot', () => {
 });
 
 test('the discard choice reverts the tab to its last saved content', () => {
-	const fn = slice(viewer, 'async function canCloseTab', 'async function toggleEdit');
+	const fn = slice(documentSession, 'async function canCloseTab', 'return { loadMarkdown');
 	assert.match(fn, /tab\.rawContent = tab\.originalContent;/);
 	assert.match(fn, /tab\.isDirty = false;/);
 });
