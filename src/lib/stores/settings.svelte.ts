@@ -176,6 +176,7 @@ export class SettingsStore {
 	imageDirectory = $state('img');
 	macosImageScaling = $state(true);
 	language = $state<LanguageCode>('en');
+	showEditorToolbar = $state(true);
 	editorToolbarOrder = $state<string[]>([...DEFAULT_EDITOR_TOOLBAR_ORDER]);
 	editorToolbarHidden = $state<string[]>([]);
 	titlebarToolbarOrder = $state<string[]>([...DEFAULT_TITLEBAR_TOOLBAR_ORDER]);
@@ -225,6 +226,7 @@ export class SettingsStore {
 			const savedLanguage = localStorage.getItem('editor.language');
 			const savedEditorToolbarOrder = localStorage.getItem('editor.toolbarOrder');
 			const savedEditorToolbarHidden = localStorage.getItem('editor.toolbarHidden');
+			const savedShowEditorToolbar = localStorage.getItem('editor.showEditorToolbar');
 			const savedTitlebarToolbarOrder = localStorage.getItem('titlebar.toolbarOrder');
 			const savedTitlebarToolbarHidden = localStorage.getItem('titlebar.toolbarHidden');
 			const savedTitlebarToolbarPlacement = localStorage.getItem('titlebar.toolbarPlacement');
@@ -290,6 +292,7 @@ export class SettingsStore {
 			if (savedTocWidth !== null) this.tocWidth = parseFontSize(savedTocWidth, 240, 180, 420);
 			if (savedImageDirectory !== null) this.imageDirectory = savedImageDirectory;
 			if (savedMacosImageScaling !== null) this.macosImageScaling = savedMacosImageScaling === 'true';
+			if (savedShowEditorToolbar !== null) this.showEditorToolbar = savedShowEditorToolbar === 'true';
 			this.editorToolbarOrder = normalizeEditorToolbarOrder(parseStringList(savedEditorToolbarOrder));
 			this.editorToolbarHidden = normalizeEditorToolbarHidden(parseStringList(savedEditorToolbarHidden));
 			this.titlebarToolbarOrder = normalizeTitlebarToolbarOrder(parseStringList(savedTitlebarToolbarOrder));
@@ -364,6 +367,7 @@ export class SettingsStore {
 					localStorage.setItem('editor.imageDirectory', this.imageDirectory);
 					localStorage.setItem('editor.macosImageScaling', String(this.macosImageScaling));
 					localStorage.setItem('editor.language', this.language);
+					localStorage.setItem('editor.showEditorToolbar', String(this.showEditorToolbar));
 					localStorage.setItem('editor.toolbarOrder', JSON.stringify(normalizeEditorToolbarOrder(this.editorToolbarOrder)));
 					localStorage.setItem('editor.toolbarHidden', JSON.stringify(normalizeEditorToolbarHidden(this.editorToolbarHidden)));
 					localStorage.setItem('titlebar.toolbarOrder', JSON.stringify(normalizeTitlebarToolbarOrder(this.titlebarToolbarOrder)));
@@ -509,6 +513,10 @@ export class SettingsStore {
 
 	setLanguage(lang: LanguageCode) {
 		this.language = lang;
+	}
+
+	toggleEditorToolbar() {
+		this.showEditorToolbar = !this.showEditorToolbar;
 	}
 
 	setEditorToolbarToolVisible(id: string, visible: boolean) {

@@ -1375,9 +1375,45 @@
 		editor.getAction("actions.find")?.run();
 	}
 
-	export function runEditorAction(actionId: string) {
+	export function insertTableCustom(rows: number, cols: number) {
 		if (!editor) return;
 		editor.focus();
+		const selection = editor.getSelection();
+		if (!selection) return;
+
+		const c = Math.max(1, cols);
+		const r = Math.max(1, rows);
+
+		let table = "\n";
+		const headers = Array.from({ length: c }, (_, i) => `Header ${i + 1}`);
+		table += "| " + headers.join(" | ") + " |\n";
+
+		const dividers = Array(c).fill("---");
+		table += "| " + dividers.join(" | ") + " |\n";
+
+		const dataRowCount = Math.max(1, r - 1);
+		for (let row = 0; row < dataRowCount; row++) {
+			const cells = Array.from({ length: c }, (_, col) => `Cell ${row + 1}.${col + 1}`);
+			table += "| " + cells.join(" | ") + " |\n";
+		}
+		table += "\n";
+
+		editor.executeEdits("insert-table", [
+			{
+				range: selection,
+				text: table,
+				forceMoveMarkers: true,
+			},
+		]);
+	}
+
+	export function runEditorAction(actionId: string, payload?: any) {
+		if (!editor) return;
+		editor.focus();
+		if (actionId === 'insert-table-grid' && payload && typeof payload === 'object') {
+			insertTableCustom(payload.rows ?? 2, payload.cols ?? 3);
+			return;
+		}
 		editor.getAction(actionId)?.run();
 	}
 

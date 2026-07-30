@@ -838,6 +838,14 @@
 							</div>
 
 							<div class="setting-item">
+								<label for="editor-show-toolbar">{t('settings.showEditorToolbar', settings.language)}</label>
+								<label class="toggle">
+									<input id="editor-show-toolbar" type="checkbox" checked={settings.showEditorToolbar} onchange={() => settings.toggleEditorToolbar()} />
+									<span class="toggle-slider"></span>
+								</label>
+							</div>
+
+							<div class="setting-item">
 								<label for="editor-word-count">{t('settings.wordCount', settings.language)}</label>
 								<label class="toggle">
 									<input id="editor-word-count" type="checkbox" checked={settings.wordCount} onchange={() => settings.toggleWordCount()} />
@@ -1164,143 +1172,147 @@
 							<h2>{t('settings.toolbarsSettings', settings.language)}</h2>
 						</div>
 
-						<details class="toolbar-settings toolbar-settings-accordion">
-							<summary class="toolbar-settings-summary">
-								<span class="toolbar-settings-chevron" aria-hidden="true"></span>
-								<span>{t('settings.applicationToolbar', settings.language)}</span>
-							</summary>
-							<div class="toolbar-settings-body">
-								<div class="toolbar-settings-header">
-									<button
-										type="button"
-										class="reset-text-btn"
-										onclick={() => settings.resetTitlebarToolbar()}>
-										{t('settings.resetToolbar', settings.language)}
-									</button>
-								</div>
-								<div class="toolbar-settings-list" role="list">
-									{#each titlebarToolbarSettingsActions as action, index (action.id)}
-										{@const actionName = t(action.labelKey, settings.language) === action.labelKey ? action.fallbackName : t(action.labelKey, settings.language)}
-										<div
-											class="toolbar-tool-row titlebar-toolbar-row"
-											class:drag-source={titlebarToolbarDraggingId === action.id}
-											class:drag-over={titlebarToolbarDragOverId === action.id}
-											role="listitem"
-											data-titlebar-toolbar-action-id={action.id}>
+						<div class="toolbar-section">
+							<div class="toolbar-section-header">
+								<h3>{t('settings.applicationToolbar', settings.language)}</h3>
+								<button
+									type="button"
+									class="reset-text-btn"
+									onclick={() => settings.resetTitlebarToolbar()}>
+									{t('settings.resetToolbar', settings.language)}
+								</button>
+							</div>
+							<div class="toolbar-settings-list" role="list">
+								{#each titlebarToolbarSettingsActions as action, index (action.id)}
+									{@const actionName = t(action.labelKey, settings.language) === action.labelKey ? action.fallbackName : t(action.labelKey, settings.language)}
+									<div
+										class="toolbar-tool-row titlebar-toolbar-row"
+										class:drag-source={titlebarToolbarDraggingId === action.id}
+										class:drag-over={titlebarToolbarDragOverId === action.id}
+										role="listitem"
+										data-titlebar-toolbar-action-id={action.id}>
+										<button
+											type="button"
+											class="toolbar-drag-handle"
+											aria-label={`${t('settings.move', settings.language)}: ${actionName}`}
+											onpointerdown={(e) => handleTitlebarToolbarDragPointerDown(e, action.id)}>
+											<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+												<circle cx="9" cy="5" r="1" fill="currentColor"/>
+												<circle cx="9" cy="12" r="1" fill="currentColor"/>
+												<circle cx="9" cy="19" r="1" fill="currentColor"/>
+												<circle cx="15" cy="5" r="1" fill="currentColor"/>
+												<circle cx="15" cy="12" r="1" fill="currentColor"/>
+												<circle cx="15" cy="19" r="1" fill="currentColor"/>
+											</svg>
+										</button>
+										<label class="toggle">
+											<input
+												id={`titlebar-toolbar-action-${action.id}`}
+												type="checkbox"
+												checked={isTitlebarToolbarActionVisible(action.id)}
+												disabled={action.required}
+												onchange={(e) => settings.setTitlebarToolbarActionVisible(action.id, e.currentTarget.checked)}
+											/>
+											<span class="toggle-slider"></span>
+										</label>
+										<span class="toolbar-tool-name">{actionName}</span>
+										<div class="toolbar-placement-controls" role="group" aria-label={`${t('settings.toolbarPlacement', settings.language)}: ${actionName}`}>
 											<button
 												type="button"
-												class="toolbar-drag-handle"
-												aria-label={`${t('settings.move', settings.language)}: ${actionName}`}
-												onpointerdown={(e) => handleTitlebarToolbarDragPointerDown(e, action.id)}>
-												::
+												class:active={getTitlebarToolbarActionPlacement(action.id) === 'bar'}
+												onclick={() => settings.setTitlebarToolbarActionPlacement(action.id, 'bar')}>
+												{t('settings.toolbarOnBar', settings.language)}
 											</button>
-											<label class="toolbar-tool-toggle" for={`titlebar-toolbar-action-${action.id}`}>
-												<input
-													id={`titlebar-toolbar-action-${action.id}`}
-													type="checkbox"
-													checked={isTitlebarToolbarActionVisible(action.id)}
-													disabled={action.required}
-													onchange={(e) => settings.setTitlebarToolbarActionVisible(action.id, e.currentTarget.checked)}
-												/>
-												<span class="toolbar-tool-name">{actionName}</span>
-												<span class="toolbar-tool-sample">{action.sample}</span>
-											</label>
-											<div class="toolbar-placement-controls" role="group" aria-label={`${t('settings.toolbarPlacement', settings.language)}: ${actionName}`}>
-												<button
-													type="button"
-													class:active={getTitlebarToolbarActionPlacement(action.id) === 'bar'}
-													onclick={() => settings.setTitlebarToolbarActionPlacement(action.id, 'bar')}>
-													{t('settings.toolbarOnBar', settings.language)}
-												</button>
-												<button
-													type="button"
-													class:active={getTitlebarToolbarActionPlacement(action.id) === 'menu'}
-													onclick={() => settings.setTitlebarToolbarActionPlacement(action.id, 'menu')}>
-													{t('settings.toolbarInMenu', settings.language)}
-												</button>
-											</div>
-											<div class="toolbar-order-controls">
-												<button
-													type="button"
-													disabled={index === 0}
-													aria-label={`${t('settings.moveUp', settings.language)}: ${actionName}`}
-													onclick={() => settings.moveTitlebarToolbarAction(action.id, 'up')}>
-													{t('settings.moveUp', settings.language)}
-												</button>
-												<button
-													type="button"
-													disabled={index === titlebarToolbarSettingsActions.length - 1}
-													aria-label={`${t('settings.moveDown', settings.language)}: ${actionName}`}
-													onclick={() => settings.moveTitlebarToolbarAction(action.id, 'down')}>
-													{t('settings.moveDown', settings.language)}
-												</button>
-											</div>
+											<button
+												type="button"
+												class:active={getTitlebarToolbarActionPlacement(action.id) === 'menu'}
+												onclick={() => settings.setTitlebarToolbarActionPlacement(action.id, 'menu')}>
+												{t('settings.toolbarInMenu', settings.language)}
+											</button>
 										</div>
-									{/each}
-								</div>
+										<div class="toolbar-order-controls">
+											<button
+												type="button"
+												disabled={index === 0}
+												aria-label={`${t('settings.moveUp', settings.language)}: ${actionName}`}
+												onclick={() => settings.moveTitlebarToolbarAction(action.id, 'up')}>
+												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
+											</button>
+											<button
+												type="button"
+												disabled={index === titlebarToolbarSettingsActions.length - 1}
+												aria-label={`${t('settings.moveDown', settings.language)}: ${actionName}`}
+												onclick={() => settings.moveTitlebarToolbarAction(action.id, 'down')}>
+												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+											</button>
+										</div>
+									</div>
+								{/each}
 							</div>
-						</details>
+						</div>
 
-						<details class="toolbar-settings toolbar-settings-accordion">
-							<summary class="toolbar-settings-summary">
-								<span class="toolbar-settings-chevron" aria-hidden="true"></span>
-								<span>{t('settings.editorToolbar', settings.language)}</span>
-							</summary>
-							<div class="toolbar-settings-body">
-								<div class="toolbar-settings-header">
-									<button
-										type="button"
-										class="reset-text-btn"
-										onclick={() => settings.resetEditorToolbar()}>
-										{t('settings.resetToolbar', settings.language)}
-									</button>
-								</div>
-								<div class="toolbar-settings-list" role="list">
-									{#each editorToolbarSettingsTools as tool, index (tool.id)}
-										<div
-											class="toolbar-tool-row"
-											class:drag-source={editorToolbarDraggingId === tool.id}
-											class:drag-over={editorToolbarDragOverId === tool.id}
-											role="listitem"
-											data-editor-toolbar-tool-id={tool.id}>
+						<div class="toolbar-section" style="margin-top: 24px;">
+							<div class="toolbar-section-header">
+								<h3>{t('settings.editorToolbar', settings.language)}</h3>
+								<button
+									type="button"
+									class="reset-text-btn"
+									onclick={() => settings.resetEditorToolbar()}>
+									{t('settings.resetToolbar', settings.language)}
+								</button>
+							</div>
+							<div class="toolbar-settings-list" role="list">
+								{#each editorToolbarSettingsTools as tool, index (tool.id)}
+									<div
+										class="toolbar-tool-row"
+										class:drag-source={editorToolbarDraggingId === tool.id}
+										class:drag-over={editorToolbarDragOverId === tool.id}
+										role="listitem"
+										data-editor-toolbar-tool-id={tool.id}>
+										<button
+											type="button"
+											class="toolbar-drag-handle"
+											aria-label={`${t('settings.move', settings.language)}: ${tool.name}`}
+											onpointerdown={(e) => handleEditorToolbarDragPointerDown(e, tool.id)}>
+											<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+												<circle cx="9" cy="5" r="1" fill="currentColor"/>
+												<circle cx="9" cy="12" r="1" fill="currentColor"/>
+												<circle cx="9" cy="19" r="1" fill="currentColor"/>
+												<circle cx="15" cy="5" r="1" fill="currentColor"/>
+												<circle cx="15" cy="12" r="1" fill="currentColor"/>
+												<circle cx="15" cy="19" r="1" fill="currentColor"/>
+											</svg>
+										</button>
+										<label class="toggle">
+											<input
+												id={`editor-toolbar-tool-${tool.id}`}
+												type="checkbox"
+												checked={isEditorToolbarToolVisible(tool.id)}
+												onchange={(e) => settings.setEditorToolbarToolVisible(tool.id, e.currentTarget.checked)}
+											/>
+											<span class="toggle-slider"></span>
+										</label>
+										<span class="toolbar-tool-name">{tool.name}</span>
+										<div class="toolbar-order-controls">
 											<button
 												type="button"
-												class="toolbar-drag-handle"
-												aria-label={`${t('settings.move', settings.language)}: ${tool.name}`}
-												onpointerdown={(e) => handleEditorToolbarDragPointerDown(e, tool.id)}>
-												::
+												disabled={index === 0}
+												aria-label={`${t('settings.moveUp', settings.language)}: ${tool.name}`}
+												onclick={() => settings.moveEditorToolbarTool(tool.id, 'up')}>
+												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
 											</button>
-											<label class="toolbar-tool-toggle" for={`editor-toolbar-tool-${tool.id}`}>
-												<input
-													id={`editor-toolbar-tool-${tool.id}`}
-													type="checkbox"
-													checked={isEditorToolbarToolVisible(tool.id)}
-													onchange={(e) => settings.setEditorToolbarToolVisible(tool.id, e.currentTarget.checked)}
-												/>
-												<span class="toolbar-tool-name">{tool.name}</span>
-												<span class="toolbar-tool-sample">{tool.label}</span>
-											</label>
-											<div class="toolbar-order-controls">
-												<button
-													type="button"
-													disabled={index === 0}
-													aria-label={`${t('settings.moveUp', settings.language)}: ${tool.name}`}
-													onclick={() => settings.moveEditorToolbarTool(tool.id, 'up')}>
-													{t('settings.moveUp', settings.language)}
-												</button>
-												<button
-													type="button"
-													disabled={index === editorToolbarSettingsTools.length - 1}
-													aria-label={`${t('settings.moveDown', settings.language)}: ${tool.name}`}
-													onclick={() => settings.moveEditorToolbarTool(tool.id, 'down')}>
-													{t('settings.moveDown', settings.language)}
-												</button>
-											</div>
+											<button
+												type="button"
+												disabled={index === editorToolbarSettingsTools.length - 1}
+												aria-label={`${t('settings.moveDown', settings.language)}: ${tool.name}`}
+												onclick={() => settings.moveEditorToolbarTool(tool.id, 'down')}>
+												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+											</button>
 										</div>
-									{/each}
-								</div>
+									</div>
+								{/each}
 							</div>
-						</details>
+						</div>
 					</div>
 					{:else if activeCategory === 'files'}
 					<div class="settings-group">
@@ -1700,55 +1712,53 @@
 		display: none;
 	}
 
-	.toolbar-settings-summary::marker {
-		content: '';
+	.toolbar-section {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
 	}
 
-	.toolbar-settings-chevron {
-		width: 7px;
-		height: 7px;
-		border-right: 1.5px solid var(--color-fg-muted);
-		border-bottom: 1.5px solid var(--color-fg-muted);
-		transform: rotate(-45deg);
-		transition: transform 0.12s ease;
-	}
-
-	.toolbar-settings[open] .toolbar-settings-chevron {
-		transform: rotate(45deg);
-	}
-
-	.toolbar-settings-body {
-		padding-bottom: 12px;
-	}
-
-	.toolbar-settings-header {
+	.toolbar-section-header {
 		display: flex;
 		align-items: center;
-		justify-content: flex-end;
-		gap: 12px;
-		margin-bottom: 8px;
+		justify-content: space-between;
+		padding-bottom: 2px;
+	}
+
+	.toolbar-section-header h3 {
+		margin: 0;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--color-fg-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
 	}
 
 	.toolbar-settings-list {
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
+		gap: 6px;
 	}
 
 	.toolbar-tool-row {
 		display: grid;
-		grid-template-columns: 18px minmax(0, 1fr) auto;
+		grid-template-columns: 20px 40px minmax(0, 1fr) auto;
 		align-items: center;
-		gap: 8px;
-		min-height: 34px;
-		padding: 4px 6px;
+		gap: 10px;
+		min-height: 38px;
+		padding: 4px 10px;
 		border: 1px solid var(--color-border-muted);
 		border-radius: 6px;
 		background: var(--color-canvas-subtle);
+		transition: background-color 0.15s, border-color 0.15s;
+	}
+
+	.toolbar-tool-row:hover {
+		border-color: var(--color-border-default);
 	}
 
 	.titlebar-toolbar-row {
-		grid-template-columns: 18px minmax(0, 1fr) auto auto;
+		grid-template-columns: 20px 40px minmax(0, 1fr) auto auto;
 	}
 
 	.toolbar-tool-row.drag-source {
@@ -1764,18 +1774,20 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 18px;
-		height: 26px;
+		width: 20px;
+		height: 24px;
 		padding: 0;
 		border: none;
 		background: transparent;
 		color: var(--color-fg-muted);
 		cursor: grab;
-		font-family: inherit;
-		font-size: 12px;
 		line-height: 1;
-		text-align: center;
 		user-select: none;
+		transition: color 0.15s;
+	}
+
+	.toolbar-drag-handle:hover {
+		color: var(--color-fg-default);
 	}
 
 	.toolbar-drag-handle:active,
@@ -1783,45 +1795,47 @@
 		cursor: grabbing;
 	}
 
-	.toolbar-tool-toggle {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		min-width: 0;
-		font-size: 13px;
-		color: var(--color-fg-default);
-	}
-
-	.toolbar-tool-toggle input {
-		flex: 0 0 auto;
-	}
-
 	.toolbar-tool-name {
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-	}
-
-	.toolbar-tool-sample {
-		flex: 0 0 28px;
-		width: 28px;
-		height: 24px;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		border: 1px solid var(--color-border-muted);
-		border-radius: 4px;
-		color: var(--color-fg-muted);
-		background: var(--color-canvas-default);
-		font-size: 12px;
-		font-weight: 600;
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--color-fg-default);
 	}
 
 	.toolbar-order-controls {
 		display: flex;
 		align-items: center;
-		gap: 4px;
+		gap: 2px;
+	}
+
+	.toolbar-order-controls button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		padding: 0;
+		border: none;
+		background: transparent;
+		color: var(--color-fg-muted);
+		cursor: pointer;
+		transition: color 0.15s, transform 0.1s;
+	}
+
+	.toolbar-order-controls button:hover:not(:disabled) {
+		color: var(--color-fg-default);
+	}
+
+	.toolbar-order-controls button:active:not(:disabled) {
+		transform: scale(0.9);
+	}
+
+	.toolbar-order-controls button:disabled {
+		opacity: 0.25;
+		cursor: not-allowed;
 	}
 
 	.toolbar-placement-controls {
@@ -1852,26 +1866,6 @@
 	.toolbar-placement-controls button:not(.active):hover {
 		background: var(--color-neutral-muted);
 		color: var(--color-fg-default);
-	}
-
-	.toolbar-order-controls button {
-		height: 24px;
-		padding: 0 8px;
-		border: 1px solid var(--color-border-default);
-		border-radius: 4px;
-		background: var(--color-canvas-default);
-		color: var(--color-fg-default);
-		font-size: 11px;
-		cursor: pointer;
-	}
-
-	.toolbar-order-controls button:disabled {
-		opacity: 0.45;
-		cursor: default;
-	}
-
-	.toolbar-order-controls button:not(:disabled):hover {
-		background: var(--color-neutral-muted);
 	}
 
 	.select-wrapper {

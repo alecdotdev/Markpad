@@ -45,6 +45,7 @@
 		canGoForward = false,
 
 		ontoggleEdit,
+		ontoggleEditorToolbar,
 		ontoggleSplit,
 		isEditing,
 		ondetach,
@@ -87,6 +88,7 @@
 		canGoForward?: boolean;
 
 		ontoggleEdit: () => void;
+		ontoggleEditorToolbar?: () => void;
 		ontoggleSplit?: () => void;
 		isEditing: boolean;
 		ondetach: (tabId: string) => void;
@@ -263,6 +265,9 @@
 			// Ctrl+F handles search, so we hide the entry there.
 			if (isMarkdown && (!isEditing || tabManager.activeTab?.isSplit)) {
 				list.push('find');
+			}
+			if (isEditing || tabManager.activeTab?.isSplit) {
+				list.push('editorToolbar');
 			}
 			list.push('zen');
 			list.push('tabs');
@@ -849,6 +854,19 @@
 							><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
 						<span class="action-label">{t('menu.editor', currentLanguage)}</span>
 						<span class="menu-shortcut">{modifier}+E</span>
+					</button>
+				{:else if id === 'editorToolbar'}
+					<button
+						class="title-action-btn {settings.showEditorToolbar ? 'active' : ''}"
+						onclick={ontoggleEditorToolbar}
+						aria-label={t('tooltip.editorToolbar', currentLanguage)}
+						onmouseenter={(e) => showTooltip(e, t('tooltip.editorToolbar', currentLanguage))}
+						onmousedown={(e) => e.preventDefault()}
+						onmouseleave={hideTooltip}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/>
+						</svg>
+						<span class="action-label">{t('settings.editorToolbar', currentLanguage)}</span>
 					</button>
 				{:else if id === 'theme'}
 					<div class="theme-dropdown-container">

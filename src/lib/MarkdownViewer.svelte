@@ -3,7 +3,7 @@
 	import { emitTo } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount, tick, untrack } from 'svelte';
-	import { fade, fly } from 'svelte/transition';
+	import { fade, fly, slide } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 	import { open, save, ask } from '@tauri-apps/plugin-dialog';
@@ -107,7 +107,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		handleDroppedFile: (path: string, x: number, y: number) => Promise<void>;
 		updateDragCaret: (x: number, y: number) => void;
 		hideDragCaret: () => void;
-		runEditorAction: (actionId: string) => void;
+		runEditorAction: (actionId: string, payload?: any) => void;
 		undo: () => void;
 		redo: () => void;
 		revealHeader: (text: string) => void;
@@ -3038,6 +3038,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
 		ontoggleEdit={() => toggleEdit()}
+		ontoggleEditorToolbar={() => settings.toggleEditorToolbar()}
 		ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 		{isEditing}
 		ondetach={handleDetach}
@@ -3076,11 +3077,30 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 					<!-- Editor Pane -->
 					<div bind:this={editorPaneEl} class="pane editor-pane" class:active={isEditing || isSplit} style="flex: {isSplit ? tabManager.activeTab.splitRatio : isEditing ? 1 : 0}">
 						{#if isEditing || isSplit}
-							<EditorToolbar
-								modifier={settings.osType === 'macos' ? 'Cmd' : 'Ctrl'}
-								toolbarOrder={settings.editorToolbarOrder}
-								toolbarHidden={settings.editorToolbarHidden}
-								onaction={(actionId) => editorPane?.runEditorAction(actionId)} />
+							{#if settings.showEditorToolbar}
+								<div transition:slide={{ duration: 150 }}>
+									<EditorToolbar
+										modifier={settings.osType === 'macos' ? 'Cmd' : 'Ctrl'}
+										toolbarOrder={settings.editorToolbarOrder}
+										toolbarHidden={settings.editorToolbarHidden}
+										onaction={(actionId, payload) => editorPane?.runEditorAction(actionId, payload)}
+										ontoggleHide={() => settings.toggleEditorToolbar()}
+										onshowTooltip={(e, text, shortcut, align) => {
+											const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+											tooltip = {
+												show: true,
+												text,
+												shortcut: shortcut || '',
+												html: '',
+												isFootnote: false,
+												x: align === 'right' ? rect.right + 8 : (align === 'left' ? rect.left - 8 : rect.left + rect.width / 2),
+												y: align === 'below' ? rect.bottom + 8 : rect.top - 8,
+												align: (align as any) || 'below'
+											};
+										}}
+										onhideTooltip={() => (tooltip.show = false)} />
+								</div>
+							{/if}
 							<Editor
 								bind:this={editorPane}
 								bind:value={tabManager.activeTab.rawContent}
