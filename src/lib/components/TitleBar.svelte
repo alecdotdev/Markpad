@@ -430,14 +430,6 @@
 				{t('menu.openFile', currentLanguage)}
 				<span class="menu-shortcut">{modifier}+O</span>
 			</button>
-			<button
-				class="home-menu-item"
-				onclick={() => {
-					homeMenuOpen = false;
-					onmergeAllWindows?.();
-				}}>
-				{t('menu.mergeAllWindows', currentLanguage)}
-			</button>
 					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.isEditing)}
 						<button
 						class="home-menu-item"
@@ -502,6 +494,23 @@
 						{t('menu.exportPdf', currentLanguage)}
 					</button>
 					{/if}
+					<div class="home-menu-divider"></div>
+					<button
+						class="home-menu-item"
+						onclick={() => {
+							homeMenuOpen = false;
+							openTagEditor();
+						}}>
+						{t('menu.setWindowTag', currentLanguage)}
+					</button>
+					<button
+						class="home-menu-item"
+						onclick={() => {
+							homeMenuOpen = false;
+							onmergeAllWindows?.();
+						}}>
+						{t('menu.mergeAllWindows', currentLanguage)}
+					</button>
 					<div class="home-menu-divider"></div>
 					<button
 					class="home-menu-item"

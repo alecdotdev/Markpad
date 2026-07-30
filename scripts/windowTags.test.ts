@@ -27,3 +27,15 @@ test('the title bar exposes a named color chip and pin control', () => {
 	assert.match(titleBar, /window-tag-chip/);
 	assert.match(titleBar, /togglePinnedTag/);
 });
+
+test('the Home menu groups window organization below export actions', () => {
+	const exportIndex = titleBar.indexOf("t('menu.exportPdf', currentLanguage)");
+	const tagIndex = titleBar.indexOf("t('menu.setWindowTag', currentLanguage)");
+	const mergeIndex = titleBar.indexOf("t('menu.mergeAllWindows', currentLanguage)");
+	const exitIndex = titleBar.indexOf("t('menu.exit', currentLanguage)");
+
+	assert.ok(exportIndex < tagIndex);
+	assert.ok(tagIndex < mergeIndex);
+	assert.ok(mergeIndex < exitIndex);
+	assert.match(titleBar, /homeMenuOpen = false;\s*openTagEditor\(\);/);
+});
