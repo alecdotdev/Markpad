@@ -25,13 +25,29 @@ type DocumentSessionOptions = {
 	isScrolling: () => boolean;
 	renderRichContent: () => void;
 	onError: (message: string, error: unknown) => void;
-	markSelfWrite: (path: string) => void;
-	clearSelfWrite: (path: string) => void;
+	selfWriteGraceMs: number;
 };
 
 export function createDocumentSession(options: DocumentSessionOptions) {
 	const loadRevisionByTab = new Map<string, number>();
 	const loadingTabs = new Set<string>();
+	const selfWriteUntilByPath = new Map<string, number>();
+
+	function markSelfWrite(path: string) {
+		selfWriteUntilByPath.set(path, Date.now() + options.selfWriteGraceMs);
+	}
+
+	function clearSelfWrite(path: string) {
+		selfWriteUntilByPath.delete(path);
+	}
+
+	function shouldReloadExternalChange(path: string) {
+		const until = selfWriteUntilByPath.get(path);
+		if (until === undefined) return true;
+		if (Date.now() < until) return false;
+		selfWriteUntilByPath.delete(path);
+		return true;
+	}
 
 	function updateLoading(tabId: string, loading: boolean) {
 		if (loading) loadingTabs.add(tabId);
@@ -146,10 +162,10 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			targetPath = selected;
 		}
 		const snapshot = tab.rawContent;
-		options.markSelfWrite(targetPath);
+		markSelfWrite(targetPath);
 		try {
 			await invoke('save_file_content', { path: targetPath, content: snapshot });
-			options.markSelfWrite(targetPath);
+			markSelfWrite(targetPath);
 			if (tab.path === '') {
 				tabManager.updateTabPath(tab.id, targetPath);
 				options.saveRecentFile(targetPath);
@@ -158,7 +174,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			tab.isDirty = tab.rawContent !== snapshot;
 			return true;
 		} catch (error) {
-			options.clearSelfWrite(targetPath);
+			clearSelfWrite(targetPath);
 			options.onError('Failed to save file', error);
 			return false;
 		}
@@ -176,17 +192,17 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		});
 		if (!selected) return false;
 		const snapshot = tab.rawContent;
-		options.markSelfWrite(selected);
+		markSelfWrite(selected);
 		try {
 			await invoke('save_file_content', { path: selected, content: snapshot });
-			options.markSelfWrite(selected);
+			markSelfWrite(selected);
 			tabManager.updateTabPath(tab.id, selected);
 			options.saveRecentFile(selected);
 			tab.originalContent = snapshot;
 			tab.isDirty = tab.rawContent !== snapshot;
 			return true;
 		} catch (error) {
-			options.clearSelfWrite(selected);
+			clearSelfWrite(selected);
 			options.onError('Failed to save file as', error);
 			return false;
 		}
@@ -207,5 +223,5 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		return true;
 	}
 
-	return { loadMarkdown, saveContent, saveContentAs, toggleTaskCheckbox };
+	return { loadMarkdown, saveContent, saveContentAs, toggleTaskCheckbox, shouldReloadExternalChange };
 }

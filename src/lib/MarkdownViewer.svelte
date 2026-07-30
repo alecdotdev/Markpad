@@ -155,7 +155,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	const lastContentRefByTab = new Map<string, string>();
 	// Suppress the file-watcher reload that fires when we ourselves write the file.
 	// Maps absolute path -> wall-clock ms after which an event for that path is real again.
-	const selfWriteUntilByPath = new Map<string, number>();
 	const SELF_WRITE_GRACE_MS = 400;
 	const AUTO_SAVE_DEBOUNCE_MS = 1500;
 
@@ -492,8 +491,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			console.error(message, error);
 			addToast(`${message}: ${String(error)}`, 'error');
 		},
-		markSelfWrite: (path) => selfWriteUntilByPath.set(path, Date.now() + SELF_WRITE_GRACE_MS),
-		clearSelfWrite: (path) => selfWriteUntilByPath.delete(path),
+		selfWriteGraceMs: SELF_WRITE_GRACE_MS,
 	});
 
 	async function discardPersistedWindowState() {
@@ -2588,11 +2586,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 					// Skip events caused by our own auto-save / save invocations,
 					// otherwise the reload would clobber any keystrokes that landed
 					// between fs::write and this listener firing.
-					const until = selfWriteUntilByPath.get(currentFile);
-					if (until !== undefined) {
-						if (Date.now() < until) return;
-						selfWriteUntilByPath.delete(currentFile);
-					}
+					if (!documentSession.shouldReloadExternalChange(currentFile)) return;
 					loadMarkdown(currentFile);
 				}),
 			);
