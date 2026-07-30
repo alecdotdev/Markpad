@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+	import { emitTo } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount, tick, untrack } from 'svelte';
-	import { fly } from 'svelte/transition';
+	import { fade, fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 	import { open, save, ask } from '@tauri-apps/plugin-dialog';
@@ -49,9 +50,11 @@ import {
 	import DOMPurify from 'dompurify';
 	import HomePage from './components/HomePage.svelte';
 import { tabManager } from './stores/tabs.svelte.js';
-import { snapshotTab, validateTransferPayload } from './utils/tabTransfer.js';
+import { snapshotTab } from './utils/tabTransfer.js';
 import { settings } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
+import { createWindowSession } from './sessions/windowSession.svelte.js';
+import { createDocumentSession, type LoadMarkdownOptions } from './sessions/documentSession.svelte.js';
 
 	// syntax highlighting & latex
 	let hljs: any = $state(null);
@@ -63,6 +66,7 @@ import { t } from './utils/i18n.js';
 	import 'katex/dist/katex.min.css';
 
 	let mode = $state<'loading' | 'app' | 'installer' | 'uninstall'>('loading');
+	let isDisposed = false;
 
 	let showSettings = $state(false);
 
@@ -152,7 +156,6 @@ import { t } from './utils/i18n.js';
 	const lastContentRefByTab = new Map<string, string>();
 	// Suppress the file-watcher reload that fires when we ourselves write the file.
 	// Maps absolute path -> wall-clock ms after which an event for that path is real again.
-	const selfWriteUntilByPath = new Map<string, number>();
 	const SELF_WRITE_GRACE_MS = 400;
 	const AUTO_SAVE_DEBOUNCE_MS = 1500;
 
@@ -403,6 +406,8 @@ import { t } from './utils/i18n.js';
 	// red button is not blocked by the dialog overlay, so this keeps a second
 	// close request from starting a competing walk.
 	let isCloseWalkActive = false;
+	let identifyFlash = $state('');
+	let identifyFlashTimer: ReturnType<typeof setTimeout> | undefined;
 
 	// v2 window-state snapshots live under their own key, and the legacy key
 	// is removed on every write: an older Markpad build restoring a v2
@@ -412,6 +417,7 @@ import { t } from './utils/i18n.js';
 	// makes old and new builds invisible to each other.
 	const WINDOW_STATE_KEY = 'savedTabsDataV2';
 	const LEGACY_STATE_KEY = 'savedTabsData';
+	const RESTORE_IN_PROGRESS_KEY = 'markpad-window-restore-in-progress';
 
 	// localStorage is origin-scoped, so every window shares the one snapshot
 	// slot. Only the main window persists and restores tabs: secondary window
@@ -419,6 +425,137 @@ import { t } from './utils/i18n.js';
 	// be restored under the same label again, and letting N windows write the
 	// shared key means the last window closed overwrites everyone else.
 	const isMainWindow = appWindow.label === 'main';
+	const windowSession = createWindowSession({
+		isMainWindow,
+		windowStateKey: WINDOW_STATE_KEY,
+		legacyStateKey: LEGACY_STATE_KEY,
+		restoreInProgressKey: RESTORE_IN_PROGRESS_KEY,
+		serializeState: () => tabManager.serializeState(),
+		shouldRestoreState: () => settings.restoreStateOnReopen,
+		isDisposed: () => isDisposed,
+		restoreState: (json) => tabManager.restoreState(json),
+		restoredTabs: () => tabManager.tabs.map((tab) => ({ id: tab.id, path: tab.path })),
+		applyRestoredContent: async (tabId, raw) => {
+			const tab = tabManager.tabs.find((item) => item.id === tabId);
+			if (!tab) return;
+			tab.rawContent = raw;
+			tab.originalContent = raw;
+			const processed = await renderMarkdownPreview(raw, tab.path);
+			if (isDisposed) return;
+			tabManager.updateTabContent(tab.id, processed);
+			if (tabManager.activeTabId === tab.id) tick().then(renderRichContent);
+		},
+		dropRestoredTab: (tabId) => tabManager.closeTab(tabId),
+		canTransfer: (tabId) => {
+			const tab = tabManager.tabs.find((item) => item.id === tabId);
+			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME';
+		},
+		canDetach: (tabId) => {
+			const tab = tabManager.tabs.find((item) => item.id === tabId);
+			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME' && tabManager.tabs.length >= 2;
+		},
+		transferPayload: (tabId) => {
+			const tab = tabManager.tabs.find((item) => item.id === tabId);
+			if (!tab) throw new Error('Tab disappeared before transfer');
+			return JSON.stringify(snapshotTab(tab));
+		},
+		onTransferClaimed: (tabId) => tabManager.closeTab(tabId),
+		acceptTransferredTab: async (snapshot) => {
+			const id = tabManager.insertTransferredTab(snapshot);
+			const transferred = tabManager.tabs.find((tab) => tab.id === id);
+			if (!transferred) return false;
+			await renderTabPreviewFromRaw(transferred);
+			return !isDisposed;
+		},
+		onError: (message, error) => {
+			console.error(message, error);
+			addToast(`${message}: ${String(error)}`, 'error');
+		},
+		onWarning: (message, error) => console.warn(message, error),
+	});
+
+	$effect(() => {
+		invoke('set_window_meta', {
+			tagName: tabManager.windowTag?.name ?? null,
+			tagColor: tabManager.windowTag?.color ?? null,
+			activeTabTitle: tabManager.activeTab?.title ?? '',
+			tabCount: tabManager.tabs.length,
+		}).catch(() => {});
+	});
+
+	$effect(() => {
+		const tag = tabManager.windowTag;
+		appWindow.setTitle(tag ? `${tag.name} — ${windowTitle}` : windowTitle).catch(() => {});
+	});
+
+	let pinnedTags = $state<Array<{ name: string; color: string; files: string[] }>>([]);
+
+	async function refreshPinnedTags() {
+		pinnedTags = (await invoke('list_pinned_tags')) as typeof pinnedTags;
+	}
+
+	async function savePinnedTagIfNeeded() {
+		const tag = tabManager.windowTag;
+		if (!tag?.pinned) return;
+		const files = tabManager.tabs.filter((tab) => tab.path !== '' && tab.path !== 'HOME').map((tab) => tab.path);
+		await invoke('save_pinned_tag', { name: tag.name, color: tag.color, files });
+	}
+
+	async function openPinnedTag(tag: { name: string; color: string; files: string[] }) {
+		tabManager.setWindowTag({ ...tag, pinned: true });
+		for (const file of tag.files) await loadMarkdown(file);
+		showHome = false;
+	}
+
+	async function unpinTagFromHome(name: string) {
+		await invoke('remove_pinned_tag', { name });
+		if (tabManager.windowTag?.name === name) tabManager.setWindowTag({ ...tabManager.windowTag, pinned: false });
+		await refreshPinnedTags();
+	}
+
+	$effect(() => {
+		if (showHome) refreshPinnedTags().catch(console.error);
+	});
+
+	const documentSession = createDocumentSession({
+		setShowHome: (value) => (showHome = value),
+		currentFile: () => currentFile,
+		resetScrollHistory: () => {
+			scrollHistory = [];
+			scrollFuture = [];
+		},
+		renderMarkdown: renderMarkdownPreview,
+		isLiveMode: () => liveMode,
+		afterLoad: tick,
+		saveRecentFile,
+		deleteRecentFile,
+		setLoadingTabs: (tabIds) => (loadingTabs = tabIds),
+		measureInitialViewport: () => {
+			tick().then(() => {
+				if (markdownBody) isAtBottom = markdownBody.scrollHeight <= markdownBody.clientHeight + 100;
+			});
+		},
+		isScrolling: () => isScrolling,
+		renderRichContent,
+		onError: (message, error) => {
+			console.error(message, error);
+			addToast(`${message}: ${String(error)}`, 'error');
+		},
+		selfWriteGraceMs: SELF_WRITE_GRACE_MS,
+		cancelPendingAutoSave,
+		askClose: (title) =>
+			askCustom(t('modal.youHaveUnsavedChanges', settings.language).replace('{title}', title), {
+				title: t('modal.unsavedChanges', settings.language),
+				kind: 'warning',
+				showSave: true,
+			}),
+		onCloseSaveNewerEdits: () => addToast(t('toast.savedNewerEdits', settings.language), 'info'),
+		onCloseAutoSaveFailed: () => addToast(t('toast.autoSaveFailed', settings.language), 'error'),
+	});
+
+	async function discardPersistedWindowState() {
+		await windowSession.discardPersistedState();
+	}
 
 	// Persisted through Rust, not localStorage: setItem is an async message
 	// to the WebKit storage process that dies in transit when the last
@@ -430,17 +567,11 @@ import { t } from './utils/i18n.js';
 	// after the first successful Rust write; a downgraded build then starts
 	// a fresh session instead of misreading anything.
 	async function persistWindowState() {
-		if (!isMainWindow) return;
-		try {
-			await invoke('save_window_state', { json: tabManager.serializeState() });
-			localStorage.removeItem(WINDOW_STATE_KEY);
-			localStorage.removeItem(LEGACY_STATE_KEY);
-		} catch (e) {
-			console.error('Failed to save state on close:', e);
-		}
+		await windowSession.persistState();
 	}
 
 	async function appExit() {
+		await savePinnedTagIfNeeded();
 		if (settings.restoreStateOnReopen) {
 			const hasUnsaved = tabManager.tabs.some((t) => t.isDirty || (t.path === '' && t.rawContent.trim() !== ''));
 			if (hasUnsaved) {
@@ -451,16 +582,8 @@ import { t } from './utils/i18n.js';
 				});
 				if (response !== 'discard') return;
 			}
+			await discardPersistedWindowState();
 			isForceExiting = true;
-			if (isMainWindow) {
-				try {
-					await invoke('clear_window_state');
-				} catch (e) {
-					console.error('Failed to clear window state:', e);
-				}
-				localStorage.removeItem(WINDOW_STATE_KEY);
-				localStorage.removeItem(LEGACY_STATE_KEY);
-			}
 		}
 		appWindow.close();
 	}
@@ -814,149 +937,8 @@ import { t } from './utils/i18n.js';
 		}
 	}
 
-	type LoadMarkdownOptions = {
-		navigate?: boolean;
-		skipTabManagement?: boolean;
-		preserveEditState?: boolean;
-		resetScrollHistory?: boolean;
-	};
-
 	async function loadMarkdown(filePath: string, options: LoadMarkdownOptions = {}) {
-		showHome = false;
-		let existing = null;
-		let pendingNavigateTabId: string | null = null;
-		try {
-			if (options.resetScrollHistory || filePath !== currentFile) {
-				scrollHistory = [];
-				scrollFuture = [];
-			}
-			if (options.navigate && tabManager.activeTab) {
-				pendingNavigateTabId = tabManager.activeTab.id;
-			} else if (!options.skipTabManagement) {
-				existing = tabManager.tabs.find((t) => t.path === filePath);
-				if (existing) {
-					tabManager.setActive(existing.id);
-				} else if (tabManager.activeTab && tabManager.activeTab.path === '' && !tabManager.activeTab.isDirty && tabManager.activeTab.rawContent.trim() === '') {
-					tabManager.updateTabPath(tabManager.activeTab.id, filePath);
-				} else {
-					tabManager.addTab(filePath);
-				}
-			}
-			const activeId = tabManager.activeTabId;
-			if (!activeId) return;
-			const fullLoadRevision = (loadRevisionByTab.get(activeId) ?? 0) + 1;
-			loadRevisionByTab.set(activeId, fullLoadRevision);
-
-			const isMarkdown = hasMarkdownLinkExtension(filePath);
-			const tab = tabManager.tabs.find((t) => t.id === activeId);
-
-			if (isMarkdown) {
-				// Only set default edit mode if it's a brand new tab or we aren't preserving state
-				if (tab && !options.preserveEditState && !existing) {
-					tab.isEditing = settings.startInEditor;
-				}
-				const initialIsEditing = tab?.isEditing ?? false;
-				const initialIsSplit = tab?.isSplit ?? false;
-				const [, content, isFull] = await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 }) as [string, string, boolean];
-				if (pendingNavigateTabId) {
-					tabManager.navigate(pendingNavigateTabId, filePath);
-				}
-				const processedInfo = await renderMarkdownPreview(content, filePath);
-				tabManager.updateTabContent(activeId, processedInfo);
-				tabManager.setTabRawContent(activeId, content);
-
-				if (!isFull) {
-					const canApplyFullLoad = () => {
-						const targetTab = tabManager.tabs.find((t) => t.id === activeId);
-						return (
-							targetTab?.path === filePath &&
-							loadRevisionByTab.get(activeId) === fullLoadRevision &&
-							!targetTab.isDirty &&
-							targetTab.isEditing === initialIsEditing &&
-							targetTab.isSplit === initialIsSplit
-						);
-					};
-					loadingTabs = [...loadingTabs, activeId];
-					tick().then(() => {
-						if (markdownBody) isAtBottom = markdownBody.scrollHeight <= markdownBody.clientHeight + 100;
-					});
-					(invoke('read_file_content', { path: filePath }) as Promise<string>).then((fullContent) => {
-						const applyFull = () => {
-							try {
-								if (isScrolling) {
-									setTimeout(applyFull, 100);
-									return;
-								}
-								if (canApplyFullLoad()) {
-									renderMarkdownPreview(fullContent, filePath)
-										.then((fullProcessed) => {
-											if (!canApplyFullLoad()) {
-												loadingTabs = loadingTabs.filter((id) => id !== activeId);
-												return;
-											}
-											tabManager.updateTabContent(activeId, fullProcessed);
-											tabManager.setTabRawContent(activeId, fullContent);
-											loadingTabs = loadingTabs.filter((id) => id !== activeId);
-											if (tabManager.activeTabId === activeId) {
-												tick().then(() => {
-													setTimeout(renderRichContent, 10);
-												});
-											}
-										})
-										.catch((renderErr) => {
-											console.error("render full markdown error:", renderErr);
-											addToast('Error processing full markdown: ' + String(renderErr), 'error');
-											loadingTabs = loadingTabs.filter((id) => id !== activeId);
-										});
-								} else {
-									loadingTabs = loadingTabs.filter((id) => id !== activeId);
-								}
-							} catch (applyErr) {
-								console.error("applyFull error:", applyErr);
-								addToast('Error processing full markdown: ' + String(applyErr), 'error');
-								loadingTabs = loadingTabs.filter((id) => id !== activeId);
-							}
-						};
-						
-						if ('requestIdleCallback' in window) {
-							(window as any).requestIdleCallback(applyFull, { timeout: 2000 });
-						} else {
-							setTimeout(applyFull, 100);
-						}
-					}).catch((e) => {
-						console.error("read full markdown error:", e);
-						addToast('Backend Error loading full markdown: ' + String(e), 'error');
-						loadingTabs = loadingTabs.filter((id) => id !== activeId);
-					});
-				}
-			} else {
-				const content = (await invoke('read_file_content', { path: filePath })) as string;
-				if (pendingNavigateTabId) {
-					tabManager.navigate(pendingNavigateTabId, filePath);
-				}
-				if (tab) tab.isEditing = true;
-				tabManager.setTabRawContent(activeId, content);
-			}
-
-			if (liveMode) invoke('watch_file', { path: filePath }).catch(console.error);
-
-			await tick();
-			if (filePath) saveRecentFile(filePath);
-		} catch (error) {
-			console.error('Error loading file:', error);
-			const errStr = String(error);
-			if (errStr.includes('The system cannot find the file specified') || errStr.includes('No such file or directory')) {
-				deleteRecentFile(filePath);
-				if (tabManager.activeTab && tabManager.activeTab.path === filePath) {
-					tabManager.closeTab(tabManager.activeTab.id);
-				}
-			} else {
-				// Permission denials (macOS TCC) and other read failures used
-				// to die silently in the console, leaving an empty tab with no
-				// explanation. Surface them.
-				addToast('Error loading file: ' + errStr, 'error');
-			}
-		}
+		return documentSession.loadMarkdown(filePath, options);
 	}
 
 	async function renderRichContent() {
@@ -1545,37 +1527,11 @@ import { t } from './utils/i18n.js';
     }
 
 	async function toggleTaskCheckbox(checkbox: HTMLInputElement) {
-		const tab = tabManager.activeTab;
-		if (!tab || !tab.path) return;
-		const raw = tab.rawContent;
-
-		// find which task item this is by counting checkboxes in DOM
 		const allBoxes = Array.from(markdownBody?.querySelectorAll('[data-task-checkbox]') || []);
 		const index = allBoxes.indexOf(checkbox);
 		if (index === -1) return;
-
-		// checkbox.checked is still the OLD state (e.preventDefault blocked the toggle)
 		const nowChecked = !checkbox.checked;
-
-		// replace the nth [ ] or [x] in the raw markdown
-		let count = 0;
-		const updated = raw.replace(/^(\s*[-*+] )\[( |x|X)\]/gm, (match, prefix) => {
-			if (count === index) {
-				count++;
-				return `${prefix}[${nowChecked ? 'x' : ' '}]`;
-			}
-			count++;
-			return match;
-		});
-
-		if (updated === raw) return;
-
-		// Update the single in-memory source before saving. saveContent keeps the
-		// tab dirty if its write fails, so a disk error cannot discard this edit.
-		tabManager.updateTabRawContent(tab.id, updated);
-		await saveContent(tab.id);
-
-		// update DOM optimistically
+		if (!(await documentSession.toggleTaskCheckbox(index, nowChecked))) return;
 		checkbox.checked = nowChecked;
 		const li = checkbox.closest('li');
 		if (li) {
@@ -1637,57 +1593,7 @@ import { t } from './utils/i18n.js';
 	}
 
 	async function canCloseTab(tabId: string): Promise<boolean> {
-		const tab = tabManager.tabs.find((t) => t.id === tabId);
-		if (!tab || (!tab.isDirty && tab.path !== '')) return true;
-
-		if (!tab.isDirty) return true;
-
-		// Silent save path: only when auto-save is on, the user did NOT ask
-		// for confirmation, and the tab has a real path. Untitled tabs always
-		// need a save dialog, which means the modal flow is the right place
-		// for them. We cancel the pending timer right before the manual save
-		// to avoid a duplicate write from a timer that fires concurrently.
-		if (settings.autoSave && !settings.confirmBeforeSave && tab.path !== '') {
-			cancelPendingAutoSave(tabId);
-			const success = await saveContent(tabId);
-			// Only allow the close if the tab is fully clean afterwards.
-			// `saveContent` resolves true even when post-save `isDirty=true`
-			// (the user typed during the await — TOCTOU) — closing here
-			// would silently drop those new keystrokes.
-			if (success && !tab.isDirty) return true;
-			if (success) {
-				// Save succeeded but the tab is dirty again — let the user
-				// decide via the modal whether to save again, discard, or cancel.
-				addToast(t('toast.savedNewerEdits', settings.language), 'info');
-			} else {
-				// Silent save failed — surface and fall through to the modal.
-				addToast(t('toast.autoSaveFailed', settings.language), 'error');
-			}
-		}
-
-		const response = await askCustom(t('modal.youHaveUnsavedChanges', settings.language).replace('{title}', tab.title), {
-			title: t('modal.unsavedChanges', settings.language),
-			kind: 'warning',
-			showSave: true,
-		});
-
-		// Important: do NOT cancel the pending auto-save timer before this
-		// modal. If the user clicks Cancel, the tab remains dirty and we
-		// want background auto-save to keep firing on the existing schedule.
-		if (response === 'cancel') return false;
-		if (response === 'save') {
-			cancelPendingAutoSave(tabId);
-			return await saveContent(tabId);
-		}
-
-		// Discard: drop pending save so we don't write what the user just
-		// threw away, and revert to the last saved content so the tab is
-		// clean — callers either close it (tab close) or keep it open for the
-		// window-state snapshot (window close with restore enabled).
-		cancelPendingAutoSave(tabId);
-		tab.rawContent = tab.originalContent;
-		tab.isDirty = false;
-		return true;
+		return documentSession.canCloseTab(tabId);
 	}
 
 	async function toggleEdit(silentSave = false) {
@@ -1777,104 +1683,12 @@ import { t } from './utils/i18n.js';
 		}
 	}
 
-	/**
-	 * Save the given (or active) tab to disk. Returns true on success.
-	 *
-	 * Important details:
-	 * - Operates on a snapshot of `rawContent` taken BEFORE the await, so further
-	 *   keystrokes during the in-flight invoke are not mistakenly marked clean
-	 *   (TOCTOU fix). The dirty flag is recomputed against the snapshot, not
-	 *   forced to false.
-	 * - Marks the destination path as a "self write" so the file-watcher does
-	 *   not bounce the change back into the editor and clobber unsaved input.
-	 * - Untitled tabs (empty path) are NOT silently auto-saved; they require an
-	 *   interactive save dialog (caller must come from a user gesture).
-	 */
 	async function saveContent(tabId?: string): Promise<boolean> {
-		const tab = tabId
-			? tabManager.tabs.find((t) => t.id === tabId)
-			: tabManager.activeTab;
-		if (!tab) return false;
-		// No further gating: explicit user-initiated saves should always
-		// work. Auto-save filters by `path !== '' && (isEditing || isSplit)`
-		// in the effect itself, so untitled or view-mode tabs can only
-		// reach this function through a modal "Save" choice or a hotkey,
-		// both of which are legitimate save triggers — including for
-		// untitled tabs in view mode (e.g. unsaved-changes modal at close).
-
-		let targetPath = tab.path;
-
-		if (!targetPath) {
-			// Special handling for new (untitled) files. Prefill the numbered
-			// tab title so the dialog itself names which tab is being saved.
-			const selected = await save({
-				filters: [
-					{ name: 'Markdown', extensions: ['md'] },
-					{ name: 'All Files', extensions: ['*'] },
-				],
-				defaultPath: tab.title,
-			});
-			if (selected) {
-				targetPath = selected;
-			} else {
-				return false; // User cancelled save dialog
-			}
-		}
-
-		const snapshot = tab.rawContent;
-		selfWriteUntilByPath.set(targetPath, Date.now() + SELF_WRITE_GRACE_MS);
-
-		try {
-			await invoke('save_file_content', { path: targetPath, content: snapshot });
-			// Refresh the grace window — the watcher event arrives after the write
-			// completes, not when it started.
-			selfWriteUntilByPath.set(targetPath, Date.now() + SELF_WRITE_GRACE_MS);
-			if (tab.path === '') {
-				// We just saved an untitled tab for the first time
-				tabManager.updateTabPath(tab.id, targetPath);
-				saveRecentFile(targetPath);
-			}
-			tab.originalContent = snapshot;
-			// If the user kept typing during the await, the buffer is still dirty.
-			tab.isDirty = tab.rawContent !== snapshot;
-			return true;
-		} catch (e) {
-			selfWriteUntilByPath.delete(targetPath);
-			console.error('Failed to save file', e);
-			return false;
-		}
+		return documentSession.saveContent(tabId);
 	}
 
 	async function saveContentAs(): Promise<boolean> {
-		const tab = tabManager.activeTab;
-		if (!tab) return false;
-
-		const selected = await save({
-			filters: [
-				{ name: 'Markdown', extensions: ['md'] },
-				{ name: 'All Files', extensions: ['*'] },
-			],
-			defaultPath: tab.path || undefined,
-		});
-
-		if (selected) {
-			const snapshot = tab.rawContent;
-			selfWriteUntilByPath.set(selected, Date.now() + SELF_WRITE_GRACE_MS);
-			try {
-				await invoke('save_file_content', { path: selected, content: snapshot });
-				selfWriteUntilByPath.set(selected, Date.now() + SELF_WRITE_GRACE_MS);
-				tabManager.updateTabPath(tab.id, selected);
-				saveRecentFile(selected);
-				tab.originalContent = snapshot;
-				tab.isDirty = tab.rawContent !== snapshot;
-				return true;
-			} catch (e) {
-				selfWriteUntilByPath.delete(selected);
-				console.error('Failed to save file as', e);
-				return false;
-			}
-		}
-		return false;
+		return documentSession.saveContentAs();
 	}
 
 	/**
@@ -2081,6 +1895,7 @@ import { t } from './utils/i18n.js';
 	}
 
 	async function destroyWindowAfterTabsClosed() {
+		await savePinnedTagIfNeeded();
 		if (settings.restoreStateOnReopen) {
 			await persistWindowState();
 		}
@@ -2171,11 +1986,12 @@ import { t } from './utils/i18n.js';
 	function handleContextMenu(e: MouseEvent) {
 		if (modalState.show) return;
 		if (mode !== 'app') return;
+		const isInsideEditor = (e.target as HTMLElement).closest('.editor-container');
+		if (isInsideEditor) return;
 		e.preventDefault();
 
 		const selection = window.getSelection();
 		const hasSelection = selection ? selection.toString().length > 0 : false;
-		const isInsideEditor = (e.target as HTMLElement).closest('.editor-container');
 		const link = (e.target as HTMLElement).closest('a') as HTMLAnchorElement | null;
 		const linkTarget = link ? getRelativeMarkdownTarget(link.getAttribute('href') || '') : null;
 		const linkItems: ContextMenuItem[] =
@@ -2225,13 +2041,6 @@ import { t } from './utils/i18n.js';
 				...linkItems,
 				...copyRefItem,
 				...mediaItems,
-				...(isEditing && isInsideEditor
-					? [
-							{ label: t('menu.undo', uiLanguage), shortcut: 'Ctrl+Z', onClick: () => editorPane?.undo() },
-							{ label: t('menu.redo', uiLanguage), shortcut: 'Ctrl+Y', onClick: () => editorPane?.redo() },
-							{ separator: true }
-						]
-					: []),
 				...(hasSelection ? [{ label: t('menu.copy', uiLanguage), onClick: () => {
 					const selection = window.getSelection()?.toString();
 					if (selection) invoke('clipboard_write_text', { text: selection });
@@ -2353,17 +2162,33 @@ import { t } from './utils/i18n.js';
 		}
 	}
 
-	let debounceTimer: number;
+	let previewRenderRevision = 0;
 
 	$effect(() => {
 		const tab = tabManager.activeTab;
+		const renderRevision = ++previewRenderRevision;
 		if (tab && (tab.isSplit || (isEditing && settings.showToc)) && tab.rawContent !== undefined) {
-			if ((tab as any)._lastRenderedRawContent === tab.rawContent) return;
+			const tabId = tab.id;
+			const rawContent = tab.rawContent;
+			if ((tab as any)._lastRenderedRawContent === rawContent) return;
 
-			clearTimeout(debounceTimer);
-			debounceTimer = setTimeout(() => {
-				renderTabPreviewFromRaw(tab).catch(console.error);
+			const timer = setTimeout(() => {
+				renderMarkdownPreview(rawContent, tab.path)
+					.then((processed) => {
+						const currentTab = tabManager.activeTab;
+						if (
+							previewRenderRevision !== renderRevision ||
+							tabManager.activeTabId !== tabId ||
+							currentTab?.rawContent !== rawContent
+						) return;
+						tabManager.updateTabContent(tabId, processed);
+						(currentTab as any)._lastRenderedRawContent = rawContent;
+						tick().then(renderRichContent);
+					})
+					.catch(console.error);
 			}, 16);
+
+			return () => clearTimeout(timer);
 		}
 	});
 
@@ -2458,6 +2283,11 @@ import { t } from './utils/i18n.js';
 		if (!cmdOrCtrl && !e.shiftKey && !e.altKey && code === 'F5') {
 			e.preventDefault();
 			reloadFromDisk();
+			return;
+		}
+		if (cmdOrCtrl && e.shiftKey && key === 'm') {
+			e.preventDefault();
+			carryActiveTabToNextWindow();
 			return;
 		}
 		if (cmdOrCtrl && key === 'w') {
@@ -2620,35 +2450,48 @@ import { t } from './utils/i18n.js';
 	// deleted only after the destination confirms the claim, so any failure —
 	// window creation error, timeout — leaves the tab exactly where it was.
 	async function handleDetach(tabId: string) {
-		if (isCloseWalkActive) return;
-		const tab = tabManager.tabs.find((t) => t.id === tabId);
-		if (!tab || tab.path === 'HOME' || tabManager.tabs.length < 2) return;
+		await windowSession.detach(tabId);
+	}
 
-		const payload = JSON.stringify(snapshotTab(tab));
-		const token = (await invoke('stage_detached_tab', { payload })) as string;
+	async function moveTabToWindow(tabId: string, targetLabel: string, focusAfter = false) {
+		const moved = await windowSession.transfer(tabId, (token) => invoke('offer_tab_to_window', { targetLabel, token }));
+		if (moved && focusAfter) await invoke('focus_window', { label: targetLabel });
+		return moved;
+	}
 
-		let settled = false;
-		const unlisten = await appWindow.listen<string>('tab-transfer-claimed', (event) => {
-			if (settled || event.payload !== token) return;
-			settled = true;
-			unlisten();
-			tabManager.closeTab(tabId);
-		});
-		const cancel = () => {
-			if (settled) return;
-			settled = true;
-			unlisten();
-			invoke('cancel_detached_tab', { token }).catch(console.error);
-		};
-		setTimeout(cancel, 15000);
-
-		try {
-			await invoke('create_transfer_window', { token });
-		} catch (e) {
-			console.error('create_transfer_window failed:', e);
-			addToast('Failed to open new window: ' + String(e), 'error');
-			cancel();
+	async function carryActiveTabToNextWindow() {
+		const activeId = tabManager.activeTabId;
+		if (!activeId) return;
+		const windows = (await invoke('list_viewer_windows')) as Array<{ label: string; number: number }>;
+		const ordered = windows.slice().sort((a, b) => a.number - b.number);
+		const selfIndex = ordered.findIndex((window) => window.label === appWindow.label);
+		if (selfIndex === -1 || ordered.length === 1) {
+			await handleDetach(activeId);
+			return;
 		}
+		await moveTabToWindow(activeId, ordered[(selfIndex + 1) % ordered.length].label, true);
+	}
+
+	async function mergeAllWindowsHere() {
+		const windows = (await invoke('list_viewer_windows')) as Array<{ label: string }>;
+		const others = windows.filter((window) => window.label !== appWindow.label);
+		if (others.length === 0) {
+			addToast(t('toast.noOtherWindows', settings.language), 'info');
+			return;
+		}
+		await Promise.all(others.map((window) => emitTo(window.label, 'merge-into', appWindow.label)));
+	}
+
+	async function mergeSelfInto(targetLabel: string) {
+		if (isCloseWalkActive) return;
+		for (const tab of [...tabManager.tabs]) {
+			if (tab.path === 'HOME') {
+				tabManager.closeTab(tab.id);
+				continue;
+			}
+			await moveTabToWindow(tab.id, targetLabel);
+		}
+		if (tabManager.tabs.length === 0) await appWindow.destroy();
 	}
 
 	function startDrag(e: MouseEvent, tabId: string | null) {
@@ -2739,9 +2582,11 @@ import { t } from './utils/i18n.js';
 
 	onMount(() => {
 		loadRecentFiles();
+		isDisposed = false;
 
 		// @ts-ignore
 		Promise.all([import('highlight.js'), import('highlightjs-svelte'), import('katex'), import('mermaid')]).then(async ([hljsModule, svelteModule, katexMainModule, mermaidModule]) => {
+			if (isDisposed) return;
 			hljs = hljsModule.default;
 			try {
 				svelteModule.default(hljs);
@@ -2757,6 +2602,7 @@ import { t } from './utils/i18n.js';
 				import('katex/dist/contrib/mhchem.js'),
 				import('katex/dist/contrib/copy-tex.js')
 			]);
+			if (isDisposed) return;
 			
 			renderMathInElement = autoRenderModule.default;
 			mermaid = mermaidModule.default;
@@ -2769,92 +2615,21 @@ import { t } from './utils/i18n.js';
 			const init = async () => {
 				const appWindow = getCurrentWindow();
 				const appMode = (await invoke('get_app_mode')) as any;
+				if (isDisposed) return;
 
-			if (isMainWindow && settings.restoreStateOnReopen) {
-				// localStorage first, Rust file as fallback. Startup always
-				// deletes the localStorage keys after migrating, so their
-				// presence means an OLDER build wrote them since our last
-				// run (fresh install upgrade, or a downgrade period) — in
-				// either case they are newer than the Rust file. Reading the
-				// file first would resurrect a pre-downgrade snapshot over
-				// the one the older build just wrote.
-				const savedData =
-					localStorage.getItem(WINDOW_STATE_KEY) ??
-					localStorage.getItem(LEGACY_STATE_KEY) ??
-					((await invoke('load_window_state').catch(() => null)) as string | null);
-				if (savedData) {
-					tabManager.restoreState(savedData);
-					// The snapshot carries window state only — content always
-					// comes from disk, so restored tabs show the file's real
-					// current bytes. A file that no longer exists drops its tab.
-					for (const tab of [...tabManager.tabs]) {
-						try {
-							const raw = (await invoke('read_file_content', { path: tab.path })) as string;
-							tab.rawContent = raw;
-							tab.originalContent = raw;
-							const processed = await renderMarkdownPreview(raw, tab.path);
-							tabManager.updateTabContent(tab.id, processed);
-							if (tabManager.activeTabId === tab.id) {
-								tick().then(renderRichContent);
-							}
-						} catch (e) {
-							console.warn('Restore: dropping tab for unreadable file', tab.path, e);
-							tabManager.closeTab(tab.id);
-						}
-					}
-				}
-			}
-			if (isMainWindow) {
-				// Hand the snapshot over to the Rust file NOW, then drop the
-				// localStorage keys: write-through first so a crash between
-				// the two steps can never lose the snapshot, and delete at
-				// startup rather than at close so the stale copy cannot
-				// outlive the migration (the close-time removal never runs
-				// for users who disabled restore-on-reopen, which would
-				// leave the old snapshot on disk forever).
-				if (settings.restoreStateOnReopen && tabManager.tabs.length > 0) {
-					await persistWindowState();
-				}
-				localStorage.removeItem(WINDOW_STATE_KEY);
-				localStorage.removeItem(LEGACY_STATE_KEY);
-			}
+			await windowSession.restore();
+			if (isDisposed) return;
+			await windowSession.claimTransferredTab();
+			if (isDisposed) return;
 
 			const urlParams = new URLSearchParams(window.location.search);
-
-			// A window created by "Move to New Window" claims its tab from the
-			// Rust broker. The transfer token rides in the window label itself
-			// ("window-<token>") — a URL query would 404 in the asset protocol.
-			// The payload is validated strictly before any tab is built: a tab
-			// whose content fields are not strings must never be constructed
-			// (the editor would attribute a stale buffer to it and auto-save
-			// could destroy the file). A failed claim or invalid payload just
-			// yields an empty window — the source kept its tab.
-			const claimToken = appWindow.label.startsWith('window-')
-				? appWindow.label.slice('window-'.length)
-				: null;
-			if (claimToken) {
-				try {
-					const payload = (await invoke('claim_detached_tab', { token: claimToken })) as string | null;
-					const snap = payload ? validateTransferPayload(payload) : null;
-					if (snap) {
-						const id = tabManager.insertTransferredTab(snap);
-						const transferred = tabManager.tabs.find((t) => t.id === id);
-						if (transferred) {
-							await renderTabPreviewFromRaw(transferred);
-							await invoke('complete_detached_tab', { token: claimToken });
-						}
-					} else {
-						console.warn('Tab transfer claim failed or payload invalid; opening empty window');
-					}
-				} catch (e) {
-					console.error('Tab transfer claim error:', e);
-				}
-			}
 
 			const fileParam = urlParams.get('file');
 			if (fileParam) {
 				const decodedPath = decodeURIComponent(fileParam);
+				if (isDisposed) return;
 				await loadMarkdown(decodedPath);
+				if (isDisposed) return;
 			}
 
 			unlisteners.push(
@@ -2868,11 +2643,7 @@ import { t } from './utils/i18n.js';
 					// Skip events caused by our own auto-save / save invocations,
 					// otherwise the reload would clobber any keystrokes that landed
 					// between fs::write and this listener firing.
-					const until = selfWriteUntilByPath.get(currentFile);
-					if (until !== undefined) {
-						if (Date.now() < until) return;
-						selfWriteUntilByPath.delete(currentFile);
-					}
+					if (!documentSession.shouldReloadExternalChange(currentFile)) return;
 					loadMarkdown(currentFile);
 				}),
 			);
@@ -2944,6 +2715,30 @@ import { t } from './utils/i18n.js';
 			unlisteners.push(
 				await appWindow.listen('menu-tab-detach', (event) => {
 					handleDetach(event.payload as string);
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen('menu-tab-move', (event) => {
+					const { tabId, targetLabel } = event.payload as { tabId: string; targetLabel: string };
+					moveTabToWindow(tabId, targetLabel).catch((error) => console.error('Failed to move tab', error));
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen<string>('tab-transfer-offer', (event) => {
+					if (isCloseWalkActive) return;
+					windowSession.acceptOfferedTransfer(event.payload);
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen<string>('merge-into', (event) => {
+					mergeSelfInto(event.payload).catch((error) => console.error('Failed to merge window', error));
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen<string>('window-identify', (event) => {
+					identifyFlash = event.payload;
+					clearTimeout(identifyFlashTimer);
+					identifyFlashTimer = setTimeout(() => (identifyFlash = ''), 700);
 				}),
 			);
 			unlisteners.push(
@@ -3065,6 +2860,7 @@ import { t } from './utils/i18n.js';
 					// Awaited: the close-requested handler holds the close open
 					// until the Rust write returns, so the process cannot exit
 					// under the snapshot.
+					await savePinnedTagIfNeeded();
 					if (settings.restoreStateOnReopen) {
 						await persistWindowState();
 					}
@@ -3134,6 +2930,11 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 
+			if (isDisposed) {
+				unlisteners.forEach((unlisten) => unlisten());
+				return;
+			}
+
 			// Startup-file delivery (argv / macOS Opened-before-ready stash) is
 			// a boot-time channel that belongs to the FIRST window only. It is
 			// process-global state: letting every window consume it meant each
@@ -3141,7 +2942,7 @@ import { t } from './utils/i18n.js';
 			if (isMainWindow) {
 				try {
 					const args: string[] = await invoke('send_markdown_path');
-					if (args?.length > 0) {
+					if (!isDisposed && args?.length > 0) {
 						await loadMarkdown(args[0]);
 					}
 				} catch (error) {
@@ -3149,12 +2950,14 @@ import { t } from './utils/i18n.js';
 				}
 			}
 
-			mode = appMode;
+			if (!isDisposed) mode = appMode;
 		};
 
 		init();
 
 		return () => {
+			isDisposed = true;
+			clearTimeout(identifyFlashTimer);
 			unlisteners.forEach((u) => u());
 		};
 	});
@@ -3180,6 +2983,7 @@ import { t } from './utils/i18n.js';
 		onselectFile={selectFile}
 		onnewFile={handleNewFile}
 		onopenFile={selectFile}
+		onmergeAllWindows={mergeAllWindowsHere}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
 		onreloadFromDisk={reloadFromDisk}
@@ -3223,6 +3027,7 @@ import { t } from './utils/i18n.js';
 		onselectFile={selectFile}
 		onnewFile={handleNewFile}
 		onopenFile={selectFile}
+		onmergeAllWindows={mergeAllWindowsHere}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
 		onreloadFromDisk={reloadFromDisk}
@@ -3546,7 +3351,7 @@ import { t } from './utils/i18n.js';
 				</div>
 			</div>
 	{:else}
-		<HomePage {recentFiles} onselectFile={selectFile} onloadFile={loadMarkdown} onremoveRecentFile={removeRecentFile} onnewFile={handleNewFile} />
+		<HomePage {recentFiles} {pinnedTags} onselectFile={selectFile} onloadFile={loadMarkdown} onremoveRecentFile={removeRecentFile} onnewFile={handleNewFile} onopenPinnedTag={openPinnedTag} onunpinTag={unpinTagFromHome} />
 	{/if}
 
 	<div 
@@ -3584,6 +3389,12 @@ import { t } from './utils/i18n.js';
 		oncancel={handlePromptCancel} />
 
 	<UpdateDialog />
+
+	{#if identifyFlash}
+		<div class="identify-flash" transition:fade={{ duration: 150 }}>
+			<span>{identifyFlash}</span>
+		</div>
+	{/if}
 
 	<div class="toast-container">
 		{#each toasts as toast (toast.id)}
@@ -4064,6 +3875,28 @@ import { t } from './utils/i18n.js';
 	@keyframes fadeIn {
 		from { opacity: 0; }
 		to { opacity: 1; }
+	}
+
+	.identify-flash {
+		position: fixed;
+		inset: 0;
+		z-index: 40000;
+		pointer-events: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-shadow: inset 0 0 0 3px var(--color-accent-fg);
+		border-radius: 8px;
+	}
+
+	.identify-flash span {
+		padding: 10px 22px;
+		border-radius: 10px;
+		background: var(--color-accent-fg);
+		color: #fff;
+		font-size: 20px;
+		font-weight: 600;
+		box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
 	}
 
 	.toast-container {

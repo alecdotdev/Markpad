@@ -4,6 +4,7 @@
 		shortcut?: string;
 		disabled?: boolean;
 		onClick?: () => void;
+		onHover?: () => void;
 		separator?: boolean;
 	};
 
@@ -60,6 +61,9 @@
 					<button
 						class="menu-item"
 						disabled={item.disabled}
+						onmouseenter={() => {
+							if (!item.disabled) item.onHover?.();
+						}}
 						onclick={() => {
 							if (!item.disabled && item.onClick) {
 								item.onClick();
