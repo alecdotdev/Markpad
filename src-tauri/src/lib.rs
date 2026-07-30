@@ -334,10 +334,12 @@ fn clear_window_state(app: AppHandle) -> Result<(), String> {
 fn set_window_meta(
     window: tauri::Window,
     state: State<'_, AppState>,
+    tag_name: Option<String>,
+    tag_color: Option<String>,
     active_tab_title: String,
     tab_count: usize,
 ) {
-    window_runtime::set_window_meta(window, state, active_tab_title, tab_count)
+    window_runtime::set_window_meta(window, state, tag_name, tag_color, active_tab_title, tab_count)
 }
 
 #[tauri::command]
@@ -353,6 +355,21 @@ fn offer_tab_to_window(app: AppHandle, target_label: String, token: String) -> R
 #[tauri::command]
 fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
     window_runtime::focus_window(app, label)
+}
+
+#[tauri::command]
+fn list_pinned_tags(app: AppHandle) -> Vec<window_runtime::PinnedTag> {
+    window_runtime::list_pinned_tags(app)
+}
+
+#[tauri::command]
+fn save_pinned_tag(app: AppHandle, name: String, color: String, files: Vec<String>) -> Result<(), String> {
+    window_runtime::save_pinned_tag(app, name, color, files)
+}
+
+#[tauri::command]
+fn remove_pinned_tag(app: AppHandle, name: String) -> Result<(), String> {
+    window_runtime::remove_pinned_tag(app, name)
 }
 
 /// Byte ranges of code regions — fenced code blocks and inline code spans —
@@ -1516,6 +1533,9 @@ pub fn run() {
             list_viewer_windows,
             offer_tab_to_window,
             focus_window,
+            list_pinned_tags,
+            save_pinned_tag,
+            remove_pinned_tag,
             save_window_state,
             load_window_state,
             clear_window_state

@@ -118,6 +118,42 @@
 	const modifier = isMac ? 'Cmd' : 'Ctrl';
 
 	let isWin11 = $state(false);
+	const tagColors = ['#5f6368', '#1a73e8', '#d93025', '#f9ab00', '#188038', '#d01884', '#a142f4', '#007b83'];
+	let tagEditorOpen = $state(false);
+	let tagDraftName = $state('');
+	let tagDraftColor = $state(tagColors[1]);
+
+	function openTagEditor() {
+		tagDraftName = tabManager.windowTag?.name ?? '';
+		tagDraftColor = tabManager.windowTag?.color ?? tagColors[1];
+		tagEditorOpen = true;
+	}
+
+	function applyTag() {
+		const name = tagDraftName.trim();
+		tabManager.setWindowTag(name ? { name, color: tagDraftColor, pinned: tabManager.windowTag?.pinned } : null);
+		tagEditorOpen = false;
+	}
+
+	function clearTag() {
+		const tag = tabManager.windowTag;
+		if (tag?.pinned) invoke('remove_pinned_tag', { name: tag.name }).catch(console.error);
+		tabManager.setWindowTag(null);
+		tagEditorOpen = false;
+	}
+
+	function togglePinnedTag() {
+		const tag = tabManager.windowTag;
+		if (!tag) return;
+		if (tag.pinned) {
+			invoke('remove_pinned_tag', { name: tag.name }).catch(console.error);
+			tabManager.setWindowTag({ ...tag, pinned: false });
+			return;
+		}
+		const files = tabManager.tabs.filter((tab) => tab.path !== '' && tab.path !== 'HOME').map((tab) => tab.path);
+		invoke('save_pinned_tag', { name: tag.name, color: tag.color, files }).catch(console.error);
+		tabManager.setWindowTag({ ...tag, pinned: true });
+	}
 
 	$effect(() => {
 		invoke('is_win11')
@@ -491,6 +527,27 @@
 				</div>
 			{/if}
 		</div>
+	</div>
+	<div class="window-tag-container">
+		{#if tabManager.windowTag}
+			<button class="window-tag-chip" style:--tag-color={tabManager.windowTag.color} onclick={openTagEditor}>
+				{tabManager.windowTag.name}
+			</button>
+		{/if}
+		{#if tagEditorOpen}
+			<div class="tag-editor" role="dialog" tabindex="-1" onkeydown={(event) => event.key === 'Enter' && applyTag()}>
+				<!-- svelte-ignore a11y_autofocus -->
+				<input autofocus spellcheck="false" placeholder={t('menu.windowTagPlaceholder', currentLanguage)} bind:value={tagDraftName} />
+				<div class="tag-colors">
+					{#each tagColors as color}
+						<button class:selected={tagDraftColor === color} style:--tag-color={color} onclick={() => (tagDraftColor = color)} aria-label={color}></button>
+					{/each}
+				</div>
+				<button onclick={applyTag}>{t('common.save', currentLanguage)}</button>
+				{#if tabManager.windowTag}<button onclick={togglePinnedTag}>{t(tabManager.windowTag.pinned ? 'menu.unpinWindowTag' : 'menu.pinWindowTag', currentLanguage)}</button>{/if}
+				{#if tabManager.windowTag}<button onclick={clearTag}>{t('menu.windowTagClear', currentLanguage)}</button>{/if}
+			</div>
+		{/if}
 	</div>
 
 	{#if tabManager.tabs.length > 0 && settings.showTabs}
@@ -1486,6 +1543,14 @@
 		z-index: 10006;
 		gap: 1px;
 	}
+
+	.window-tag-container { position: relative; display: flex; align-items: center; margin-left: 4px; }
+	.window-tag-chip { border: 0; border-radius: 10px; background: var(--tag-color); color: #fff; padding: 3px 10px; font: 600 11px var(--win-font); cursor: pointer; }
+	.tag-editor { position: absolute; top: 28px; left: 0; z-index: 20000; width: 180px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--color-canvas-default); border: 1px solid var(--color-border-default); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); }
+	.tag-editor input { box-sizing: border-box; width: 100%; padding: 5px; color: var(--color-fg-default); background: var(--color-canvas-default); border: 1px solid var(--color-border-default); border-radius: 4px; }
+	.tag-colors { display: flex; justify-content: space-between; }
+	.tag-colors button { width: 17px; height: 17px; padding: 0; border: 2px solid transparent; border-radius: 50%; background: var(--tag-color); cursor: pointer; }
+	.tag-colors button.selected { border-color: var(--color-fg-default); }
 
 	.home-menu-item {
 		display: flex;

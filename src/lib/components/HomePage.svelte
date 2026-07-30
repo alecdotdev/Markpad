@@ -4,8 +4,11 @@
 	import { t } from '../utils/i18n.js';
 	import { settings } from '../stores/settings.svelte.js';
 
-	let { recentFiles, onselectFile, onloadFile, onremoveRecentFile, onnewFile } = $props<{
+	let { recentFiles, pinnedTags = [], onselectFile, onloadFile, onremoveRecentFile, onnewFile, onopenPinnedTag, onunpinTag } = $props<{
 		recentFiles: string[];
+		pinnedTags?: Array<{ name: string; color: string; files: string[] }>;
+		onopenPinnedTag?: (tag: { name: string; color: string; files: string[] }) => void;
+		onunpinTag?: (name: string) => void;
 		onselectFile: () => void;
 		onloadFile: (file: string) => void;
 		onremoveRecentFile: (file: string, e: MouseEvent) => void;
@@ -57,6 +60,20 @@
 			{t('home.newFile', settings.language)}
 		</button>
 	</div>
+	{#if pinnedTags.length > 0}
+		<div class="recent-section">
+			<h3>{t('home.pinnedTags', settings.language)}</h3>
+			<div class="recent-grid">
+				{#each pinnedTags as tag (tag.name)}
+					<div class="recent-card" onclick={() => onopenPinnedTag?.(tag)} onkeydown={(event) => (event.key === 'Enter' || event.key === ' ') && onopenPinnedTag?.(tag)} role="button" tabindex="0">
+						<div class="file-icon"><span class="tag-dot" style:--tag-color={tag.color}></span></div>
+						<div class="file-info"><span class="file-name">{tag.name}</span><span class="file-path">{tag.files.length} files</span></div>
+						<button class="clear-btn" onclick={(event) => { event.stopPropagation(); onunpinTag?.(tag.name); }}>×</button>
+					</div>
+				{/each}
+			</div>
+		</div>
+	{/if}
 
 	{#if settings.showRecentFiles}
 	<div class="recent-section">
@@ -176,6 +193,8 @@
 		box-sizing: border-box;
 		overflow-x: hidden;
 	}
+
+	.tag-dot { display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--tag-color); }
 
 	@keyframes slideUp {
 		from {

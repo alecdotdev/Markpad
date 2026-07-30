@@ -476,9 +476,45 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 	$effect(() => {
 		invoke('set_window_meta', {
+			tagName: tabManager.windowTag?.name ?? null,
+			tagColor: tabManager.windowTag?.color ?? null,
 			activeTabTitle: tabManager.activeTab?.title ?? '',
 			tabCount: tabManager.tabs.length,
 		}).catch(() => {});
+	});
+
+	$effect(() => {
+		const tag = tabManager.windowTag;
+		appWindow.setTitle(tag ? `${tag.name} — ${windowTitle}` : windowTitle).catch(() => {});
+	});
+
+	let pinnedTags = $state<Array<{ name: string; color: string; files: string[] }>>([]);
+
+	async function refreshPinnedTags() {
+		pinnedTags = (await invoke('list_pinned_tags')) as typeof pinnedTags;
+	}
+
+	async function savePinnedTagIfNeeded() {
+		const tag = tabManager.windowTag;
+		if (!tag?.pinned) return;
+		const files = tabManager.tabs.filter((tab) => tab.path !== '' && tab.path !== 'HOME').map((tab) => tab.path);
+		await invoke('save_pinned_tag', { name: tag.name, color: tag.color, files });
+	}
+
+	async function openPinnedTag(tag: { name: string; color: string; files: string[] }) {
+		tabManager.setWindowTag({ ...tag, pinned: true });
+		for (const file of tag.files) await loadMarkdown(file);
+		showHome = false;
+	}
+
+	async function unpinTagFromHome(name: string) {
+		await invoke('remove_pinned_tag', { name });
+		if (tabManager.windowTag?.name === name) tabManager.setWindowTag({ ...tabManager.windowTag, pinned: false });
+		await refreshPinnedTags();
+	}
+
+	$effect(() => {
+		if (showHome) refreshPinnedTags().catch(console.error);
 	});
 
 	const documentSession = createDocumentSession({
@@ -535,6 +571,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	}
 
 	async function appExit() {
+		await savePinnedTagIfNeeded();
 		if (settings.restoreStateOnReopen) {
 			const hasUnsaved = tabManager.tabs.some((t) => t.isDirty || (t.path === '' && t.rawContent.trim() !== ''));
 			if (hasUnsaved) {
@@ -1858,6 +1895,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	}
 
 	async function destroyWindowAfterTabsClosed() {
+		await savePinnedTagIfNeeded();
 		if (settings.restoreStateOnReopen) {
 			await persistWindowState();
 		}
@@ -2822,6 +2860,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 					// Awaited: the close-requested handler holds the close open
 					// until the Rust write returns, so the process cannot exit
 					// under the snapshot.
+					await savePinnedTagIfNeeded();
 					if (settings.restoreStateOnReopen) {
 						await persistWindowState();
 					}
@@ -3312,7 +3351,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				</div>
 			</div>
 	{:else}
-		<HomePage {recentFiles} onselectFile={selectFile} onloadFile={loadMarkdown} onremoveRecentFile={removeRecentFile} onnewFile={handleNewFile} />
+		<HomePage {recentFiles} {pinnedTags} onselectFile={selectFile} onloadFile={loadMarkdown} onremoveRecentFile={removeRecentFile} onnewFile={handleNewFile} onopenPinnedTag={openPinnedTag} onunpinTag={unpinTagFromHome} />
 	{/if}
 
 	<div 

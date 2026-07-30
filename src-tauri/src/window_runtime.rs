@@ -41,6 +41,8 @@ impl AppState {
 #[derive(Clone, serde::Serialize)]
 struct WindowMeta {
     number: u64,
+    tag_name: Option<String>,
+    tag_color: Option<String>,
     active_tab_title: String,
     tab_count: usize,
 }
@@ -52,9 +54,63 @@ pub struct WindowListEntry {
     meta: WindowMeta,
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct PinnedTag {
+    pub name: String,
+    pub color: String,
+    pub files: Vec<String>,
+}
+
+fn pinned_tags_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    Ok(dir.join("pinned-tags.json"))
+}
+
+fn read_pinned_tags(app: &AppHandle) -> Vec<PinnedTag> {
+    pinned_tags_path(app)
+        .ok()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default()
+}
+
+pub fn list_pinned_tags(app: AppHandle) -> Vec<PinnedTag> {
+    read_pinned_tags(&app)
+}
+
+pub fn save_pinned_tag(
+    app: AppHandle,
+    name: String,
+    color: String,
+    files: Vec<String>,
+) -> Result<(), String> {
+    let mut tags = read_pinned_tags(&app);
+    if let Some(tag) = tags.iter_mut().find(|tag| tag.name == name) {
+        tag.color = color;
+        tag.files = files;
+    } else {
+        tags.push(PinnedTag { name, color, files });
+    }
+    let json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
+    fs::write(pinned_tags_path(&app)?, json).map_err(|error| error.to_string())
+}
+
+pub fn remove_pinned_tag(app: AppHandle, name: String) -> Result<(), String> {
+    let mut tags = read_pinned_tags(&app);
+    tags.retain(|tag| tag.name != name);
+    let json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
+    fs::write(pinned_tags_path(&app)?, json).map_err(|error| error.to_string())
+}
+
 pub fn set_window_meta(
     window: tauri::Window,
     state: State<'_, AppState>,
+    tag_name: Option<String>,
+    tag_color: Option<String>,
     active_tab_title: String,
     tab_count: usize,
 ) {
@@ -65,9 +121,13 @@ pub fn set_window_meta(
     let mut registry = state.window_registry.lock().unwrap();
     let entry = registry.entry(label).or_insert_with(|| WindowMeta {
         number: state.window_counter.fetch_add(1, Ordering::SeqCst) + 1,
+        tag_name: None,
+        tag_color: None,
         active_tab_title: String::new(),
         tab_count: 0,
     });
+    entry.tag_name = tag_name;
+    entry.tag_color = tag_color;
     entry.active_tab_title = active_tab_title;
     entry.tab_count = tab_count;
 }

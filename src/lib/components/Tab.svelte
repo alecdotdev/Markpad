@@ -70,12 +70,13 @@
 	type ViewerWindowEntry = {
 		label: string;
 		number: number;
+		tag_name: string | null;
 		active_tab_title: string;
 		tab_count: number;
 	};
 
 	function windowDisplay(window: ViewerWindowEntry, lang: typeof settings.language): string {
-		const identity = `${t('menu.window', lang)} ${window.number}`;
+		const identity = window.tag_name ?? `${t('menu.window', lang)} ${window.number}`;
 		return window.active_tab_title ? `${identity} · ${window.active_tab_title}` : identity;
 	}
 

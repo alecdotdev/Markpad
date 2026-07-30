@@ -36,6 +36,7 @@ class TabManager {
 	tabs = $state<Tab[]>([]);
 	activeTabId = $state<string | null>(null);
 	splitScrollSyncPreference = $state(false);
+	windowTag = $state<{ name: string; color: string; pinned: boolean } | null>(null);
 
 	constructor() {
 		if (typeof localStorage !== 'undefined') {
@@ -56,6 +57,10 @@ class TabManager {
 		return this.tabs.find((t) => t.id === this.activeTabId);
 	}
 
+	setWindowTag(tag: { name: string; color: string; pinned?: boolean } | null) {
+		this.windowTag = tag ? { ...tag, pinned: tag.pinned === true } : null;
+	}
+
 	/**
 	 * Serialize WINDOW state only: which files are open, the active tab, and
 	 * per-tab UI (edit mode, split, scroll). Document content always lives on
@@ -67,6 +72,7 @@ class TabManager {
 	serializeState(): string {
 		const stateData = {
 			version: 2,
+			windowTag: this.windowTag,
 			activeTabId: this.activeTabId,
 			tabs: this.tabs
 				.filter((t) => t.path !== '')
@@ -96,6 +102,18 @@ class TabManager {
 		try {
 			const data = JSON.parse(jsonBuffer);
 			if (!data || !Array.isArray(data.tabs)) return;
+			if (
+				data.windowTag &&
+				typeof data.windowTag.name === 'string' &&
+				data.windowTag.name !== '' &&
+				typeof data.windowTag.color === 'string'
+			) {
+				this.setWindowTag({
+					name: data.windowTag.name,
+					color: data.windowTag.color,
+					pinned: data.windowTag.pinned === true,
+				});
+			}
 
 			const restored: Tab[] = [];
 			for (const saved of data.tabs) {
