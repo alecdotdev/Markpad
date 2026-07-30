@@ -19,6 +19,7 @@ type WindowSessionOptions = {
 	restoredTabs: () => RestoredTab[];
 	applyRestoredContent: (tabId: string, raw: string) => Promise<void>;
 	dropRestoredTab: (tabId: string) => void;
+	canTransfer: (tabId: string) => boolean;
 	canDetach: (tabId: string) => boolean;
 	transferPayload: (tabId: string) => string;
 	onTransferClaimed: (tabId: string) => void;
@@ -98,54 +99,70 @@ export function createWindowSession(options: WindowSessionOptions) {
 		localStorage.removeItem(options.legacyStateKey);
 	}
 
+	async function acceptOfferedTransfer(token: string): Promise<boolean> {
+		try {
+			const payload = (await invoke('claim_detached_tab', { token })) as string | null;
+			const tab = payload ? validateTransferPayload(payload) : null;
+			if (!tab) {
+				options.onWarning('Tab transfer claim failed or payload invalid; opening empty window');
+				return false;
+			}
+			if (await options.acceptTransferredTab(tab)) {
+				await invoke('complete_detached_tab', { token });
+				return true;
+			}
+			return false;
+		} catch (error) {
+			options.onError('Tab transfer claim error', error);
+			return false;
+		}
+	}
+
 	async function claimTransferredTab() {
 		const claimToken = appWindow.label.startsWith('window-')
 			? appWindow.label.slice('window-'.length)
 			: null;
 		if (!claimToken) return;
-		try {
-			const payload = (await invoke('claim_detached_tab', { token: claimToken })) as string | null;
-			const tab = payload ? validateTransferPayload(payload) : null;
-			if (!tab) {
-				options.onWarning('Tab transfer claim failed or payload invalid; opening empty window');
-				return;
-			}
-			if (await options.acceptTransferredTab(tab)) {
-				await invoke('complete_detached_tab', { token: claimToken });
-			}
-		} catch (error) {
-			options.onError('Tab transfer claim error', error);
-		}
+		await acceptOfferedTransfer(claimToken);
 	}
 
-	async function detach(tabId: string) {
-		if (!options.canDetach(tabId)) return;
+	async function transfer(tabId: string, deliver: (token: string) => Promise<void>): Promise<boolean> {
+		if (!options.canTransfer(tabId)) return false;
 		const token = (await invoke('stage_detached_tab', {
 			payload: options.transferPayload(tabId),
 		})) as string;
 		let settled = false;
+		let resolveTransfer: (moved: boolean) => void;
 		const unlisten = await appWindow.listen<string>('tab-transfer-claimed', (event) => {
 			if (settled || event.payload !== token) return;
 			settled = true;
 			unlisten();
 			options.onTransferClaimed(tabId);
+			resolveTransfer(true);
 		});
-		const cancel = () => {
-			if (settled) return;
-			settled = true;
-			unlisten();
-			invoke('cancel_detached_tab', { token }).catch((error) => {
-				options.onError('Failed to cancel tab transfer', error);
+		return new Promise<boolean>((resolve) => {
+			resolveTransfer = resolve;
+			const cancel = () => {
+				if (settled) return;
+				settled = true;
+				unlisten();
+				invoke('cancel_detached_tab', { token }).catch((error) => {
+					options.onError('Failed to cancel tab transfer', error);
+				});
+				resolve(false);
+			};
+			setTimeout(cancel, 15_000);
+			deliver(token).catch((error) => {
+				options.onError('Failed to deliver tab transfer', error);
+				cancel();
 			});
-		};
-		setTimeout(cancel, 15_000);
-		try {
-			await invoke('create_transfer_window', { token });
-		} catch (error) {
-			options.onError('Failed to open new window', error);
-			cancel();
-		}
+		});
 	}
 
-	return { discardPersistedState, persistState, restore, claimTransferredTab, detach };
+	async function detach(tabId: string) {
+		if (!options.canDetach(tabId)) return false;
+		return transfer(tabId, (token) => invoke('create_transfer_window', { token }));
+	}
+
+	return { discardPersistedState, persistState, restore, claimTransferredTab, acceptOfferedTransfer, detach, transfer };
 }

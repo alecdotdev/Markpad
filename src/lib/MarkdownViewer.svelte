@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+	import { emitTo } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount, tick, untrack } from 'svelte';
-	import { fly } from 'svelte/transition';
+	import { fade, fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 	import { open, save, ask } from '@tauri-apps/plugin-dialog';
@@ -405,6 +406,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	// red button is not blocked by the dialog overlay, so this keeps a second
 	// close request from starting a competing walk.
 	let isCloseWalkActive = false;
+	let identifyFlash = $state('');
+	let identifyFlashTimer: ReturnType<typeof setTimeout> | undefined;
 
 	// v2 window-state snapshots live under their own key, and the legacy key
 	// is removed on every write: an older Markpad build restoring a v2
@@ -443,6 +446,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			if (tabManager.activeTabId === tab.id) tick().then(renderRichContent);
 		},
 		dropRestoredTab: (tabId) => tabManager.closeTab(tabId),
+		canTransfer: (tabId) => {
+			const tab = tabManager.tabs.find((item) => item.id === tabId);
+			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME';
+		},
 		canDetach: (tabId) => {
 			const tab = tabManager.tabs.find((item) => item.id === tabId);
 			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME' && tabManager.tabs.length >= 2;
@@ -465,6 +472,13 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			addToast(`${message}: ${String(error)}`, 'error');
 		},
 		onWarning: (message, error) => console.warn(message, error),
+	});
+
+	$effect(() => {
+		invoke('set_window_meta', {
+			activeTabTitle: tabManager.activeTab?.title ?? '',
+			tabCount: tabManager.tabs.length,
+		}).catch(() => {});
 	});
 
 	const documentSession = createDocumentSession({
@@ -2233,6 +2247,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			reloadFromDisk();
 			return;
 		}
+		if (cmdOrCtrl && e.shiftKey && key === 'm') {
+			e.preventDefault();
+			carryActiveTabToNextWindow();
+			return;
+		}
 		if (cmdOrCtrl && key === 'w') {
 			e.preventDefault();
 			closeFile();
@@ -2394,6 +2413,47 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	// window creation error, timeout — leaves the tab exactly where it was.
 	async function handleDetach(tabId: string) {
 		await windowSession.detach(tabId);
+	}
+
+	async function moveTabToWindow(tabId: string, targetLabel: string, focusAfter = false) {
+		const moved = await windowSession.transfer(tabId, (token) => invoke('offer_tab_to_window', { targetLabel, token }));
+		if (moved && focusAfter) await invoke('focus_window', { label: targetLabel });
+		return moved;
+	}
+
+	async function carryActiveTabToNextWindow() {
+		const activeId = tabManager.activeTabId;
+		if (!activeId) return;
+		const windows = (await invoke('list_viewer_windows')) as Array<{ label: string; number: number }>;
+		const ordered = windows.slice().sort((a, b) => a.number - b.number);
+		const selfIndex = ordered.findIndex((window) => window.label === appWindow.label);
+		if (selfIndex === -1 || ordered.length === 1) {
+			await handleDetach(activeId);
+			return;
+		}
+		await moveTabToWindow(activeId, ordered[(selfIndex + 1) % ordered.length].label, true);
+	}
+
+	async function mergeAllWindowsHere() {
+		const windows = (await invoke('list_viewer_windows')) as Array<{ label: string }>;
+		const others = windows.filter((window) => window.label !== appWindow.label);
+		if (others.length === 0) {
+			addToast(t('toast.noOtherWindows', settings.language), 'info');
+			return;
+		}
+		await Promise.all(others.map((window) => emitTo(window.label, 'merge-into', appWindow.label)));
+	}
+
+	async function mergeSelfInto(targetLabel: string) {
+		if (isCloseWalkActive) return;
+		for (const tab of [...tabManager.tabs]) {
+			if (tab.path === 'HOME') {
+				tabManager.closeTab(tab.id);
+				continue;
+			}
+			await moveTabToWindow(tab.id, targetLabel);
+		}
+		if (tabManager.tabs.length === 0) await appWindow.destroy();
 	}
 
 	function startDrag(e: MouseEvent, tabId: string | null) {
@@ -2620,6 +2680,30 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				}),
 			);
 			unlisteners.push(
+				await appWindow.listen('menu-tab-move', (event) => {
+					const { tabId, targetLabel } = event.payload as { tabId: string; targetLabel: string };
+					moveTabToWindow(tabId, targetLabel).catch((error) => console.error('Failed to move tab', error));
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen<string>('tab-transfer-offer', (event) => {
+					if (isCloseWalkActive) return;
+					windowSession.acceptOfferedTransfer(event.payload);
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen<string>('merge-into', (event) => {
+					mergeSelfInto(event.payload).catch((error) => console.error('Failed to merge window', error));
+				}),
+			);
+			unlisteners.push(
+				await appWindow.listen<string>('window-identify', (event) => {
+					identifyFlash = event.payload;
+					clearTimeout(identifyFlashTimer);
+					identifyFlashTimer = setTimeout(() => (identifyFlash = ''), 700);
+				}),
+			);
+			unlisteners.push(
 				await appWindow.listen('menu-tab-close-others', async (event) => {
 					const tabId = event.payload as string;
 					const tabsToClose = tabManager.tabs.filter((t) => t.id !== tabId).map((t) => t.id);
@@ -2834,6 +2918,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 		return () => {
 			isDisposed = true;
+			clearTimeout(identifyFlashTimer);
 			unlisteners.forEach((u) => u());
 		};
 	});
@@ -2859,6 +2944,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		onselectFile={selectFile}
 		onnewFile={handleNewFile}
 		onopenFile={selectFile}
+		onmergeAllWindows={mergeAllWindowsHere}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
 		onreloadFromDisk={reloadFromDisk}
@@ -2902,6 +2988,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		onselectFile={selectFile}
 		onnewFile={handleNewFile}
 		onopenFile={selectFile}
+		onmergeAllWindows={mergeAllWindowsHere}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
 		onreloadFromDisk={reloadFromDisk}
@@ -3263,6 +3350,12 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		oncancel={handlePromptCancel} />
 
 	<UpdateDialog />
+
+	{#if identifyFlash}
+		<div class="identify-flash" transition:fade={{ duration: 150 }}>
+			<span>{identifyFlash}</span>
+		</div>
+	{/if}
 
 	<div class="toast-container">
 		{#each toasts as toast (toast.id)}
@@ -3743,6 +3836,28 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	@keyframes fadeIn {
 		from { opacity: 0; }
 		to { opacity: 1; }
+	}
+
+	.identify-flash {
+		position: fixed;
+		inset: 0;
+		z-index: 40000;
+		pointer-events: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-shadow: inset 0 0 0 3px var(--color-accent-fg);
+		border-radius: 8px;
+	}
+
+	.identify-flash span {
+		padding: 10px 22px;
+		border-radius: 10px;
+		background: var(--color-accent-fg);
+		color: #fff;
+		font-size: 20px;
+		font-weight: 600;
+		box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
 	}
 
 	.toast-container {

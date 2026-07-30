@@ -330,6 +330,31 @@ fn clear_window_state(app: AppHandle) -> Result<(), String> {
     window_runtime::clear_window_state(app)
 }
 
+#[tauri::command]
+fn set_window_meta(
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    active_tab_title: String,
+    tab_count: usize,
+) {
+    window_runtime::set_window_meta(window, state, active_tab_title, tab_count)
+}
+
+#[tauri::command]
+fn list_viewer_windows(state: State<'_, AppState>) -> Vec<window_runtime::WindowListEntry> {
+    window_runtime::list_viewer_windows(state)
+}
+
+#[tauri::command]
+fn offer_tab_to_window(app: AppHandle, target_label: String, token: String) -> Result<(), String> {
+    window_runtime::offer_tab_to_window(app, target_label, token)
+}
+
+#[tauri::command]
+fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
+    window_runtime::focus_window(app, label)
+}
+
 /// Byte ranges of code regions — fenced code blocks and inline code spans —
 /// paired with CommonMark's rules. The regex alternation previously used for
 /// protection (```` ```.*?```|`.*?` ````) cannot express them: a fence closes
@@ -1487,6 +1512,10 @@ pub fn run() {
             tab_transfer::complete_detached_tab,
             tab_transfer::cancel_detached_tab,
             create_transfer_window,
+            set_window_meta,
+            list_viewer_windows,
+            offer_tab_to_window,
+            focus_window,
             save_window_state,
             load_window_state,
             clear_window_state

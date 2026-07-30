@@ -67,7 +67,19 @@
 		invoke('open_file_folder', { path: tab.path }).catch(console.error);
 	}
 
-	function handleContextMenu(e: MouseEvent) {
+	type ViewerWindowEntry = {
+		label: string;
+		number: number;
+		active_tab_title: string;
+		tab_count: number;
+	};
+
+	function windowDisplay(window: ViewerWindowEntry, lang: typeof settings.language): string {
+		const identity = `${t('menu.window', lang)} ${window.number}`;
+		return window.active_tab_title ? `${identity} · ${window.active_tab_title}` : identity;
+	}
+
+	async function handleContextMenu(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
 
@@ -77,6 +89,21 @@
 			disabled: action.disabled,
 			onClick: action.id === 'copy-path' ? copyTabPath : openTabFileLocation,
 		}));
+		const selfLabel = getCurrentWindow().label;
+		let moveToWindowItems: ContextMenuItem[] = [];
+		try {
+			const windows = (await invoke('list_viewer_windows')) as ViewerWindowEntry[];
+			moveToWindowItems = windows
+				.filter((window) => window.label !== selfLabel)
+				.map((window) => ({
+					label: `${t('menu.moveToWindow', currentLang)} ${windowDisplay(window, currentLang)}`,
+					disabled: tab.path === 'HOME',
+					onHover: () => emitTo(window.label, 'window-identify', windowDisplay(window, currentLang)),
+					onClick: () => emitTo(selfLabel, 'menu-tab-move', { tabId: tab.id, targetLabel: window.label }),
+				}));
+		} catch (error) {
+			console.error('Failed to list viewer windows', error);
+		}
 
 		tabContextMenu = {
 			show: true,
@@ -102,6 +129,7 @@
 					disabled: tab.path === 'HOME' || tabManager.tabs.length < 2,
 					onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-detach', tab.id),
 				},
+				...moveToWindowItems,
 				{ separator: true },
 				{ label: t('menu.closeFile', currentLang), shortcut: 'Ctrl+W', onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-close', tab.id) },
 				{ label: t('menu.closeOtherTabs', currentLang), onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-close-others', tab.id) },

@@ -152,6 +152,9 @@ export const translations: Record<LanguageCode, Translation> = {
             closeFile: 'Close File',
             closeWindow: 'Close Window',
             moveToNewWindow: 'Move to New Window',
+			moveToWindow: 'Move to',
+			window: 'Window',
+			mergeAllWindows: 'Merge All Windows Here',
             undo: 'Undo',
             redo: 'Redo',
             cut: 'Cut',
@@ -239,6 +242,7 @@ export const translations: Record<LanguageCode, Translation> = {
             failedToCopyCode: 'Failed to copy code',
             unsupportedFile: 'Unsupported file type: {{filename}}',
             autoSaveFailed: 'Auto-save failed — unsaved changes still in memory',
+			noOtherWindows: 'No other windows to merge',
             savedNewerEdits: 'Saved — staying in edit mode because you have newer edits',
             openExportedFileFailed: 'Could not open exported file'
         },

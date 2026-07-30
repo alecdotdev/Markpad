@@ -29,6 +29,7 @@
 		onselectFile,
 		onnewFile,
 		onopenFile,
+		onmergeAllWindows,
 		onsaveFile,
 		onsaveFileAs,
 		onreloadFromDisk,
@@ -70,6 +71,7 @@
 		onselectFile?: () => void;
 		onnewFile?: () => void;
 		onopenFile?: () => void;
+		onmergeAllWindows?: () => void;
 		onsaveFile?: () => void;
 		onsaveFileAs?: () => void;
 		onreloadFromDisk?: () => void;
@@ -376,7 +378,7 @@
 				{t('menu.newFile', currentLanguage)}
 				<span class="menu-shortcut">{modifier}+T</span>
 			</button>
-					<button
+			<button
 				class="home-menu-item"
 				onclick={() => {
 					homeMenuOpen = false;
@@ -391,6 +393,14 @@
 					></svg>
 				{t('menu.openFile', currentLanguage)}
 				<span class="menu-shortcut">{modifier}+O</span>
+			</button>
+			<button
+				class="home-menu-item"
+				onclick={() => {
+					homeMenuOpen = false;
+					onmergeAllWindows?.();
+				}}>
+				{t('menu.mergeAllWindows', currentLanguage)}
 			</button>
 					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.isEditing)}
 						<button

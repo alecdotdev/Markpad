@@ -225,5 +225,5 @@ test('source removal waits for destination completion', () => {
 	assert.match(broker, /pub fn complete_detached_tab/);
 	const claim = broker.slice(broker.indexOf('pub fn claim_detached_tab'), broker.indexOf('pub fn complete_detached_tab'));
 	assert.doesNotMatch(claim, /tab-transfer-claimed/);
-	assert.match(session, /invoke\('complete_detached_tab', \{ token: claimToken \}\)/);
+	assert.match(session, /invoke\('complete_detached_tab', \{ token \}\)/);
 });

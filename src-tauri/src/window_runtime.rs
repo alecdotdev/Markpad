@@ -2,7 +2,10 @@ use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct WatcherState {
@@ -20,6 +23,8 @@ impl WatcherState {
 pub struct AppState {
     pub(crate) startup_file: Mutex<Option<String>>,
     pub(crate) last_focused_viewer: Mutex<Option<String>>,
+    window_registry: Mutex<HashMap<String, WindowMeta>>,
+    window_counter: AtomicU64,
 }
 
 impl AppState {
@@ -27,8 +32,77 @@ impl AppState {
         Self {
             startup_file: Mutex::new(None),
             last_focused_viewer: Mutex::new(None),
+            window_registry: Mutex::new(HashMap::new()),
+            window_counter: AtomicU64::new(0),
         }
     }
+}
+
+#[derive(Clone, serde::Serialize)]
+struct WindowMeta {
+    number: u64,
+    active_tab_title: String,
+    tab_count: usize,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct WindowListEntry {
+    label: String,
+    #[serde(flatten)]
+    meta: WindowMeta,
+}
+
+pub fn set_window_meta(
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    active_tab_title: String,
+    tab_count: usize,
+) {
+    let label = window.label().to_string();
+    if label != "main" && !label.starts_with("window-") {
+        return;
+    }
+    let mut registry = state.window_registry.lock().unwrap();
+    let entry = registry.entry(label).or_insert_with(|| WindowMeta {
+        number: state.window_counter.fetch_add(1, Ordering::SeqCst) + 1,
+        active_tab_title: String::new(),
+        tab_count: 0,
+    });
+    entry.active_tab_title = active_tab_title;
+    entry.tab_count = tab_count;
+}
+
+pub fn list_viewer_windows(state: State<'_, AppState>) -> Vec<WindowListEntry> {
+    let registry = state.window_registry.lock().unwrap();
+    let mut list: Vec<WindowListEntry> = registry
+        .iter()
+        .map(|(label, meta)| WindowListEntry {
+            label: label.clone(),
+            meta: meta.clone(),
+        })
+        .collect();
+    list.sort_by_key(|entry| entry.meta.number);
+    list
+}
+
+pub fn offer_tab_to_window(
+    app: AppHandle,
+    target_label: String,
+    token: String,
+) -> Result<(), String> {
+    if app.get_webview_window(&target_label).is_none() {
+        return Err(format!("no such window: {target_label}"));
+    }
+    app.emit_to(target_label.as_str(), "tab-transfer-offer", token)
+        .map_err(|error| error.to_string())
+}
+
+pub fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
+    let window = app
+        .get_webview_window(&label)
+        .ok_or_else(|| format!("no such window: {label}"))?;
+    bring_to_front(&window);
+    Ok(())
 }
 
 pub async fn show_window(window: tauri::Window) {
@@ -200,6 +274,12 @@ pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
         tauri::WindowEvent::Destroyed => {
             let state = window.state::<WatcherState>();
             state.watchers.lock().unwrap().remove(window.label());
+            let app_state = window.state::<AppState>();
+            app_state
+                .window_registry
+                .lock()
+                .unwrap()
+                .remove(window.label());
         }
         _ => {}
     }
