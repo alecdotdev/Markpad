@@ -1348,7 +1348,7 @@ pub fn run() {
                 window_builder = window_builder.decorations(false);
             }
 
-            let _window = window_builder.build()?;
+            let window = window_builder.build()?;
 
             #[cfg(target_os = "macos")]
             {
@@ -1460,8 +1460,6 @@ pub fn run() {
             let theme_pref =
                 fs::read_to_string(theme_path).unwrap_or_else(|_| "system".to_string());
 
-            let window = app.get_webview_window(label).unwrap();
-
             let bg_color = match theme_pref.as_str() {
                 "dark" => Some(tauri::window::Color(24, 24, 24, 255)),
                 "light" => Some(tauri::window::Color(253, 253, 253, 255)),
@@ -1479,9 +1477,7 @@ pub fn run() {
 
             let _ = window.set_background_color(bg_color);
 
-            let _ = _window.set_shadow(true);
-
-            let window = app.get_webview_window(label).unwrap();
+            let _ = window.set_shadow(true);
 
             let file_path = args.iter().skip(1).find(|arg| !arg.starts_with("-"));
 
