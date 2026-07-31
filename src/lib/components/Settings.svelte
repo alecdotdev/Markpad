@@ -9,6 +9,12 @@
 	import type { LanguageCode } from '../utils/i18n.js';
 	import { getEditorToolbarTools } from '../utils/editorToolbar.js';
 	import { getTitlebarToolbarActions, type TitlebarToolbarPlacement } from '../utils/titlebarToolbar.js';
+	import {
+		DEFAULT_PREVIEW_MAX_WIDTH,
+		MAX_PREVIEW_MAX_WIDTH,
+		MIN_PREVIEW_MAX_WIDTH,
+		normalizePreviewMaxWidth,
+	} from '../utils/previewWidth.js';
 
 	let {
 		show = false,
@@ -19,6 +25,10 @@
 
 	let activeCategory = $state<'editor' | 'preview' | 'appearance' | 'toolbars' | 'files'>('editor');
 	let highlightMenuOpen = $state(false);
+
+	function updatePreviewMaxWidth(value: unknown) {
+		settings.previewMaxWidth = normalizePreviewMaxWidth(value);
+	}
 	const highlightColors = [
 		{ value: 'default', color: 'var(--color-accent-fg)' },
 		{ value: 'yellow', color: '#ffd000' },
@@ -899,10 +909,41 @@
 								<h2>{t('settings.previewSettings', settings.language)}</h2>
 								<button
 									class="reset-text-btn"
-									class:disabled={settings.previewFont === defaultFonts.previewFont && settings.previewFontSize === 16 && settings.codeFont === defaultFonts.codeFont && settings.codeFontSize === 14}
-									onclick={() => settings.resetPreviewFont()}>
-									{t('settings.resetFontSettings', settings.language)}
+									class:disabled={settings.previewFont === defaultFonts.previewFont && settings.previewFontSize === 16 && settings.codeFont === defaultFonts.codeFont && settings.codeFontSize === 14 && settings.previewMaxWidth === DEFAULT_PREVIEW_MAX_WIDTH}
+									onclick={() => {
+										settings.resetPreviewFont();
+										settings.resetPreviewMaxWidth();
+									}}>
+									{t('settings.resetPreviewSettings', settings.language)}
 								</button>
+							</div>
+
+							<div class="setting-item">
+								<label for="preview-max-width">{t('settings.previewMaxWidth', settings.language)}</label>
+								<div class="slider-container">
+									<div class="number-input-wrapper horizontal">
+										<button class="spin-btn minus" onclick={() => updatePreviewMaxWidth(settings.previewMaxWidth - 40)} aria-label={t('common.decrease', settings.language)}>
+											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+										</button>
+										<input
+											type="number"
+											id="preview-max-width"
+											min={MIN_PREVIEW_MAX_WIDTH}
+											max={MAX_PREVIEW_MAX_WIDTH}
+											step="40"
+											bind:value={settings.previewMaxWidth}
+											onchange={() => updatePreviewMaxWidth(settings.previewMaxWidth)}
+											class="number-input"
+											style="width: 62px"
+										/>
+										<button class="spin-btn plus" onclick={() => updatePreviewMaxWidth(settings.previewMaxWidth + 40)} aria-label={t('common.increase', settings.language)}>
+											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+										</button>
+									</div>
+									<span class="slider-value">px · {MIN_PREVIEW_MAX_WIDTH}–{MAX_PREVIEW_MAX_WIDTH} · {t('settings.default', settings.language)} {DEFAULT_PREVIEW_MAX_WIDTH}</span>
+								</div>
 							</div>
 
 							<div class="setting-item">
