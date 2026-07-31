@@ -13,6 +13,7 @@
     "opener:allow-open-url",
     "opener:allow-open-path",
     "dialog:default",
+    "core:webview:allow-print",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
