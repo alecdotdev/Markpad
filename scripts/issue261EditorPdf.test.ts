@@ -25,3 +25,10 @@ test('print layout releases measured fold heights before text reflows', () => {
 		/@media print\s*\{[\s\S]*?\.foldable-content-wrapper\.is-collapsed\s*\{[\s\S]*?height:\s*0\s*!important;/,
 	);
 });
+
+test('print layout lets the viewer pane escape the interactive split flex ratio', () => {
+	assert.match(
+		styles,
+		/@media print\s*\{[\s\S]*?\.pane\.viewer-pane\s*\{[\s\S]*?flex:\s*none\s*!important;/,
+	);
+});

@@ -1438,6 +1438,12 @@ body {
 		border-radius: 0 !important;
 	}
 
+	/* The viewer pane carries an inline split ratio during normal interaction.
+	   Width alone cannot override that flex value in the print layout. */
+	.pane.viewer-pane {
+		flex: none !important;
+	}
+
 	.markdown-body {
 		padding: 0 !important;
 		margin: 0 !important;
