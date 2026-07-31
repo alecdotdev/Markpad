@@ -25,11 +25,11 @@
 		"@tauri-apps/plugin-process": "^2.3.1",
 		"@tauri-apps/plugin-updater": "^2.10.1",
 		"@types/dompurify": "^3.0.5",
-		"dompurify": "^3.3.1",
+		"dompurify": "3.4.12",
 		"highlight.js": "^11.11.1",
 		"highlightjs-svelte": "^1.0.6",
 		"katex": "^0.16.27",
-		"mermaid": "^11.12.2",
+		"mermaid": "^11.16.0",
 		"monaco-editor": "^0.55.1",
 		"monaco-vim": "^0.4.4",
 		"node-stream-zip": "^1.15.0",
@@ -45,5 +45,8 @@
 		"tsx": "^4.22.4",
 		"typescript": "~5.6.2",
 		"vite": "^6.0.3"
+	},
+	"overrides": {
+		"dompurify": "3.4.12"
 	}
 }
