@@ -49,14 +49,6 @@
         "name": "Markdown File",
         "description": "Opens Markdown files with Markpad",
         "role": "Editor"
-      },
-      {
-        "ext": ["txt"],
-        "contentTypes": ["public.plain-text"],
-        "mimeType": "text/plain",
-        "name": "Text File",
-        "description": "Opens Text files with Markpad",
-        "role": "Editor"
       }
     ],
     "windows": {
