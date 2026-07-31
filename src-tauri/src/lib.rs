@@ -1569,12 +1569,12 @@ pub fn run() {
         .run(|_app_handle, _event| {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = _event {
-                if let Some(url) = urls.first() {
+                for url in urls {
                     if let Ok(path_buf) = url.to_file_path() {
                         let path_str = path_buf.to_string_lossy().to_string();
 
                         let state = _app_handle.state::<AppState>();
-                        *state.startup_file.lock().unwrap() = Some(path_str.clone());
+                        state.startup_files.lock().unwrap().push(path_str.clone());
 
                         if let Some(window) = pick_delivery_window(_app_handle) {
                             let _ = _app_handle.emit_to(window.label(), "file-path", path_str);

@@ -2947,7 +2947,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				try {
 					const args: string[] = await invoke('send_markdown_path');
 					if (!isDisposed && args?.length > 0) {
-						await loadMarkdown(args[0]);
+						for (const path of args) await loadMarkdown(path);
 					}
 				} catch (error) {
 					console.error('Error receiving Markdown file path:', error);

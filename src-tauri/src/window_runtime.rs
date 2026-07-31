@@ -21,7 +21,7 @@ impl WatcherState {
 }
 
 pub struct AppState {
-    pub(crate) startup_file: Mutex<Option<String>>,
+    pub(crate) startup_files: Mutex<Vec<String>>,
     pub(crate) last_focused_viewer: Mutex<Option<String>>,
     window_registry: Mutex<HashMap<String, WindowMeta>>,
     window_counter: AtomicU64,
@@ -30,7 +30,7 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
-            startup_file: Mutex::new(None),
+            startup_files: Mutex::new(Vec::new()),
             last_focused_viewer: Mutex::new(None),
             window_registry: Mutex::new(HashMap::new()),
             window_counter: AtomicU64::new(0),
@@ -315,7 +315,8 @@ pub fn send_markdown_path(state: State<'_, AppState>) -> Vec<String> {
         .skip(1)
         .filter(|arg| !arg.starts_with('-'))
         .collect();
-    if let Some(path) = state.startup_file.lock().unwrap().take() {
+    let startup_files: Vec<String> = state.startup_files.lock().unwrap().drain(..).collect();
+    for path in startup_files.into_iter().rev() {
         if !files.contains(&path) {
             files.insert(0, path);
         }
