@@ -288,10 +288,11 @@ pub fn watch_file(
     let mut watchers = state.watchers.lock().unwrap();
     watchers.remove(&label);
     let event_label = label.clone();
+    let watched_path = path.clone();
     let mut watcher = RecommendedWatcher::new(
         move |result: Result<notify::Event, notify::Error>| {
             if result.is_ok() {
-                let _ = handle.emit_to(event_label.as_str(), "file-changed", ());
+                let _ = handle.emit_to(event_label.as_str(), "file-changed", watched_path.clone());
             }
         },
         Config::default(),

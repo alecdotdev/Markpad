@@ -525,7 +525,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			scrollFuture = [];
 		},
 		renderMarkdown: renderMarkdownPreview,
-		isLiveMode: () => liveMode,
 		afterLoad: tick,
 		saveRecentFile,
 		deleteRecentFile,
@@ -618,6 +617,14 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		const _ = tabManager.activeTabId;
 		showHome = false;
 		findOpen = false;
+	});
+
+	$effect(() => {
+		if (liveMode && currentFile) {
+			invoke('watch_file', { path: currentFile }).catch(console.error);
+		} else {
+			invoke('unwatch_file').catch(console.error);
+		}
 	});
 
 	function processHighlights(root: Element) {
@@ -1907,14 +1914,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		if (currentFile) await invoke('open_file_folder', { path: currentFile });
 	}
 
-	async function toggleLiveMode() {
+	function toggleLiveMode() {
 		liveMode = !liveMode;
-		if (liveMode && currentFile) {
-			await invoke('watch_file', { path: currentFile });
-			if (tabManager.activeTabId) await loadMarkdown(currentFile);
-		} else {
-			await invoke('unwatch_file');
-		}
 	}
 
 	async function saveImageAs(src: string) {
@@ -2638,8 +2639,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				}),
 			);
 			unlisteners.push(
-				await appWindow.listen('file-changed', () => {
-					if (!liveMode || !currentFile) return;
+				await appWindow.listen('file-changed', (event) => {
+					const changedPath = event.payload as string;
+					if (!liveMode || !currentFile || changedPath !== currentFile) return;
 					// Skip events caused by our own auto-save / save invocations,
 					// otherwise the reload would clobber any keystrokes that landed
 					// between fs::write and this listener firing.

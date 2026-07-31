@@ -16,7 +16,6 @@ type DocumentSessionOptions = {
 	currentFile: () => string;
 	resetScrollHistory: () => void;
 	renderMarkdown: (raw: string, path: string) => Promise<string>;
-	isLiveMode: () => boolean;
 	afterLoad: () => Promise<unknown>;
 	saveRecentFile: (path: string) => void;
 	deleteRecentFile: (path: string) => void;
@@ -137,7 +136,6 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				if (tab) tab.isEditing = true;
 				tabManager.setTabRawContent(activeId, content);
 			}
-			if (options.isLiveMode()) invoke('watch_file', { path: filePath }).catch(console.error);
 			await options.afterLoad();
 			if (filePath) options.saveRecentFile(filePath);
 		} catch (error) {
