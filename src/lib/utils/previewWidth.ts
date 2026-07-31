@@ -8,3 +8,7 @@ export function normalizePreviewMaxWidth(value: unknown): number {
 	if (!Number.isFinite(parsed)) return DEFAULT_PREVIEW_MAX_WIDTH;
 	return Math.min(MAX_PREVIEW_MAX_WIDTH, Math.max(MIN_PREVIEW_MAX_WIDTH, Math.round(parsed)));
 }
+
+export function getPreviewContentWidth(value: unknown, isFullWidth: boolean): number | null {
+	return isFullWidth ? null : normalizePreviewMaxWidth(value);
+}
