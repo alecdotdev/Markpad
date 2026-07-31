@@ -25,8 +25,20 @@ In the GitHub repo settings → Secrets and variables → Actions → New reposi
 |---------------------------------------|----------------------------------------------------|
 | `TAURI_SIGNING_PRIVATE_KEY`           | full content of `~/.tauri/markpad-updater.key`     |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`  | the password you set in step 1                     |
+| `APPLE_CERTIFICATE`                   | base64-encoded Developer ID Application `.p12`     |
+| `APPLE_CERTIFICATE_PASSWORD`          | password used when exporting that `.p12`            |
+| `KEYCHAIN_PASSWORD`                   | temporary GitHub Actions keychain password          |
+| `APPLE_ID`                            | Apple ID used for notarization                      |
+| `APPLE_PASSWORD`                      | app-specific password for that Apple ID             |
+| `APPLE_TEAM_ID`                       | Apple Developer team ID                             |
 
 The build workflow reads both at signing time on macOS, Windows, and Linux runners.
+
+### 3. Configure macOS code signing and notarization
+
+The release workflow imports a `Developer ID Application` certificate on the macOS runner, signs the universal bundle, then asks Apple to notarize and staple it. Create the certificate in the Apple Developer portal, export it from Keychain Access as a password-protected `.p12`, encode it with `base64 -i certificate.p12`, and store the resulting single-line value in `APPLE_CERTIFICATE`.
+
+Use an app-specific Apple ID password for `APPLE_PASSWORD`. The certificate, Apple ID, and team ID must belong to the same Developer Program team. A release intentionally fails at the macOS build step if the certificate cannot be imported or no `Developer ID Application` identity is found; publishing an ad-hoc-signed macOS bundle would break persistent TCC folder grants.
 
 ### 3. Send the public key content
 
@@ -92,6 +104,5 @@ Mention this clearly in the release notes for the first auto-update-capable vers
 
 ## Out of scope (not handled by this workflow)
 
-- **Apple Developer ID code-signing & notarization** — `.app` bundles are unsigned. macOS may show a Gatekeeper warning on first launch. Minisign verification by the updater is independent of Apple code-signing.
 - **Windows Authenticode signing** — neither the portable `.exe` nor the `*-setup.exe` NSIS installer is signed with a code-signing certificate. Users may see a SmartScreen warning. Minisign verification by the updater is independent.
 - **Retroactive signing** of older releases.
