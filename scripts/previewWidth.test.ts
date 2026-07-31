@@ -12,6 +12,7 @@ import {
 
 const settingsSource = readFileSync(new URL('../src/lib/stores/settings.svelte.ts', import.meta.url), 'utf8');
 const viewerSource = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
+const settingsComponentSource = readFileSync(new URL('../src/lib/components/Settings.svelte', import.meta.url), 'utf8');
 
 test('preview width defaults and clamps persisted numeric values', () => {
 	assert.equal(DEFAULT_PREVIEW_MAX_WIDTH, 880);
@@ -46,4 +47,12 @@ test('preview layout derives width and ToC geometry from the same preference', (
 	assert.match(viewerSource, /viewerWidth - previewContentWidth/);
 	assert.match(viewerSource, /--preview-max-width:/);
 	assert.match(viewerSource, /max-width: var\(--preview-max-width, 880px\)/);
+});
+
+test('Settings exposes a bounded preview-width input and reset action', () => {
+	assert.match(settingsComponentSource, /id="preview-max-width"/);
+	assert.match(settingsComponentSource, /min=\{MIN_PREVIEW_MAX_WIDTH\}/);
+	assert.match(settingsComponentSource, /max=\{MAX_PREVIEW_MAX_WIDTH\}/);
+	assert.match(settingsComponentSource, /bind:value=\{settings\.previewMaxWidth\}/);
+	assert.match(settingsComponentSource, /settings\.resetPreviewMaxWidth\(\)/);
 });
