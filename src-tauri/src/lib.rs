@@ -303,6 +303,11 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(outside).unwrap();
     }
+
+    #[test]
+    fn theme_slug_collapses_punctuation_runs() {
+        assert_eq!(theme_slug("SynthWave '84"), "synthwave-84");
+    }
 }
 
 mod setup;
@@ -818,6 +823,15 @@ async fn get_app_mode() -> String {
     }
 }
 
+fn theme_slug(value: &str) -> String {
+    let lowercase = value.to_lowercase();
+    lowercase
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
 #[tauri::command]
 async fn fetch_vscode_theme(app: AppHandle, url: String) -> Result<String, String> {
     use std::io::{Cursor, Read};
@@ -892,9 +906,7 @@ async fn fetch_vscode_theme(app: AppHandle, url: String) -> Result<String, Strin
             .unwrap_or("");
         let path = t.get("path").and_then(|p| p.as_str()).unwrap_or("");
 
-        let label_slug = label
-            .to_lowercase()
-            .replace(|c: char| !c.is_alphanumeric(), "-");
+        let label_slug = theme_slug(label);
 
         // If theme_name is empty, just take the first one
         if theme_name.is_empty()
