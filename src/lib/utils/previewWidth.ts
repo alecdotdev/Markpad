@@ -12,3 +12,7 @@ export function normalizePreviewMaxWidth(value: unknown): number {
 export function getPreviewContentWidth(value: unknown, isFullWidth: boolean): number | null {
 	return isFullWidth ? null : normalizePreviewMaxWidth(value);
 }
+
+export function adjustPreviewMaxWidth(value: unknown, delta: number): number {
+	return normalizePreviewMaxWidth(normalizePreviewMaxWidth(value) + delta);
+}
