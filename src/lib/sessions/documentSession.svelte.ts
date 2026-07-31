@@ -142,11 +142,10 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			if (filePath) options.saveRecentFile(filePath);
 		} catch (error) {
 			console.error('Error loading file:', error);
-			const errorText = String(error);
-			if (errorText.includes('The system cannot find the file specified') || errorText.includes('No such file or directory')) {
-				options.deleteRecentFile(filePath);
-				if (tabManager.activeTab?.path === filePath) tabManager.closeTab(tabManager.activeTab.id);
-			} else options.onError('Error loading file', error);
+			// A watcher can observe a transient gap while another process replaces
+			// the file. Keep the already-open buffer and recent-file entry instead
+			// of closing the tab and discarding the user's recovery path.
+			options.onError('Error loading file', error);
 		}
 	}
 
