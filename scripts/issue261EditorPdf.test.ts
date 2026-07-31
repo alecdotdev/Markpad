@@ -32,3 +32,17 @@ test('print layout lets the viewer pane escape the interactive split flex ratio'
 		/@media print\s*\{[\s\S]*?\.pane\.viewer-pane\s*\{[\s\S]*?flex:\s*none\s*!important;/,
 	);
 });
+
+test('floating toc toggle keeps a visible translucent surface outside edit mode', () => {
+	const selector = viewer.slice(
+		viewer.indexOf('\t.toc-toggle-floating {'),
+		viewer.indexOf('\n\t.toc-toggle-floating.expanded {'),
+	);
+
+	assert.match(selector, /background-color:\s*color-mix\(in srgb, var\(--color-canvas-default\) 82%, transparent\);/);
+	assert.match(selector, /border:\s*1px solid var\(--color-border-default\);/);
+	assert.match(selector, /box-shadow:\s*0 2px 8px rgba\(0, 0, 0, 0\.12\);/);
+	assert.match(selector, /backdrop-filter:\s*blur\(8px\);/);
+	assert.match(viewer, /\.toc-toggle-floating:focus-visible\s*\{[\s\S]*?outline:\s*2px solid var\(--color-accent-fg\);/);
+	assert.doesNotMatch(viewer, /\.toc-toggle-floating\.in-edit-mode:not\(\.expanded\)/);
+});

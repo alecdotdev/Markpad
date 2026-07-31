@@ -3999,15 +3999,20 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background-color: transparent;
-		border: none;
+		background-color: color-mix(in srgb, var(--color-canvas-default) 82%, transparent);
+		border: 1px solid var(--color-border-default);
 		border-radius: 4px;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+		backdrop-filter: blur(8px);
+		-webkit-backdrop-filter: blur(8px);
 		color: var(--color-fg-muted);
 		cursor: pointer;
 		z-index: 1001;
 		transition: 
 			left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
 			background-color 0.2s ease,
+			border-color 0.2s ease,
+			box-shadow 0.2s ease,
 			color 0.2s ease,
 			opacity 0.2s ease,
 			transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -4030,6 +4035,14 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 	.layout-container:hover .toc-toggle-floating,
 	.toc-toggle-floating:hover {
+		background-color: color-mix(in srgb, var(--color-canvas-default) 90%, transparent);
+		color: var(--color-fg-default);
+		opacity: 1;
+	}
+
+	.toc-toggle-floating:focus-visible {
+		outline: 2px solid var(--color-accent-fg);
+		outline-offset: 2px;
 		opacity: 1;
 	}
 
@@ -4094,15 +4107,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 	.layout-container.editing .toc-overlay-wrapper.on-right {
 		border-left-color: var(--color-border-default);
-	}
-
-	.toc-toggle-floating.in-edit-mode:not(.expanded) {
-		background-color: var(--color-canvas-default);
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-		border: 1px solid var(--color-border-default);
-		opacity: 0.9;
-		backdrop-filter: blur(8px);
-		-webkit-backdrop-filter: blur(8px);
 	}
 
 	.toc-resize-handle {
