@@ -51,7 +51,7 @@ import {
 	import HomePage from './components/HomePage.svelte';
 import { tabManager } from './stores/tabs.svelte.js';
 import { snapshotTab } from './utils/tabTransfer.js';
-import { getPreviewContentWidth } from './utils/previewWidth.js';
+import { adjustPreviewMaxWidth, getPreviewContentWidth } from './utils/previewWidth.js';
 import { settings } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
 import { createWindowSession } from './sessions/windowSession.svelte.js';
@@ -2266,6 +2266,12 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	}
 
+	function canUsePreviewWidthShortcut(target: EventTarget | null, isSplit: boolean) {
+		if (showSettings || modalState.show || promptModal.show || showHome || (isEditing && !isSplit)) return false;
+		const element = target instanceof Element ? target : null;
+		return !element?.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]');
+	}
+
 	function handleKeyDown(e: KeyboardEvent) {
 		if (mode !== 'app') return;
 
@@ -2280,6 +2286,14 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 
 		const isSplit = tabManager.activeTab?.isSplit;
+
+		if (cmdOrCtrl && e.altKey && !e.shiftKey && (code === 'BracketLeft' || code === 'BracketRight')) {
+			if (!canUsePreviewWidthShortcut(e.target, !!isSplit)) return;
+			e.preventDefault();
+			isFullWidth = false;
+			settings.previewMaxWidth = adjustPreviewMaxWidth(settings.previewMaxWidth, code === 'BracketLeft' ? -40 : 40);
+			return;
+		}
 
 		if (!cmdOrCtrl && !e.shiftKey && !e.altKey && code === 'F5') {
 			e.preventDefault();

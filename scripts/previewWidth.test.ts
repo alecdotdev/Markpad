@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+	adjustPreviewMaxWidth,
 	DEFAULT_PREVIEW_MAX_WIDTH,
 	getPreviewContentWidth,
 	MAX_PREVIEW_MAX_WIDTH,
@@ -34,6 +35,12 @@ test('full mode has no configured content-width cap', () => {
 	assert.equal(getPreviewContentWidth(1200, true), null);
 });
 
+test('preview width shortcut adjustments retain the configured bounds', () => {
+	assert.equal(adjustPreviewMaxWidth(DEFAULT_PREVIEW_MAX_WIDTH, 40), 920);
+	assert.equal(adjustPreviewMaxWidth(MIN_PREVIEW_MAX_WIDTH, -40), MIN_PREVIEW_MAX_WIDTH);
+	assert.equal(adjustPreviewMaxWidth(MAX_PREVIEW_MAX_WIDTH, 40), MAX_PREVIEW_MAX_WIDTH);
+});
+
 test('settings load, persist, and reset the preview width through one normalizer', () => {
 	assert.match(settingsSource, /previewMaxWidth = \$state\(DEFAULT_PREVIEW_MAX_WIDTH\)/);
 	assert.match(settingsSource, /localStorage\.getItem\('preview\.maxWidth'\)/);
@@ -55,4 +62,13 @@ test('Settings exposes a bounded preview-width input and reset action', () => {
 	assert.match(settingsComponentSource, /max=\{MAX_PREVIEW_MAX_WIDTH\}/);
 	assert.match(settingsComponentSource, /bind:value=\{settings\.previewMaxWidth\}/);
 	assert.match(settingsComponentSource, /settings\.resetPreviewMaxWidth\(\)/);
+});
+
+test('preview width keyboard shortcuts avoid editable controls and app modals', () => {
+	assert.match(viewerSource, /function canUsePreviewWidthShortcut\(target: EventTarget \| null, isSplit: boolean\)/);
+	assert.match(viewerSource, /showSettings \|\| modalState\.show \|\| promptModal\.show \|\| showHome/);
+	assert.match(viewerSource, /closest\('input, textarea, select, \[contenteditable="true"\], \[role="textbox"\]'\)/);
+	assert.match(viewerSource, /cmdOrCtrl && e\.altKey && !e\.shiftKey && \(code === 'BracketLeft' \|\| code === 'BracketRight'\)/);
+	assert.match(viewerSource, /isFullWidth = false/);
+	assert.match(viewerSource, /settings\.previewMaxWidth = adjustPreviewMaxWidth\(settings\.previewMaxWidth, code === 'BracketLeft' \? -40 : 40\)/);
 });
