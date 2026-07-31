@@ -51,6 +51,7 @@ import {
 	import HomePage from './components/HomePage.svelte';
 import { tabManager } from './stores/tabs.svelte.js';
 import { snapshotTab } from './utils/tabTransfer.js';
+import { getPreviewContentWidth } from './utils/previewWidth.js';
 import { settings } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
 import { createWindowSession } from './sessions/windowSession.svelte.js';
@@ -222,7 +223,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	const TOC_MAX_WIDTH = 420;
 	const TOC_RESIZE_STEP = 16;
 	let isTocResizing = $state(false);
-	let isOverhanging = $derived(isFullWidth || (viewerWidth > 0 && settings.tocWidth > Math.max(50, (viewerWidth - 780) / 2)));
+	let previewContentWidth = $derived(getPreviewContentWidth(settings.previewMaxWidth, isFullWidth));
+	let isOverhanging = $derived(
+		isFullWidth || (viewerWidth > 0 && previewContentWidth !== null && settings.tocWidth > Math.max(50, (viewerWidth - previewContentWidth) / 2)),
+	);
 
 	$effect(() => {
 		localStorage.setItem('isFullWidth', String(isFullWidth));
@@ -3149,7 +3153,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 										if(e.key === 'Enter' || e.key === ' ') handleLinkClick(e as unknown as MouseEvent);
 									}}
 									tabindex="-1"
-									style="outline: none; font-family: {settings.previewFont}, sans-serif; font-size: {settings.previewFontSize}px; flex: 1;">
+									style="outline: none; font-family: {settings.previewFont}, sans-serif; font-size: {settings.previewFontSize}px; flex: 1; --preview-max-width: {previewContentWidth === null ? '100%' : `${previewContentWidth}px`};">
 									{#if frontMatterInfo.exists}
 										<details
 											class="frontmatter-panel"
@@ -3473,7 +3477,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		overflow-y: auto;
 		overflow-x: hidden;
 		transform: translate3d(0, 0, 0);
-		max-width: 880px;
+		max-width: var(--preview-max-width, 880px);
 		text-align: left;
 		overflow-wrap: anywhere;
 	}
