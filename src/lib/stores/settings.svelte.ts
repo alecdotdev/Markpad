@@ -18,6 +18,10 @@ import {
 	normalizeTitlebarToolbarPlacement,
 	type TitlebarToolbarPlacement,
 } from '../utils/titlebarToolbar.js';
+import {
+	DEFAULT_PREVIEW_MAX_WIDTH,
+	normalizePreviewMaxWidth,
+} from '../utils/previewWidth.js';
 
 export type OSType = 'macos' | 'windows' | 'linux' | 'unknown';
 export type LanguageCode =
@@ -169,6 +173,7 @@ export class SettingsStore {
 	newFileDefaultMode = $state(true);
 	showRecentFiles = $state(true);
 	editorMaxWidth = $state(80);
+	previewMaxWidth = $state(DEFAULT_PREVIEW_MAX_WIDTH);
 	pinnedToc = $state(false);
 	tocSide = $state<'left' | 'right'>('left');
 	tocWidth = $state(240);
@@ -218,6 +223,7 @@ export class SettingsStore {
 			const savedNewFileDefaultMode = localStorage.getItem('editor.newFileDefaultMode');
 			const savedShowRecentFiles = localStorage.getItem('editor.showRecentFiles');
 			const savedEditorMaxWidth = localStorage.getItem('editor.maxWidth');
+			const savedPreviewMaxWidth = localStorage.getItem('preview.maxWidth');
 			const savedPinnedToc = localStorage.getItem('editor.pinnedToc');
 			const savedTocSide = localStorage.getItem('editor.tocSide');
 			const savedTocWidth = localStorage.getItem('editor.tocWidth');
@@ -287,6 +293,7 @@ export class SettingsStore {
 			if (savedNewFileDefaultMode !== null) this.newFileDefaultMode = savedNewFileDefaultMode === 'true';
 			if (savedShowRecentFiles !== null) this.showRecentFiles = savedShowRecentFiles === 'true';
 			if (savedEditorMaxWidth !== null) this.editorMaxWidth = parseFontSize(savedEditorMaxWidth, 80, 20, 500);
+			this.previewMaxWidth = normalizePreviewMaxWidth(savedPreviewMaxWidth);
 			if (savedPinnedToc !== null) this.pinnedToc = savedPinnedToc === 'true';
 			if (savedTocSide !== null) this.tocSide = savedTocSide as 'left' | 'right';
 			if (savedTocWidth !== null) this.tocWidth = parseFontSize(savedTocWidth, 240, 180, 420);
@@ -361,6 +368,7 @@ export class SettingsStore {
 					localStorage.setItem('editor.newFileDefaultMode', String(this.newFileDefaultMode));
 					localStorage.setItem('editor.showRecentFiles', String(this.showRecentFiles));
 					localStorage.setItem('editor.maxWidth', String(this.editorMaxWidth));
+					localStorage.setItem('preview.maxWidth', String(this.previewMaxWidth));
 					localStorage.setItem('editor.pinnedToc', String(this.pinnedToc));
 					localStorage.setItem('editor.tocSide', this.tocSide);
 					localStorage.setItem('editor.tocWidth', String(this.tocWidth));
@@ -581,6 +589,10 @@ export class SettingsStore {
 
 	resetEditorMaxWidth() {
 		this.editorMaxWidth = 80;
+	}
+
+	resetPreviewMaxWidth() {
+		this.previewMaxWidth = DEFAULT_PREVIEW_MAX_WIDTH;
 	}
 
 	async initOSType() {
