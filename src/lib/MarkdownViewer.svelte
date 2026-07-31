@@ -51,7 +51,7 @@ import {
 	import HomePage from './components/HomePage.svelte';
 import { tabManager } from './stores/tabs.svelte.js';
 import { snapshotTab } from './utils/tabTransfer.js';
-import { adjustPreviewMaxWidth, getPreviewContentWidth } from './utils/previewWidth.js';
+import { adjustPreviewMaxWidth, getPreviewContentWidth, getStoredPreviewFullWidth } from './utils/previewWidth.js';
 import { settings } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
 import { createWindowSession } from './sessions/windowSession.svelte.js';
@@ -217,7 +217,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	let isAtBottom = $state(false);
 
 	let showHome = $state(false);
-	let isFullWidth = $state(localStorage.getItem('isFullWidth') === 'true');
+	let isFullWidth = $state(getStoredPreviewFullWidth(
+		localStorage.getItem('preview.fullWidth'),
+		localStorage.getItem('isFullWidth'),
+	));
 	let viewerWidth = $state(0);
 	const TOC_MIN_WIDTH = 180;
 	const TOC_MAX_WIDTH = 420;
@@ -229,7 +232,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	);
 
 	$effect(() => {
-		localStorage.setItem('isFullWidth', String(isFullWidth));
+		localStorage.setItem('preview.fullWidth', String(isFullWidth));
+		localStorage.removeItem('isFullWidth');
 	});
 
 	import { parseAndApplyVscodeTheme, clearVscodeTheme } from './utils/theme';

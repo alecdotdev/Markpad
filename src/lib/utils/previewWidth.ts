@@ -16,3 +16,7 @@ export function getPreviewContentWidth(value: unknown, isFullWidth: boolean): nu
 export function adjustPreviewMaxWidth(value: unknown, delta: number): number {
 	return normalizePreviewMaxWidth(normalizePreviewMaxWidth(value) + delta);
 }
+
+export function getStoredPreviewFullWidth(value: string | null, legacyValue: string | null): boolean {
+	return (value ?? legacyValue) === 'true';
+}
