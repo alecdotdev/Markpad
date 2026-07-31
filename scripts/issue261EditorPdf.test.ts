@@ -46,3 +46,16 @@ test('floating toc toggle keeps a visible translucent surface outside edit mode'
 	assert.match(viewer, /\.toc-toggle-floating:focus-visible\s*\{[\s\S]*?outline:\s*2px solid var\(--color-accent-fg\);/);
 	assert.doesNotMatch(viewer, /\.toc-toggle-floating\.in-edit-mode:not\(\.expanded\)/);
 });
+
+test('print layout gives document content paper-specific rhythm and boundaries', () => {
+	const printStyles = styles.slice(styles.indexOf('@media print {'));
+
+	assert.match(printStyles, /\.markdown-body h1,[\s\S]*?line-height:\s*1\.2;/);
+	assert.match(printStyles, /\.markdown-body p\s*\{[\s\S]*?margin:\s*0 0 0\.75em;/);
+	assert.match(printStyles, /\.markdown-body ul,[\s\S]*?padding-left:\s*1\.5em;/);
+	assert.match(printStyles, /\.markdown-body blockquote\s*\{[\s\S]*?border-left:\s*3px solid #bbb;/);
+	assert.match(printStyles, /\.markdown-body pre\s*\{[\s\S]*?break-inside:\s*auto;/);
+	assert.match(printStyles, /\.markdown-body pre\s*\{[\s\S]*?border:\s*1px solid #d0d7de;/);
+	assert.match(printStyles, /\.markdown-body img\s*\{[\s\S]*?max-width:\s*100%\s*!important;/);
+	assert.match(printStyles, /\.markdown-body table\s*\{[\s\S]*?margin:\s*1em 0;/);
+});
