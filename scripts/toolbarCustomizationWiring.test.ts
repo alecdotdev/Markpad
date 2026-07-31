@@ -63,9 +63,13 @@ test('settings modal uses a dedicated resize handle instead of native CSS resize
 	assert.match(settingsComponent, /\.settings-modal[\s\S]*max-height:/);
 });
 
-test('settings modal can be dragged by the header and resized from every edge', () => {
+test('settings modal starts dragging only from the non-interactive header surface', () => {
 	assert.match(settingsComponent, /handleSettingsModalDragPointerDown/);
-	assert.match(settingsComponent, /class="settings-header"[\s\S]*onpointerdown=\{handleSettingsModalDragPointerDown\}/);
+	assert.match(settingsComponent, /class="settings-modal"[\s\S]*onpointerdown=\{handleSettingsModalDragPointerDown\}/);
+	assert.match(settingsComponent, /closest\('\.settings-header'\)/);
+	assert.doesNotMatch(settingsComponent, /class="settings-header"[^>]*onpointerdown=/);
+	assert.match(settingsComponent, /isSettingsHeaderInteractiveTarget\(e\.target\)/);
+
 	assert.match(settingsComponent, /settingsResizeHandles/);
 	for (const handleClass of ['resize-n', 'resize-ne', 'resize-e', 'resize-se', 'resize-s', 'resize-sw', 'resize-w', 'resize-nw']) {
 		assert.match(settingsComponent, new RegExp(`className: '${handleClass}'`));

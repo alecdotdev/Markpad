@@ -313,7 +313,8 @@
 	}
 
 	function handleSettingsModalDragPointerDown(e: PointerEvent) {
-		if (e.button !== 0 || isSettingsHeaderInteractiveTarget(e.target)) return;
+		const header = e.target instanceof HTMLElement ? e.target.closest('.settings-header') : null;
+		if (e.button !== 0 || !header || !settingsModal?.contains(header) || isSettingsHeaderInteractiveTarget(e.target)) return;
 		const frame = getCurrentSettingsModalFrame();
 		if (!frame) return;
 
@@ -575,8 +576,9 @@
 			aria-modal="true"
 			aria-labelledby="settings-title"
 			tabindex="-1"
+			onpointerdown={handleSettingsModalDragPointerDown}
 			onkeydown={handleModalKeydown}>
-			<div class="settings-header" onpointerdown={handleSettingsModalDragPointerDown}>
+			<div class="settings-header">
 				<h1 id="settings-title">{t('settings.title', settings.language)}</h1>
 				<button class="close-btn" onclick={onclose} aria-label={t('common.close', settings.language)}>
 					<svg
