@@ -1491,14 +1491,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			return;
 		}
 
-		// task checkbox toggle in read mode
-		if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox' && target.hasAttribute('data-task-checkbox')) {
-			e.preventDefault();
-			e.stopPropagation();
-			toggleTaskCheckbox(target as HTMLInputElement);
-			return;
-		}
-
 		const a = target.closest('a');
 		if (a) {
 			const href = a.getAttribute('href');
@@ -1542,17 +1534,26 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
         }
     }
 
-	async function toggleTaskCheckbox(checkbox: HTMLInputElement) {
+	async function handleTaskCheckboxChange(event: Event) {
+		const checkbox = event.target as HTMLInputElement;
+		if (checkbox.tagName !== 'INPUT' || checkbox.type !== 'checkbox' || !checkbox.hasAttribute('data-task-checkbox')) return;
+
+		const nowChecked = checkbox.checked;
+		if (!(await toggleTaskCheckbox(checkbox, nowChecked))) {
+			checkbox.checked = !nowChecked;
+		}
+	}
+
+	async function toggleTaskCheckbox(checkbox: HTMLInputElement, nowChecked: boolean): Promise<boolean> {
 		const sourcePosition = checkbox.closest('li')?.getAttribute('data-sourcepos');
 		const sourceLine = Number(sourcePosition?.match(/^(\d+):/)?.[1]);
-		if (!Number.isInteger(sourceLine) || sourceLine < 1) return;
-		const nowChecked = !checkbox.checked;
-		if (!(await documentSession.toggleTaskCheckbox(sourceLine, nowChecked))) return;
-		checkbox.checked = nowChecked;
+		if (!Number.isInteger(sourceLine) || sourceLine < 1) return false;
+		if (!(await documentSession.toggleTaskCheckbox(sourceLine, nowChecked))) return false;
 		const li = checkbox.closest('li');
 		if (li) {
 			li.classList.toggle('task-done', nowChecked);
 		}
+		return true;
 	}
 
 
@@ -3152,6 +3153,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 									class="markdown-body {isFullWidth ? 'full-width' : ''} {settings.showToc ? 'toc-active' : ''}"
 									onscroll={handleScroll}
 									onclick={handleLinkClick}
+									onchange={handleTaskCheckboxChange}
 									onkeydown={(e) => {
 										const target = e.target as HTMLElement;
 										if (target.closest('.frontmatter-panel')) return;

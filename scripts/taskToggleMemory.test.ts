@@ -24,6 +24,9 @@ test('preview task toggles use the renderer source line instead of checkbox orde
 	assert.match(viewerToggle[0], /closest\('li'\)\?\.getAttribute\('data-sourcepos'\)/);
 	assert.match(viewerToggle[0], /documentSession\.toggleTaskCheckbox\(sourceLine, nowChecked\)/);
 	assert.doesNotMatch(viewerToggle[0], /allBoxes/);
+	assert.match(viewer, /onchange=\{handleTaskCheckboxChange\}/);
+	assert.match(viewer, /const nowChecked = checkbox\.checked/);
+	assert.doesNotMatch(viewerToggle[0], /const nowChecked = !checkbox\.checked/);
 });
 
 test('preview task processing trusts the Markdown renderer task marker', () => {
