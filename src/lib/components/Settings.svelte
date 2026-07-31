@@ -1172,9 +1172,13 @@
 							<h2>{t('settings.toolbarsSettings', settings.language)}</h2>
 						</div>
 
-						<div class="toolbar-section">
-							<div class="toolbar-section-header">
-								<h3>{t('settings.applicationToolbar', settings.language)}</h3>
+						<details class="toolbar-settings toolbar-settings-accordion">
+							<summary class="toolbar-settings-summary">
+								<span class="toolbar-settings-chevron" aria-hidden="true"></span>
+								<span>{t('settings.applicationToolbar', settings.language)}</span>
+							</summary>
+							<div class="toolbar-settings-body">
+								<div class="toolbar-section-header">
 								<button
 									type="button"
 									class="reset-text-btn"
@@ -1248,12 +1252,17 @@
 										</div>
 									</div>
 								{/each}
+								</div>
 							</div>
-						</div>
+						</details>
 
-						<div class="toolbar-section" style="margin-top: 24px;">
-							<div class="toolbar-section-header">
-								<h3>{t('settings.editorToolbar', settings.language)}</h3>
+						<details class="toolbar-settings toolbar-settings-accordion">
+							<summary class="toolbar-settings-summary">
+								<span class="toolbar-settings-chevron" aria-hidden="true"></span>
+								<span>{t('settings.editorToolbar', settings.language)}</span>
+							</summary>
+							<div class="toolbar-settings-body">
+								<div class="toolbar-section-header">
 								<button
 									type="button"
 									class="reset-text-btn"
@@ -1311,8 +1320,9 @@
 										</div>
 									</div>
 								{/each}
+								</div>
 							</div>
-						</div>
+						</details>
 					</div>
 					{:else if activeCategory === 'files'}
 					<div class="settings-group">
@@ -1712,10 +1722,21 @@
 		display: none;
 	}
 
-	.toolbar-section {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
+	.toolbar-settings-chevron {
+		width: 7px;
+		height: 7px;
+		border-right: 1.5px solid var(--color-fg-muted);
+		border-bottom: 1.5px solid var(--color-fg-muted);
+		transform: rotate(-45deg);
+		transition: transform 0.12s ease;
+	}
+
+	.toolbar-settings[open] .toolbar-settings-chevron {
+		transform: rotate(45deg);
+	}
+
+	.toolbar-settings-body {
+		padding-bottom: 12px;
 	}
 
 	.toolbar-section-header {
@@ -1723,15 +1744,6 @@
 		align-items: center;
 		justify-content: space-between;
 		padding-bottom: 2px;
-	}
-
-	.toolbar-section-header h3 {
-		margin: 0;
-		font-size: 12px;
-		font-weight: 600;
-		color: var(--color-fg-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
 	}
 
 	.toolbar-settings-list {

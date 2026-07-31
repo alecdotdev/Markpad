@@ -24,10 +24,10 @@ test('preview-level open shortcut handles Ctrl/Cmd+O outside Monaco without doub
 	assert.match(markdownViewer, /cmdOrCtrl[\s\S]*key === 'o'[\s\S]*selectFile\(\)/);
 });
 
-test('editor toolbar delegates to Monaco actions and exposes expected Markdown commands', () => {
+test('editor toolbar forwards Monaco actions and optional payloads', () => {
 	assert.match(markdownViewer, /import EditorToolbar from '\.\/components\/EditorToolbar\.svelte'/);
-	assert.match(markdownViewer, /<EditorToolbar[\s\S]*onaction=\{\(actionId\) => editorPane\?\.runEditorAction\(actionId\)\}/);
-	assert.match(editor, /export function runEditorAction\(actionId: string\)/);
+	assert.match(markdownViewer, /<EditorToolbar[\s\S]*onaction=\{\(actionId, payload\) => editorPane\?\.runEditorAction\(actionId, payload\)\}/);
+	assert.match(editor, /export function runEditorAction\(actionId: string, payload\?: any\)/);
 
 	for (const actionId of [
 		'fmt-bold',
