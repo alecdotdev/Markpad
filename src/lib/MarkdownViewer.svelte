@@ -1848,13 +1848,15 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 	async function selectFile() {
 		const selected = await open({
-			multiple: false,
+			multiple: true,
 			filters: [
 				{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] },
 				{ name: 'All Files', extensions: ['*'] },
 			],
 		});
-		if (selected && typeof selected === 'string') loadMarkdown(selected);
+		if (!selected) return;
+		const paths = Array.isArray(selected) ? selected : [selected];
+		for (const path of paths) await loadMarkdown(path);
 	}
 
 	async function reloadFromDisk() {
