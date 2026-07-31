@@ -367,43 +367,16 @@ function stripLeadingWhitespace(nodes: Node[]) {
 	}
 }
 
-function isWhitespaceText(node: Node) {
-	return node.nodeType === 3 && !node.textContent?.trim();
-}
-
-function startsWithNode(element: Element, target: Node) {
-	const firstContentNode = Array.from(element.childNodes).find(
-		(node) => !isWhitespaceText(node),
-	);
-	return firstContentNode === target;
-}
-
-function isTaskCheckbox(input: Element, li: Element) {
-	const looksRenderedByTaskList =
-		input.hasAttribute("data-task-checkbox") ||
-		li.classList.contains("task-list-item");
-	if (!looksRenderedByTaskList) return false;
-
-	const inputParent = input.parentElement;
-	if (inputParent === li) {
-		return startsWithNode(li, input);
-	}
-
-	return (
-		inputParent?.tagName === "P" &&
-		inputParent.parentElement === li &&
-		startsWithNode(li, inputParent) &&
-		startsWithNode(inputParent, input)
-	);
-}
-
 function processTaskItems(root: Element) {
 	for (const input of Array.from(
 		root.querySelectorAll('li input[type="checkbox"]'),
 	)) {
 		const li = input.closest("li");
 		if (!li) continue;
-		if (!isTaskCheckbox(input, li)) continue;
+		if (!input.hasAttribute("data-task-checkbox")) {
+			input.setAttribute("disabled", "");
+			continue;
+		}
 
 		input.setAttribute("data-task-checkbox", "");
 		input.removeAttribute("disabled");

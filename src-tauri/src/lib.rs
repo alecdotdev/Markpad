@@ -199,6 +199,47 @@ mod tests {
     }
 
     #[test]
+    fn task_list_checkbox_is_emitted_at_the_start_of_its_list_item() {
+        let html = convert_markdown("- [ ] open task\n- [x] completed task\n");
+        assert!(
+            html.contains("<li data-sourcepos=\"1:1-1:15\"><input type=\"checkbox\" data-task-checkbox=\"\" disabled=\"\" /> open task</li>"),
+            "unexpected task-list HTML: {html}",
+        );
+        assert!(
+            html.contains("<li data-sourcepos=\"2:1-2:20\"><input type=\"checkbox\" data-task-checkbox=\"\" disabled=\"\" checked=\"\" /> completed task</li>"),
+            "unexpected task-list HTML: {html}",
+        );
+    }
+
+    #[test]
+    fn raw_html_checkboxes_are_not_marked_as_tasks() {
+        let html = convert_markdown("- <input type=\"checkbox\" /> raw control\n");
+        assert!(
+            !html.contains("data-task-checkbox"),
+            "raw HTML control was incorrectly marked as a task: {html}",
+        );
+    }
+
+    #[test]
+    fn nested_and_quoted_task_checkboxes_are_marked() {
+        let html = convert_markdown("- [ ] parent\n  - [x] nested\n\n> - [ ] quoted\n");
+        assert_eq!(
+            html.matches("data-task-checkbox").count(),
+            3,
+            "unexpected task-list HTML: {html}",
+        );
+    }
+
+    #[test]
+    fn multiline_wikilinks_do_not_shift_task_source_positions() {
+        let html = convert_markdown("[[#first\nsecond|alias]]\n- [ ] task\n");
+        assert!(
+            html.contains("data-task-checkbox"),
+            "task source position was shifted by a multiline wikilink: {html}",
+        );
+    }
+
+    #[test]
     fn embed_protection_survives_longer_backtick_runs_earlier_in_the_doc() {
         // A 4-backtick inline sample desynchronized the old regex pairing and
         // exposed every later code span to rewriting.
@@ -747,7 +788,37 @@ fn convert_markdown(content: &str) -> String {
     options.render.hardbreaks = true;
     options.render.sourcepos = true;
 
-    markdown_to_html(&processed_links, &options)
+    let html = markdown_to_html(&processed_links, &options);
+    annotate_task_checkboxes(html, content)
+}
+
+fn annotate_task_checkboxes(html: String, markdown: &str) -> String {
+    let task_item = Regex::new(
+        r#"<li data-sourcepos="(?<sourcepos>(?<line>\d+):\d+-\d+:\d+)">(?<input><input type="checkbox" disabled=""(?: checked="")? />)"#,
+    )
+    .unwrap();
+    let task_source = Regex::new(r"^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX]\](?:\s|$)").unwrap();
+
+    task_item
+        .replace_all(&html, |captures: &Captures| {
+            let line = captures["line"].parse::<usize>().unwrap_or_default();
+            let source_line = markdown.lines().nth(line.saturating_sub(1));
+            if !source_line.is_some_and(|line| task_source.is_match(line)) {
+                return captures[0].to_string();
+            }
+
+            let input = captures["input"].replacen(
+                " disabled=\"\"",
+                " data-task-checkbox=\"\" disabled=\"\"",
+                1,
+            );
+            format!(
+                "<li data-sourcepos=\"{}\">{}",
+                &captures["sourcepos"],
+                input,
+            )
+        })
+        .into_owned()
 }
 
 #[tauri::command]

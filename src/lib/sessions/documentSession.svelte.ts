@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { settings } from '../stores/settings.svelte.js';
 import { tabManager } from '../stores/tabs.svelte.js';
+import { getMarkdownBodyWithoutFrontMatter } from '../utils/frontMatter.js';
 import { hasMarkdownLinkExtension } from '../utils/markdownLinks.js';
 
 export type LoadMarkdownOptions = {
@@ -209,15 +210,17 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		}
 	}
 
-	async function toggleTaskCheckbox(index: number, nowChecked: boolean) {
+	async function toggleTaskCheckbox(sourceLine: number, nowChecked: boolean) {
 		const tab = tabManager.activeTab;
 		if (!tab || !tab.path) return false;
 		const raw = tab.rawContent;
-		let count = 0;
-		const updated = raw.replace(/^(\s*[-*+] )\[( |x|X)\]/gm, (match, prefix) => {
-			if (count++ === index) return `${prefix}[${nowChecked ? 'x' : ' '}]`;
+		const body = getMarkdownBodyWithoutFrontMatter(raw);
+		const updatedBody = body.replace(/^(\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+)\[( |x|X)\]/gm, (match, prefix, _state, offset) => {
+			const line = body.slice(0, offset).split('\n').length;
+			if (line === sourceLine) return `${prefix}[${nowChecked ? 'x' : ' '}]`;
 			return match;
 		});
+		const updated = `${raw.slice(0, raw.length - body.length)}${updatedBody}`;
 		if (updated === raw) return false;
 		tabManager.updateTabRawContent(tab.id, updated);
 		await saveContent(tab.id);
