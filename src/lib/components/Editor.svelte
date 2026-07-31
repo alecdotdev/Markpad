@@ -1149,17 +1149,13 @@
 				onscrollsync?.(getEditorScrollSyncPosition());
 			};
 
-			const d1 = editor.onDidChangeCursorPosition((e) => {
-				emitSync();
-			});
-			const d2 = editor.onDidScrollChange((e) => {
+			const scrollListener = editor.onDidScrollChange((e) => {
 				if (e.scrollTopChanged) {
 					emitSync();
 				}
 			});
 			return () => {
-				d1.dispose();
-				d2.dispose();
+				scrollListener.dispose();
 			};
 		}
 	});
