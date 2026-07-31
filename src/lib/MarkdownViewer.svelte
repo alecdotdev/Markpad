@@ -1535,11 +1535,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
     }
 
 	async function toggleTaskCheckbox(checkbox: HTMLInputElement) {
-		const allBoxes = Array.from(markdownBody?.querySelectorAll('[data-task-checkbox]') || []);
-		const index = allBoxes.indexOf(checkbox);
-		if (index === -1) return;
+		const sourcePosition = checkbox.closest('li')?.getAttribute('data-sourcepos');
+		const sourceLine = Number(sourcePosition?.match(/^(\d+):/)?.[1]);
+		if (!Number.isInteger(sourceLine) || sourceLine < 1) return;
 		const nowChecked = !checkbox.checked;
-		if (!(await documentSession.toggleTaskCheckbox(index, nowChecked))) return;
+		if (!(await documentSession.toggleTaskCheckbox(sourceLine, nowChecked))) return;
 		checkbox.checked = nowChecked;
 		const li = checkbox.closest('li');
 		if (li) {
