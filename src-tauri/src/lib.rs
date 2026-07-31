@@ -276,6 +276,22 @@ mod tests {
     }
 
     #[test]
+    fn autolink_inside_parentheses_stops_before_adjacent_text() {
+        let input = "See (https://www.speedtest.net/awards/united_states/)for more information.";
+        let html = convert_markdown(input);
+
+        assert!(
+            html.contains("href=\"https://www.speedtest.net/awards/united_states/\""),
+            "got: {html}"
+        );
+        assert!(html.contains(")for more information."), "got: {html}");
+        assert!(
+            !html.contains("href=\"https://www.speedtest.net/awards/united_states/)for\""),
+            "got: {html}"
+        );
+    }
+
+    #[test]
     fn path_components_reject_traversal_separators_and_absolute_paths() {
         for invalid in ["", ".", "..", "../theme", "folder/theme", "folder\\theme", "/tmp/theme"] {
             assert!(safe_path_component(invalid, "test").is_err(), "{invalid}");
@@ -631,9 +647,81 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
     processed
 }
 
+fn process_parenthesized_autolinks(content: &str) -> Cow<'_, str> {
+    let regions = code_region_ranges(content);
+    let mut output = String::new();
+    let mut copied_to = 0;
+    let mut scan_from = 0;
+
+    while let Some(opening_offset) = content[scan_from..].find('(') {
+        let opening = scan_from + opening_offset;
+        let url_start = opening + 1;
+        let url_tail = &content[url_start..];
+        if !(url_tail.starts_with("http://")
+            || url_tail.starts_with("https://")
+            || url_tail.starts_with("ftp://"))
+        {
+            scan_from = url_start;
+            continue;
+        }
+
+        let mut depth = 1usize;
+        let mut closing = None;
+        for (offset, ch) in url_tail.char_indices() {
+            if ch.is_whitespace() {
+                break;
+            }
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        closing = Some(url_start + offset);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let Some(closing) = closing else {
+            scan_from = url_start;
+            continue;
+        };
+        let after_closing = closing + ')'.len_utf8();
+        let adjacent_text = content[after_closing..]
+            .chars()
+            .next()
+            .is_some_and(char::is_alphanumeric);
+        if !adjacent_text || in_code_region(&regions, opening) {
+            scan_from = after_closing;
+            continue;
+        }
+
+        let url = &content[url_start..closing];
+        output.push_str(&content[copied_to..url_start]);
+        output.push('[');
+        output.push_str(url);
+        output.push_str("](");
+        output.push_str(url);
+        output.push_str(")");
+        output.push(')');
+        copied_to = after_closing;
+        scan_from = after_closing;
+    }
+
+    if output.is_empty() {
+        Cow::Borrowed(content)
+    } else {
+        output.push_str(&content[copied_to..]);
+        Cow::Owned(output)
+    }
+}
+
 #[tauri::command]
 fn convert_markdown(content: &str) -> String {
-    let processed_embeds = process_internal_embeds(content);
+    let processed_autolinks = process_parenthesized_autolinks(content);
+    let processed_embeds = process_internal_embeds(&processed_autolinks);
     let processed_links = process_wikilinks(&processed_embeds);
 
     let mut options = ComrakOptions {
