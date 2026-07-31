@@ -19,8 +19,12 @@ test('editor emits and applies pixel segment scroll positions', () => {
 	assert.match(editor, /type ScrollSyncPosition = \{\s*section: 'frontmatter' \| 'body';\s*ratio: number;\s*\}/);
 	assert.match(editor, /onscrollsync\?: \(position: ScrollSyncPosition\) => void/);
 	assert.match(editor, /function getEditorFrontMatterScrollEnd\(\)/);
+	assert.match(editor, /function getEditorContentScrollMax\(\)/);
 	assert.match(editor, /function getEditorScrollSyncPosition\(\)/);
 	assert.match(editor, /export function syncScrollToPosition\(position: ScrollSyncPosition\)/);
+	assert.match(editor, /editor\.getContentHeight\(\) - layout\.height/);
+	assert.match(editor, /getEditorScrollSyncPosition\(\)[\s\S]*getEditorContentScrollMax\(\)/);
+	assert.match(editor, /syncScrollToPosition\(position: ScrollSyncPosition\)[\s\S]*getEditorContentScrollMax\(\)/);
 	assert.match(editor, /onscrollsync\?\.\(getEditorScrollSyncPosition\(\)\)/);
 	assert.doesNotMatch(editor, /onscrollsync\?\.\(position\.lineNumber, ratio\)/);
 	assert.doesNotMatch(editor, /export function syncScrollToLine/);

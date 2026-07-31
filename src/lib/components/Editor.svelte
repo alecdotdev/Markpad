@@ -1097,6 +1097,13 @@
 		return Math.max(0, editor.getScrollHeight() - layout.height);
 	}
 
+	function getEditorContentScrollMax() {
+		if (!editor) return 0;
+
+		const layout = editor.getLayoutInfo();
+		return Math.max(0, editor.getContentHeight() - layout.height);
+	}
+
 	function getEditorFrontMatterScrollEnd() {
 		if (!editor) return 0;
 
@@ -1107,7 +1114,7 @@
 		if (bodyStartLine <= 1) return 0;
 
 		const safeBodyStartLine = Math.max(1, Math.min(model.getLineCount(), bodyStartLine));
-		return Math.max(0, Math.min(getEditorScrollMax(), editor.getTopForLineNumber(safeBodyStartLine)));
+		return Math.max(0, Math.min(getEditorContentScrollMax(), editor.getTopForLineNumber(safeBodyStartLine)));
 	}
 
 	function getEditorScrollSyncPosition() {
@@ -1117,7 +1124,7 @@
 
 		return getScrollSyncPositionFromPixels(
 			editor.getScrollTop(),
-			getEditorScrollMax(),
+			getEditorContentScrollMax(),
 			getEditorFrontMatterScrollEnd(),
 		);
 	}
@@ -1127,7 +1134,7 @@
 
 		const targetScroll = getScrollTopForSyncPosition(
 			position,
-			getEditorScrollMax(),
+			getEditorContentScrollMax(),
 			getEditorFrontMatterScrollEnd(),
 		);
 
