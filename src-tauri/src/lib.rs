@@ -365,6 +365,24 @@ mod tests {
     fn theme_slug_collapses_punctuation_runs() {
         assert_eq!(theme_slug("SynthWave '84"), "synthwave-84");
     }
+
+    #[test]
+    fn display_math_keeps_multiple_braced_subscripts_out_of_markdown_emphasis() {
+        let html = convert_markdown("$$\\bar{b}_{1} + \\bar{b}_{2}$$\n");
+        assert!(
+            html.contains("$$\\bar{b}_{1} + \\bar{b}_{2}$$"),
+            "unexpected parser output: {html}",
+        );
+        assert!(!html.contains("<em"), "unexpected parser output: {html}");
+    }
+
+    #[test]
+    fn display_math_underscore_protection_preserves_escaped_underscores() {
+        assert_eq!(
+            protect_display_math_underscores("outside_a $$x\\_y_z$$ outside_b"),
+            format!("outside_a $$x\\{DISPLAY_MATH_UNDERSCORE_SENTINEL}y{DISPLAY_MATH_UNDERSCORE_SENTINEL}z$$ outside_b"),
+        );
+    }
 }
 
 mod setup;
@@ -764,11 +782,29 @@ fn process_parenthesized_autolinks(content: &str) -> Cow<'_, str> {
     }
 }
 
+const DISPLAY_MATH_UNDERSCORE_SENTINEL: &str = "\u{E000}";
+
+fn protect_display_math_underscores(content: &str) -> String {
+    content
+        .split("$$")
+        .enumerate()
+        .map(|(index, segment)| {
+            if index % 2 == 1 {
+                segment.replace('_', DISPLAY_MATH_UNDERSCORE_SENTINEL)
+            } else {
+                segment.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("$$")
+}
+
 #[tauri::command]
 fn convert_markdown(content: &str) -> String {
     let processed_autolinks = process_parenthesized_autolinks(content);
     let processed_embeds = process_internal_embeds(&processed_autolinks);
     let processed_links = process_wikilinks(&processed_embeds);
+    let protected_math = protect_display_math_underscores(&processed_links);
 
     let mut options = ComrakOptions {
         extension: ComrakExtensionOptions {
@@ -788,7 +824,8 @@ fn convert_markdown(content: &str) -> String {
     options.render.hardbreaks = true;
     options.render.sourcepos = true;
 
-    let html = markdown_to_html(&processed_links, &options);
+    let html = markdown_to_html(&protected_math, &options)
+        .replace(DISPLAY_MATH_UNDERSCORE_SENTINEL, "_");
     annotate_task_checkboxes(html, content)
 }
 
