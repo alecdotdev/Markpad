@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const workflow = readFileSync('.github/workflows/test.yml', 'utf8');
 
-test('pull-request checks reject vulnerable production dependencies', () => {
-	assert.match(workflow, /name: audit production dependencies[\s\S]*run: npm audit --omit=dev/);
+test('pull-request checks reject vulnerabilities anywhere in the resolved lockfile', () => {
+	assert.match(workflow, /name: audit complete dependency lockfile[\s\S]*run: npm audit(?:\s|$)/);
+	assert.doesNotMatch(workflow, /npm audit --omit=dev/);
 });

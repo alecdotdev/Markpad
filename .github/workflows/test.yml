@@ -27,8 +27,8 @@ jobs:
       - name: install frontend dependencies
         run: npm ci
 
-      - name: audit production dependencies
-        run: npm audit --omit=dev
+      - name: audit complete dependency lockfile
+        run: npm audit
 
       - name: check frontend
         run: npm run check
