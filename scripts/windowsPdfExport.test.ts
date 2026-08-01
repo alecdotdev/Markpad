@@ -15,5 +15,7 @@ test('Windows PDF export uses WebView2 settings that suppress print headers and 
 	assert.match(tauriLib, /save_file_content,\s*\n\s*export_pdf_windows,\s*\n\s*print_pdf,/);
 	assert.match(tauriLib, /SetShouldPrintHeaderAndFooter\(false\)/);
 	assert.match(tauriLib, /PrintToPdf\(/);
+	assert.match(tauriLib, /use webview2_com::\{\s*PrintToPdfCompletedHandler,/);
+	assert.doesNotMatch(tauriLib, /callback::PrintToPdfCompletedHandler/);
 	assert.match(tauriLib, /recv_timeout\(Duration::from_secs\(60\)\)/);
 });

@@ -764,7 +764,7 @@ async fn export_pdf_windows(window: tauri::WebviewWindow, path: String) -> Resul
         use std::sync::mpsc::sync_channel;
         use std::time::Duration;
         use webview2_com::{
-            callback::PrintToPdfCompletedHandler,
+            PrintToPdfCompletedHandler,
             Microsoft::Web::WebView2::Win32::{ICoreWebView2Environment6, ICoreWebView2_7},
         };
         use windows::core::{Interface, HSTRING};
