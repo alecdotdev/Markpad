@@ -1338,10 +1338,22 @@
 		dragCaretDecoration = editor.deltaDecorations(dragCaretDecoration, []);
 	}
 
-	export function revealHeader(text: string) {
+	export function revealHeader(sourceLine: number | null, text: string) {
 		if (!editor) return;
 		const model = editor.getModel();
 		if (!model) return;
+		const lineNumber = sourceLine ?? 0;
+		if (Number.isInteger(lineNumber) && lineNumber > 0) {
+			editor.revealLineInCenterIfOutsideViewport(lineNumber, monaco.editor.ScrollType.Smooth);
+			editor.setSelection({
+				startLineNumber: lineNumber,
+				startColumn: 1,
+				endLineNumber: lineNumber,
+				endColumn: model.getLineMaxColumn(lineNumber),
+			});
+			editor.focus();
+			return;
+		}
 
 		const escapedText = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const regex = new RegExp(`^#+\\s+.*${escapedText}.*$`, "m");

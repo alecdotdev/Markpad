@@ -110,7 +110,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		runEditorAction: (actionId: string, payload?: any) => void;
 		undo: () => void;
 		redo: () => void;
-		revealHeader: (text: string) => void;
+		revealHeader: (sourceLine: number | null, text: string) => void;
 		triggerFind: () => void;
 	} | null>(null);
 	let liveMode = $state(false);
@@ -3319,9 +3319,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 										{collapsedHeaders} 
 										ontoggleFold={toggleFold} 
 										oncopyref={(text: string) => { const tab = tabManager.activeTab; const fn = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : ''; invoke('clipboard_write_text', { text: fn ? `[[${fn}#${text}]]` : `#${text}` }); }}
-										onjump={(id: string, text: string) => {
+										onjump={(id: string, text: string, sourceLine: number | null) => {
 											if (isEditing && editorPane) {
-												editorPane.revealHeader(text);
+												editorPane.revealHeader(sourceLine, text);
 											}
 										}}
 										oncontext={(e, item) => {

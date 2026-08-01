@@ -10,7 +10,7 @@
 		ontoggleFold?: (id: string) => void;
 		oncopyref?: (text: string) => void;
 		oncontext?: (e: MouseEvent, item: TocItem) => void;
-		onjump?: (id: string, text: string) => void;
+		onjump?: (id: string, text: string, sourceLine: number | null) => void;
 		onshowTooltip?: (e: MouseEvent, text: string, shortcut?: string, align?: 'top' | 'right' | 'left' | 'below') => void;
 		onhideTooltip?: () => void;
 	}>();
@@ -188,7 +188,8 @@
 			scrollTocIntoView();
 			
 			const item = items.find(i => i.id === id);
-			if (item) onjump?.(id, item.text);
+			const sourceLine = Number(el.dataset.sourcepos?.match(/^(\d+):/)?.[1]);
+			if (item) onjump?.(id, item.text, Number.isInteger(sourceLine) ? sourceLine : null);
 
 			// highlight element persistently until scroll
 			if (activeTargetEl) activeTargetEl.classList.remove('toc-target-active');
