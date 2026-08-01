@@ -21,6 +21,11 @@ export type ExportHtmlResult = {
 	missingImages: number;
 };
 
+export interface PdfExportContext {
+	tabPath: string;
+	osType: 'macos' | 'windows' | 'linux' | 'unknown';
+}
+
 async function buildExportArticle(ctx: ExportContext): Promise<{ html: string; embeddedImages: number; missingImages: number }> {
 	const body = getMarkdownBodyWithoutFrontMatter(ctx.rawContent);
 	const rendered = (await invoke('render_markdown', { content: body })) as string;
@@ -162,9 +167,18 @@ ${article.html}
 	}
 }
 
-export function exportAsPdf() {
-	// The current PDF path delegates to the WebView/system print dialog. That
-	// API does not expose the saved PDF path, so prompt+open belongs in a future
-	// controlled PDF exporter that knows the target file.
-	window.print();
+export async function exportAsPdf(ctx: PdfExportContext) {
+	if (ctx.osType !== 'windows') {
+		await invoke('print_pdf');
+		return;
+	}
+
+	const defaultName = ctx.tabPath ? ctx.tabPath.replace(/\.[^.]+$/, '.pdf') : 'export.pdf';
+	const selected = await save({
+		filters: [{ name: 'PDF', extensions: ['pdf'] }],
+		defaultPath: defaultName,
+	});
+	if (!selected) return;
+
+	await invoke('export_pdf_windows', { path: selected });
 }

@@ -753,6 +753,91 @@ fn save_file_content(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn print_pdf(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.print().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn export_pdf_windows(window: tauri::WebviewWindow, path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::sync::mpsc::sync_channel;
+        use std::time::Duration;
+        use webview2_com::{
+            callback::PrintToPdfCompletedHandler,
+            Microsoft::Web::WebView2::Win32::{ICoreWebView2Environment6, ICoreWebView2_7},
+        };
+        use windows::core::{Interface, HSTRING};
+
+        let (sender, receiver) = sync_channel(1);
+        window
+            .with_webview(move |platform_webview| unsafe {
+                let result = (|| -> Result<(), String> {
+                    let controller = platform_webview.controller();
+                    let webview = controller
+                        .CoreWebView2()
+                        .map_err(|error| format!("failed to access WebView2: {error}"))?
+                        .cast::<ICoreWebView2_7>()
+                        .map_err(|error| {
+                            format!("WebView2 runtime does not support PDF export: {error}")
+                        })?;
+                    let settings = platform_webview
+                        .environment()
+                        .cast::<ICoreWebView2Environment6>()
+                        .map_err(|error| {
+                            format!("WebView2 runtime does not support print settings: {error}")
+                        })?
+                        .CreatePrintSettings()
+                        .map_err(|error| format!("failed to create PDF print settings: {error}"))?;
+
+                    settings
+                        .SetShouldPrintHeaderAndFooter(false)
+                        .map_err(|error| {
+                            format!("failed to disable PDF headers and footers: {error}")
+                        })?;
+                    settings
+                        .SetShouldPrintBackgrounds(true)
+                        .map_err(|error| format!("failed to enable PDF backgrounds: {error}"))?;
+
+                    let callback_sender = sender.clone();
+                    let completion =
+                        PrintToPdfCompletedHandler::create(Box::new(move |status, succeeded| {
+                            let result = status
+                                .map_err(|error| format!("WebView2 PDF export failed: {error}"))
+                                .and_then(|_| {
+                                    succeeded.then_some(()).ok_or_else(|| {
+                                        "WebView2 did not create the PDF file".to_string()
+                                    })
+                                });
+                            let _ = callback_sender.send(result);
+                            Ok(())
+                        }));
+
+                    webview
+                        .PrintToPdf(&HSTRING::from(path), &settings, &completion)
+                        .map_err(|error| format!("could not start PDF export: {error}"))
+                })();
+
+                if let Err(error) = result {
+                    let _ = sender.send(Err(error));
+                }
+            })
+            .map_err(|error| format!("failed to schedule PDF export: {error}"))?;
+
+        tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(Duration::from_secs(60)))
+            .await
+            .map_err(|error| format!("PDF export task failed: {error}"))?
+            .map_err(|error| format!("PDF export callback failed or timed out: {error}"))?
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, path);
+        Err("controlled PDF export is only available on Windows".to_string())
+    }
+}
+
+#[tauri::command]
 fn save_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
     atomic_write(Path::new(&path), &data).map_err(|e| e.to_string())
 }
@@ -1512,6 +1597,8 @@ pub fn run() {
             read_file_content,
             read_file_as_data_url,
             save_file_content,
+            export_pdf_windows,
+            print_pdf,
             save_file_binary,
             get_app_mode,
             setup::install_app,

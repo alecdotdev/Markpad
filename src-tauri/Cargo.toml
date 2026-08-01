@@ -53,6 +53,8 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 [target.'cfg(windows)'.dependencies]
 mslnk = "0.1"
 winreg = "0.52"
+webview2-com = "0.38.2"
+windows = "0.61.3"
 
 [profile.release]
 panic = "abort" # Strip expensive panic clean-up logic

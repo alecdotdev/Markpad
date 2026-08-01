@@ -20,7 +20,7 @@
 	import Toc from './components/Toc.svelte';
 	import Toast from './components/Toast.svelte';
 	import FindBar from './components/FindBar.svelte';
-	import { exportAsHtml as _exportHtml, exportAsPdf } from './utils/export';
+	import { exportAsHtml as _exportHtml, exportAsPdf as _exportPdf } from './utils/export';
 	import { askToOpenExportedFile } from './utils/openExportedFile.js';
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
@@ -1838,6 +1838,19 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			if (openResult === 'failed') {
 				addToast(t('toast.openExportedFileFailed', settings.language), 'error');
 			}
+		}
+	}
+
+	async function exportAsPdf() {
+		const tab = tabManager.activeTab;
+		try {
+			await _exportPdf({
+				tabPath: tab?.path || '',
+				osType: settings.osType,
+			});
+		} catch (error) {
+			console.error('Failed to export PDF', error);
+			addToast('Failed to export PDF', 'error');
 		}
 	}
 
