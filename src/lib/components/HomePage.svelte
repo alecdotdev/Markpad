@@ -67,7 +67,7 @@
 				{#each pinnedTags as tag (tag.name)}
 					<div class="recent-card" onclick={() => onopenPinnedTag?.(tag)} onkeydown={(event) => (event.key === 'Enter' || event.key === ' ') && onopenPinnedTag?.(tag)} role="button" tabindex="0">
 						<div class="file-icon"><span class="tag-dot" style:--tag-color={tag.color}></span></div>
-						<div class="file-info"><span class="file-name">{tag.name}</span><span class="file-path">{tag.files.length} files</span></div>
+						<div class="file-info"><span class="file-name">{tag.name}</span><span class="file-path">{t('home.pinnedFileCount', settings.language).replace('{{count}}', String(tag.files.length))}</span></div>
 						<button class="clear-btn" onclick={(event) => { event.stopPropagation(); onunpinTag?.(tag.name); }}>×</button>
 					</div>
 				{/each}

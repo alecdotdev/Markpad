@@ -127,6 +127,16 @@ test('interactive button labels are directly translated for every supported lang
 	assert.doesNotMatch(toastComponent, /aria-label="Close"/);
 });
 
+test('Simplified Chinese directly translates window organization labels', () => {
+	const keys = [
+		'menu.moveToWindow', 'menu.window', 'menu.mergeAllWindows', 'menu.setWindowTag',
+		'menu.windowTagPlaceholder', 'menu.windowTagClear', 'menu.pinWindowTag',
+		'menu.unpinWindowTag', 'toast.noOtherWindows', 'home.pinnedTags', 'home.pinnedFileCount',
+	];
+	assert.deepEqual(keys.filter((key) => getDirectTranslation('zh-CN', key) === undefined), []);
+	assert.doesNotMatch(readFileSync('src/lib/components/HomePage.svelte', 'utf8'), /\{tag\.files\.length\} files/);
+});
+
 test('top toolbar overflow no longer includes Open file location action', () => {
 	assert.doesNotMatch(titleBar, /list\.push\('open_loc'\)/);
 });
