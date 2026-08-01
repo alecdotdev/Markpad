@@ -4,8 +4,24 @@ use std::borrow::Cow;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
+
+static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)!\[\[(.*?)\]\]").unwrap());
+static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)\[\[#([^\|\]]+)(?:\|([^\]]+))?\]\]").unwrap());
+static BLOCK_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)\s+\^([a-zA-Z0-9_-]+)$").unwrap());
+static HIGHLIGHT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"==([^=\n]+)==").unwrap());
+static INLINE_FOOTNOTE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\^\[([^\]]+)\]").unwrap());
+static TASK_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"<li data-sourcepos="(?<sourcepos>(?<line>\d+):\d+-\d+:\d+)">(?<input><input type="checkbox" disabled=""(?: checked="")? />)"#,
+    )
+    .unwrap()
+});
+static TASK_SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX]\](?:\s|$)").unwrap()
+});
 
 /// Write `bytes` to `target` durably and atomically: write to a sibling temp
 /// file, fsync it, then rename over the target. Atomic on both Unix and
@@ -228,6 +244,22 @@ mod tests {
             3,
             "unexpected task-list HTML: {html}",
         );
+    }
+
+    #[test]
+    fn markdown_protocol_preserves_task_markers_for_many_source_lines() {
+        let markdown = (1..=64)
+            .map(|line| match line % 3 {
+                0 => format!("> - [ ] quoted task {line}"),
+                1 => format!("- [ ] task {line}"),
+                _ => format!("  - [x] nested task {line}"),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let html = convert_markdown(&markdown);
+        assert_eq!(html.matches("data-task-checkbox").count(), 64, "{html}");
+        assert!(html.contains("data-sourcepos=\"64:1-64:"), "{html}");
     }
 
     #[test]
@@ -576,9 +608,8 @@ fn create_transfer_window(app: AppHandle, token: String) -> Result<(), String> {
 
 fn process_internal_embeds(content: &str) -> Cow<'_, str> {
     let regions = code_region_ranges(content);
-    let re = Regex::new(r"(?s)!\[\[(.*?)\]\]").unwrap();
 
-    re.replace_all(content, |caps: &Captures| {
+    INTERNAL_EMBED_RE.replace_all(content, |caps: &Captures| {
         let full = caps.get(0).unwrap();
         if in_code_region(&regions, full.start()) {
             return full.as_str().to_string();
@@ -616,10 +647,9 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
     let mut processed = Cow::Borrowed(content);
 
     // 1. Process [[#target]] or [[#target|alias]]
-    let re_links = Regex::new(r"(?s)\[\[#([^\|\]]+)(?:\|([^\]]+))?\]\]").unwrap();
-    if re_links.is_match(&processed) {
+    if WIKILINK_RE.is_match(&processed) {
         let regions = code_region_ranges(&processed);
-        let replaced = re_links.replace_all(&processed, |caps: &Captures| {
+        let replaced = WIKILINK_RE.replace_all(&processed, |caps: &Captures| {
             let full = caps.get(0).unwrap();
             if in_code_region(&regions, full.start()) {
                 return full.as_str().to_string();
@@ -634,10 +664,9 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
 
     // 2. Process ^block-id at the end of lines
     // For block IDs, they are trailing. We skip code blocks but also need to be careful with inline code at EOL.
-    let re_ids = Regex::new(r"(?m)\s+\^([a-zA-Z0-9_-]+)$").unwrap();
-    if re_ids.is_match(&processed) {
+    if BLOCK_ID_RE.is_match(&processed) {
         let regions = code_region_ranges(&processed);
-        let replaced = re_ids.replace_all(&processed, |caps: &Captures| {
+        let replaced = BLOCK_ID_RE.replace_all(&processed, |caps: &Captures| {
             let full = caps.get(0).unwrap();
             if in_code_region(&regions, full.start()) {
                 return full.as_str().to_string();
@@ -652,10 +681,9 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
     }
 
     // 3. Convert ==highlight== to <mark>highlight</mark>
-    let re_highlight = Regex::new(r"==([^=\n]+)==").unwrap();
-    if re_highlight.is_match(&processed) {
+    if HIGHLIGHT_RE.is_match(&processed) {
         let regions = code_region_ranges(&processed);
-        let replaced = re_highlight.replace_all(&processed, |caps: &Captures| {
+        let replaced = HIGHLIGHT_RE.replace_all(&processed, |caps: &Captures| {
             let full = caps.get(0).unwrap();
             if in_code_region(&regions, full.start()) {
                 return full.as_str().to_string();
@@ -666,12 +694,11 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
     }
 
     // 4. Convert ^[inline footnote] to a footnote reference
-    let re_inline_fn = Regex::new(r"\^\[([^\]]+)\]").unwrap();
-    if re_inline_fn.is_match(&processed) {
+    if INLINE_FOOTNOTE_RE.is_match(&processed) {
         let regions = code_region_ranges(&processed);
         let mut footnote_defs = String::new();
         let mut fn_count = 0usize;
-        let replaced = re_inline_fn.replace_all(&processed, |caps: &Captures| {
+        let replaced = INLINE_FOOTNOTE_RE.replace_all(&processed, |caps: &Captures| {
             let full = caps.get(0).unwrap();
             if in_code_region(&regions, full.start()) {
                 return full.as_str().to_string();
@@ -793,17 +820,13 @@ fn convert_markdown(content: &str) -> String {
 }
 
 fn annotate_task_checkboxes(html: String, markdown: &str) -> String {
-    let task_item = Regex::new(
-        r#"<li data-sourcepos="(?<sourcepos>(?<line>\d+):\d+-\d+:\d+)">(?<input><input type="checkbox" disabled=""(?: checked="")? />)"#,
-    )
-    .unwrap();
-    let task_source = Regex::new(r"^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX]\](?:\s|$)").unwrap();
+    let markdown_lines = markdown.lines().collect::<Vec<_>>();
 
-    task_item
+    TASK_ITEM_RE
         .replace_all(&html, |captures: &Captures| {
             let line = captures["line"].parse::<usize>().unwrap_or_default();
-            let source_line = markdown.lines().nth(line.saturating_sub(1));
-            if !source_line.is_some_and(|line| task_source.is_match(line)) {
+            let source_line = markdown_lines.get(line.saturating_sub(1));
+            if !source_line.is_some_and(|line| TASK_SOURCE_RE.is_match(line)) {
                 return captures[0].to_string();
             }
 
