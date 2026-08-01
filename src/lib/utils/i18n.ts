@@ -410,6 +410,8 @@ export const translations: Record<LanguageCode, Translation> = {
             editor: '编辑器',
             preview: '预览',
             appearance: '外观',
+			toolbars: '工具栏',
+			toolbarsSettings: '工具栏设置',
             editorSettings: '编辑器设置',
             previewSettings: '预览设置',
             appearanceSettings: '外观设置',
@@ -445,6 +447,10 @@ export const translations: Record<LanguageCode, Translation> = {
             imageDirectory: '图片目录',
             scaleMacOSScreenshots: '缩放macOS截图',
             reduceSizeBy50: '缩小50%',
+			toolbar: '工具栏',
+			showEditorToolbar: '显示编辑器工具栏',
+			editorToolbar: '编辑器工具栏',
+			applicationToolbar: '应用程序工具栏',
             default: '默认',
             cancel: '取消',
             save: '保存',
@@ -478,6 +484,7 @@ export const translations: Record<LanguageCode, Translation> = {
             openFile: '打开文件',
             save: '保存',
             saveAs: '另存为',
+			reloadFromDisk: '从磁盘重新加载',
             closeFile: '关闭文件',
             closeWindow: '关闭窗口',
             moveToNewWindow: '移动到新窗口',
@@ -505,6 +512,7 @@ export const translations: Record<LanguageCode, Translation> = {
             resetZoom: '重置缩放',
             settings: '设置',
             about: '关于',
+			checkForUpdates: '检查更新…',
             github: 'GitHub',
             documentation: '文档',
             home: '主页',
@@ -513,7 +521,12 @@ export const translations: Record<LanguageCode, Translation> = {
             exit: '退出',
             zenMode: '禅模式',
             tabs: '{{action}} 标签页',
+			back: '后退',
+			forward: '前进',
             openLocation: '打开位置',
+			openFileLocation: '打开文件位置',
+			openInNewTab: '在新标签页中打开',
+			copyFullPath: '复制完整路径',
             splitView: '分屏视图',
             syncScroll: '同步滚动',
             fullWidth: '全宽',
@@ -548,8 +561,19 @@ export const translations: Record<LanguageCode, Translation> = {
             saveDiagramAsSvg: '将图表保存为SVG...',
             wordWrapOff: '关闭',
             wordWrapOn: '窗口',
-            wordWrapColumn: '列'
+			wordWrapColumn: '列',
+			find: '查找…'
         },
+		find: {
+			placeholder: '查找',
+			next: '下一个匹配项',
+			previous: '上一个匹配项',
+			close: '关闭',
+			matchCount: '第 {{current}} 项，共 {{total}} 项',
+			noMatches: '没有结果',
+			caseSensitive: '区分大小写',
+			wholeWord: '全词匹配'
+		},
         toast: {
             imageSavedSuccessfully: '图片保存成功',
             failedToSaveRemoteImage: '保存远程图片失败',
@@ -560,7 +584,8 @@ export const translations: Record<LanguageCode, Translation> = {
             unsupportedFile: '不支持的文件类型: {{filename}}',
             autoSaveFailed: '自动保存失败 — 未保存的更改仍在内存中',
 			noOtherWindows: '没有其他可合并的窗口',
-            savedNewerEdits: '已保存 — 因为存在更新的编辑,继续保持编辑模式'
+			savedNewerEdits: '已保存 — 因为存在更新的编辑,继续保持编辑模式',
+			openExportedFileFailed: '无法打开导出的文件'
         },
         modal: {
             confirmExit: '确认退出',
@@ -569,8 +594,37 @@ export const translations: Record<LanguageCode, Translation> = {
             youHaveUnsavedChanges: '"{title}"中有未保存的更改。关闭前要保存吗？',
             youHaveUnsavedChangesBeforeReturning: '您有未保存的更改。返回查看模式前要保存吗？',
             youHaveUnsavedChangesBeforeClosingSplitView: '您有未保存的更改。关闭分屏视图前要保存吗？',
-            youHaveUnsavedFiles: '您有 {{count}} 个未保存的文件。是否保存更改？'
+			youHaveUnsavedFiles: '您有 {{count}} 个未保存的文件。是否保存更改？',
+			openExportedFileTitle: '打开导出的文件？',
+			openExportedHtmlMessage: 'HTML 导出已保存。现在打开吗？'
         },
+		update: {
+			checkingHeader: '正在检查更新…',
+			checkingBody: '正在查找 Markpad 的最新版本…',
+			upToDateHeader: '已是最新版本',
+			upToDateBody: '您正在使用 Markpad 的最新版本（v{{version}}）。',
+			upToDateBodyNoVersion: '您正在使用 Markpad 的最新版本。',
+			availableHeader: '有可用更新',
+			availableBody: 'Markpad v{{latest}} 可供更新。您当前使用 v{{current}}。',
+			releaseNotes: '发行说明',
+			downloadingHeader: '正在下载更新…',
+			downloadingBody: '正在下载 Markpad v{{version}}…',
+			downloadingProgress: '已下载 {{downloaded}} MB，共 {{total}} MB（{{pct}}%）',
+			downloadingProgressUnknown: '已下载 {{downloaded}} MB',
+			downloadingHint: '更新准备就绪后，Markpad 将自动重启。',
+			errorCheckHeader: '检查更新失败',
+			errorCheckBody: '无法检查更新。',
+			errorDownloadHeader: '下载更新失败',
+			errorDownloadBody: '无法下载或安装更新。',
+			errorInstallHeader: '重启失败',
+			errorInstallBody: '更新已下载，但 Markpad 无法自动重启。请退出后重新打开 Markpad 以完成安装。',
+			notConfiguredHint: '此构建版本尚未配置更新功能。',
+			cancel: '取消',
+			ok: '确定',
+			downloadInstall: '下载并安装',
+			close: '关闭',
+			retry: '重试'
+		},
         home: {
             welcomeToMarkpad: '欢迎使用Markpad',
             recentFiles: '最近文件',
@@ -594,6 +648,8 @@ export const translations: Record<LanguageCode, Translation> = {
         tooltip: {
             menu: '菜单',
             more: '更多',
+			back: '后退',
+			forward: '前进',
             moreActions: '更多操作',
             settings: '设置',
             resetZoom: '重置缩放',
@@ -610,9 +666,12 @@ export const translations: Record<LanguageCode, Translation> = {
             scrollSync: '滚动同步',
             toggleFullWidth: '切换全宽',
             fullWidth: '切换全宽',
+			reloadFromDisk: '从磁盘重新加载',
             toggleAutoReload: '切换自动重载',
             autoReload: '自动重载',
-            editFile: '编辑文件',
+			editFile: '编辑文件',
+			editorToolbar: '编辑器工具栏',
+			toggleEditorToolbar: '切换编辑器工具栏',
             changeTheme: '更改主题',
             undock: '取消固定',
             dock: '固定',
@@ -623,7 +682,8 @@ export const translations: Record<LanguageCode, Translation> = {
             showTableOfContents: '显示目录',
             hideTableOfContents: '隐藏目录',
             newTab: '新标签页',
-            close: '关闭'
+			close: '关闭',
+			find: '查找'
         },
         toc: {
             noHeadingsFound: '未找到标题'
@@ -675,7 +735,8 @@ export const translations: Record<LanguageCode, Translation> = {
         common: {
             close: '关闭',
             minimize: '最小化',
-            maximize: '最大化'
+			maximize: '最大化',
+			loadingFullDocument: '正在加载完整文档…'
         }
     },
     ja: {
