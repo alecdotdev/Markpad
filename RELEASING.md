@@ -44,6 +44,8 @@ If you ever lose the private key:
 
 ## Per-release workflow
 
+The workflow uses `npm ci`, so its installed dependency graph is exactly the committed lockfile. Do not replace it with `npm install` in release jobs.
+
 1. **Bump version in both files** (mandatory — Tauri reads runtime version from `Cargo.toml`):
    - [`package.json`](package.json) `version`
    - [`src-tauri/Cargo.toml`](src-tauri/Cargo.toml) `[package].version`
@@ -59,8 +61,8 @@ If you ever lose the private key:
 4. **Wait** ~30 min for matrix builds to finish, plus ~2 min for `generate-update-feed`.
 5. **Open the draft release** on the [Releases page](https://github.com/alecdotdev/Markpad/releases). Verify the assets:
    - **macOS**: `*.dmg`, `*.app.tar.gz`, `*.app.tar.gz.sig`
-   - **Windows x64**: `*_x64.exe` (portable), `*_x64-setup.exe` (NSIS installer), `*_x64-setup.exe.sig`
-   - **Windows ARM64**: `*_arm64.exe` (portable), `*_arm64-setup.exe` (NSIS installer), `*_arm64-setup.exe.sig`
+   - **Windows x64**: `Markpad_<version>_x64.exe` (portable), `*_x64-setup.exe` (NSIS installer), `*_x64-setup.exe.sig`
+   - **Windows ARM64**: `Markpad_<version>_arm64.exe` (portable), `*_arm64-setup.exe` (NSIS installer), `*_arm64-setup.exe.sig`
    - **Linux**: `*.deb`, `*.rpm`, `*.AppImage`, `*.AppImage.sig`
    - **Update feed**: `latest.json` (one entry per successfully built platform)
 6. **Click "Publish release"** — this is the gate that activates auto-update for all clients pointing at `releases/latest/download/latest.json`.

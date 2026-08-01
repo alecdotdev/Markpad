@@ -68,6 +68,16 @@ Download the latest executable or installer from the [releases page](https://git
 - Run `npm run tauri build` to build the executable 
 - [Optional] Rename to `MarkpadInstaller.exe` to run as installer
 
+### Isolated macOS test bundle
+
+For local verification without opening or replacing `/Applications/Markpad.app`, build an unsigned test-only app with an independent identifier:
+
+```bash
+MARKPAD_TEST_BUNDLE_ID=dev.example.markpad.test npm run build:test-bundle
+```
+
+The result is placed in `dist/test-bundle/`. It is not a distributable release: it has no Developer ID notarization or Windows Authenticode signature.
+
 ## Issues & Feedback
 
 If you find a bug, have a feature request, or just want to leave some feedback, please [open an issue](https://github.com/alecdotdev/Markpad/issues/new/choose). I'm actively developing Markpad and love hearing from users!

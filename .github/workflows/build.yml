@@ -110,7 +110,7 @@ jobs:
           sudo snap install snapcraft --classic
 
       - name: Install Frontend Dependencies
-        run: npm install
+        run: npm ci
 
       # --- Windows Build (x64) ---
       - name: Build Windows x64
@@ -128,8 +128,7 @@ jobs:
         run: |
           VERSION="${{ needs.create-release.outputs.version }}"
           cp src-tauri/target/release/Markpad.exe "Markpad_${VERSION}_x64.exe"
-          cp "Markpad_${VERSION}_x64.exe" "MarkpadInstaller_${VERSION}_x64.exe"
-          gh release upload v$VERSION "Markpad_${VERSION}_x64.exe" "MarkpadInstaller_${VERSION}_x64.exe" --clobber
+          gh release upload v$VERSION "Markpad_${VERSION}_x64.exe" --clobber
           find src-tauri/target/release/bundle/nsis -name "*-setup.exe" -exec gh release upload v$VERSION {} --clobber \;
           find src-tauri/target/release/bundle/nsis -name "*-setup.exe.sig" -exec gh release upload v$VERSION {} --clobber \;
 
@@ -171,8 +170,7 @@ jobs:
         run: |
           VERSION="${{ needs.create-release.outputs.version }}"
           cp src-tauri/target/aarch64-pc-windows-msvc/release/Markpad.exe "Markpad_${VERSION}_arm64.exe"
-          cp "Markpad_${VERSION}_arm64.exe" "MarkpadInstaller_${VERSION}_arm64.exe"
-          gh release upload v$VERSION "Markpad_${VERSION}_arm64.exe" "MarkpadInstaller_${VERSION}_arm64.exe" --clobber
+          gh release upload v$VERSION "Markpad_${VERSION}_arm64.exe" --clobber
           find src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis -name "*-setup.exe" -exec gh release upload v$VERSION {} --clobber \;
           find src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis -name "*-setup.exe.sig" -exec gh release upload v$VERSION {} --clobber \;
 

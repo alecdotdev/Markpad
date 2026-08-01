@@ -14,6 +14,7 @@
 		"test:settings-scroll": "node --test --import tsx scripts/previewScrollSync.test.ts scripts/toolbarCustomizationWiring.test.ts",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"build:test-bundle": "node scripts/build-test-bundle.mjs",
 		"tauri": "tauri"
 	},
 	"license": "MIT",
