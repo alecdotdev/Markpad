@@ -2347,10 +2347,17 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			if (!isSplit) toggleEdit(true);
 		}
 		if (cmdOrCtrl && key === 's') {
-			if (isEditing || isSplit) {
-				e.preventDefault();
-				saveContent();
-			}
+			// Reading mode used to swallow the shortcut entirely. An untitled
+			// buffer reaches it with content still unsaved — `toggleEdit`
+			// only runs its save flow for tabs that already have a path — so
+			// the only way to keep that text was to switch back to the
+			// editor first. Saving is never mode-specific; the guard now
+			// asks whether there is anything to write, not which pane is
+			// visible. A saved, unmodified document stays a no-op so the
+			// shortcut cannot churn its mtime and wake the file watcher.
+			e.preventDefault();
+			const saveTarget = tabManager.activeTab;
+			if (saveTarget && (saveTarget.isDirty || saveTarget.path === '')) saveContent();
 		}
 
 		if (cmdOrCtrl && e.shiftKey && key === 't') {

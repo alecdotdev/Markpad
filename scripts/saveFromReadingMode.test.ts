@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+
+const viewer = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
+
+function keydownSaveBranch(): string {
+	const start = viewer.indexOf("if (cmdOrCtrl && key === 's') {");
+	assert.notEqual(start, -1, 'the Ctrl/Cmd+S keydown branch should exist');
+	const end = viewer.indexOf("if (cmdOrCtrl && e.shiftKey && key === 't')", start);
+	assert.notEqual(end, -1, 'expected a following branch to bound the slice');
+	return viewer.slice(start, end);
+}
+
+// Reported in #168 by @dayeggpi: with a document that was never saved,
+// Ctrl+S in reading mode did nothing at all. `toggleEdit` only runs its
+// save/confirm flow for tabs that already have a path, so an untitled buffer
+// switches to reading mode still dirty — and then the one shortcut that could
+// rescue it was suppressed.
+test('Ctrl+S is not gated on the editor being visible', () => {
+	const branch = keydownSaveBranch();
+	assert.doesNotMatch(branch, /if \(isEditing \|\| isSplit\)/);
+	assert.match(branch, /saveContent\(\)/);
+});
+
+test('an untitled buffer can be saved from reading mode', () => {
+	const branch = keydownSaveBranch();
+	// `path === ''` is the untitled case; documentSession.saveContent opens
+	// the Save dialog for it, so no extra plumbing is needed here.
+	assert.match(branch, /saveTarget\.path === ''/);
+});
+
+test('a saved, unmodified document does not write on Ctrl+S', () => {
+	// Writing unconditionally would touch mtime and wake the file watcher,
+	// which in live mode reloads the tab -- a keystroke that reads as a no-op
+	// to the user should not move the document underneath them.
+	const branch = keydownSaveBranch();
+	assert.match(branch, /saveTarget\.isDirty \|\| saveTarget\.path === ''/);
+});
+
+test('the browser save dialog is always suppressed', () => {
+	// preventDefault has to run for every mode, including the no-op case,
+	// or reading mode would surface the webview's own Save Page dialog.
+	const branch = keydownSaveBranch();
+	const beforeGuard = branch.slice(0, branch.indexOf('const saveTarget'));
+	assert.match(beforeGuard, /e\.preventDefault\(\);/);
+});
+
+test('the HOME tab is not savable', () => {
+	// HOME carries the sentinel path 'HOME' and is never dirty, so the guard
+	// excludes it without naming it. This pins that reasoning: if the guard
+	// ever becomes unconditional, HOME would start opening a Save dialog.
+	const branch = keydownSaveBranch();
+	assert.doesNotMatch(branch, /^\s*saveContent\(\);\s*$/m);
+});
