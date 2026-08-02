@@ -89,6 +89,17 @@ function toPlainRecord(value: unknown): Record<string, unknown> {
 	return value as Record<string, unknown>;
 }
 
+// Front matter is metadata, so the block has to parse as a YAML mapping. Jekyll
+// rejects anything else outright (`validate_data!` raises unless the parsed
+// value `is_a?(Hash)`) and Hugo fails to unmarshal it into its map type; when a
+// leading `---` block is not key/value pairs, no static-site generator or
+// editor treats it as metadata. An empty block (`---\n---`) is still legal and
+// empty metadata, so only a parsed scalar or sequence disqualifies it.
+function isFrontMatterMapping(value: unknown): boolean {
+	if (value === null || value === undefined) return true;
+	return typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date);
+}
+
 function toField([key, value]: [string, unknown]): FrontMatterField {
 	const kind = getValueKind(value);
 	return {
@@ -104,17 +115,16 @@ function toField([key, value]: [string, unknown]): FrontMatterField {
 export function parseFrontMatter(content: string): FrontMatterParseResult {
 	const range = findFrontMatterRange(content);
 	const lineEnding = range?.lineEnding ?? detectLineEnding(content);
-	if (!range) {
-		return {
-			exists: false,
-			valid: true,
-			raw: '',
-			body: content,
-			fields: [],
-			data: {},
-			lineEnding,
-		};
-	}
+	const notFrontMatter: FrontMatterParseResult = {
+		exists: false,
+		valid: true,
+		raw: '',
+		body: content,
+		fields: [],
+		data: {},
+		lineEnding,
+	};
+	if (!range) return notFrontMatter;
 
 	const doc = parseDocument(range.raw, { prettyErrors: false });
 	if (doc.errors.length > 0) {
@@ -130,7 +140,15 @@ export function parseFrontMatter(content: string): FrontMatterParseResult {
 		};
 	}
 
-	const data = toPlainRecord(doc.toJSON());
+	// A document whose first line is `---` but whose block is prose, not a
+	// mapping, is ordinary markdown: the opening `---` is a thematic break and
+	// the closing one underlines a setext heading. Stripping it would delete
+	// visible text from the rendered body without showing it as metadata
+	// anywhere, so hand the whole document back as body.
+	const parsed = doc.toJSON();
+	if (!isFrontMatterMapping(parsed)) return notFrontMatter;
+
+	const data = toPlainRecord(parsed);
 	return {
 		exists: true,
 		valid: true,
