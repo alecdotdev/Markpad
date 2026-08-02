@@ -1635,28 +1635,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		if (currentFile === path) tabManager.closeTab(tabManager.activeTabId!);
 	}
 
-	function isYoutubeLink(url: string) {
-		return url.includes('youtube.com/watch') || url.includes('youtu.be/');
-	}
-
-	function getYoutubeId(url: string) {
-		const match = url.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/);
-		return match && match[2].length === 11 ? match[2] : null;
-	}
-
-	function replaceWithYoutubeEmbed(element: Element, videoId: string) {
-		const container = element.ownerDocument.createElement('div');
-		container.className = 'video-container';
-		const iframe = element.ownerDocument.createElement('iframe');
-		iframe.src = `https://www.youtube.com/embed/${videoId}`;
-		iframe.title = 'YouTube video player';
-		iframe.frameBorder = '0';
-		iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
-		iframe.allowFullscreen = true;
-		container.appendChild(iframe);
-		element.replaceWith(container);
-	}
-
 	async function canCloseTab(tabId: string): Promise<boolean> {
 		return documentSession.canCloseTab(tabId);
 	}
