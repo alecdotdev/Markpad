@@ -11,7 +11,10 @@
     "core:default",
     "opener:default",
     "opener:allow-open-url",
-    "opener:allow-open-path",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "**" }]
+    },
     "dialog:default",
     "core:webview:allow-print",
     "core:window:allow-start-dragging",
