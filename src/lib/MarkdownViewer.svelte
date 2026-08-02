@@ -50,6 +50,7 @@ import {
 	resolveMarkdownTargetPath,
 	type MarkdownLinkTarget as RelativeMarkdownTarget,
 } from './utils/markdownLinks.js';
+import { normalizeAssetPath } from './utils/exportHtml.js';
 import {
 	dropRecentFile,
 	isRecentFilesStorageEvent,
@@ -2146,51 +2147,46 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		liveMode = !liveMode;
 	}
 
+	/**
+	 * Every image in the preview whose source is a local file has already been
+	 * turned into an asset URL by `processMarkdownHtml`, so `img.src` is one of
+	 * three things: an asset URL, a remote `http(s)` URL, or a `data:` URL.
+	 *
+	 * `convertFileSrc` does not spell the first one the same way everywhere:
+	 * Windows gets `http://asset.localhost/<encoded path>`, everything else
+	 * gets `asset://localhost/<encoded path>`. The old `src.startsWith('asset:')`
+	 * test only recognised the second, so on Windows every local image fell
+	 * into the remote branch — which could never work either (see below).
+	 * `normalizeAssetPath` (#363) knows both shapes and, unlike a
+	 * `startsWith('http://asset.localhost')` test, does not accept a lookalike
+	 * host such as `http://asset.localhost.evil.test/`.
+	 */
 	async function saveImageAs(src: string) {
-		let realPath = '';
-		if (src.startsWith('asset:')) {
-			try {
-				const url = new URL(src);
-				realPath = decodeURIComponent(url.pathname);
-				if (realPath.startsWith('/localhost/')) {
-					realPath = realPath.substring(11);
-				} else if (realPath.startsWith('/')) {
-					realPath = realPath.substring(1);
-				}
-			} catch (e) {
-				console.error('Failed to parse asset URL:', e);
-			}
-		} else if (src.startsWith('http')) {
-			try {
-				const response = await fetch(src);
-				const buffer = await response.arrayBuffer();
-				const dest = await save({ 
-					defaultPath: 'image.png',
-					filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
-				});
-				if (dest) {
-					await invoke('save_file_binary', { path: dest, data: Array.from(new Uint8Array(buffer)) });
-					addToast('Image saved successfully');
-				}
-			} catch (e) {
-				addToast('Failed to save remote image', 'error');
-			}
+		const realPath = normalizeAssetPath(src) ?? '';
+
+		if (!realPath) {
+			// The webview cannot fetch the bytes of a remote image at all: the
+			// app's CSP is `connect-src 'self'`, so a cross-origin `fetch` is
+			// refused before it leaves the page. (`img-src ... https:` is a
+			// different directive; it only governs what an `<img>` may
+			// display.) The download has to happen in Rust, and there is no
+			// command for it yet, so say that rather than reporting a network
+			// failure that never happened.
+			addToast('Saving a remote image is not supported yet', 'error');
 			return;
 		}
 
-		if (realPath) {
-			const ext = realPath.split('.').pop() || 'png';
-			const dest = await save({ 
-				defaultPath: `image.${ext}`,
-				filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] }]
-			});
-			if (dest) {
-				try {
-					await invoke('copy_file', { src: realPath, dest });
-					addToast('Image saved successfully');
-				} catch (e) {
-					addToast(`Failed to save image: ${e}`, 'error');
-				}
+		const ext = realPath.split('.').pop() || 'png';
+		const dest = await save({
+			defaultPath: `image.${ext}`,
+			filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] }]
+		});
+		if (dest) {
+			try {
+				await invoke('copy_file', { src: realPath, dest });
+				addToast('Image saved successfully');
+			} catch (e) {
+				addToast(`Failed to save image: ${e}`, 'error');
 			}
 		}
 	}
