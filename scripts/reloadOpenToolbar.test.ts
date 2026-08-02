@@ -7,20 +7,17 @@ const titleBar = readFileSync('src/lib/components/TitleBar.svelte', 'utf8');
 const editor = readFileSync('src/lib/components/Editor.svelte', 'utf8');
 const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf8');
 
-test('manual reload is wired through menu, titlebar, and F5 with dirty-state protection', () => {
+test('manual reload is wired through titlebar and F5 with dirty-state protection', () => {
 	assert.match(markdownViewer, /async function reloadFromDisk\(\)/);
 	assert.match(markdownViewer, /await canCloseTab\(activeId\)/);
 	assert.match(markdownViewer, /loadMarkdown\(tab\.path,\s*\{[\s\S]*preserveEditState:\s*true/);
 	assert.match(markdownViewer, /code === 'F5'[\s\S]*reloadFromDisk\(\)/);
-	assert.match(markdownViewer, /listen\('menu-file-reload'[\s\S]*reloadFromDisk\(\)/);
 	assert.match(titleBar, /onreloadFromDisk/);
 	assert.match(titleBar, /id === 'reload'/);
-	assert.match(tauriLib, /menu-file-reload/);
-	assert.match(tauriLib, /\.accelerator\("F5"\)/);
+	assert.doesNotMatch(tauriLib, /menu-file-reload/);
 });
 
-test('preview-level open shortcut handles Ctrl/Cmd+O outside Monaco without double-handling macOS native menu', () => {
-	assert.match(markdownViewer, /settings\.osType === 'macos'[\s\S]*key === 'o'[\s\S]*return/);
+test('preview-level open shortcut handles Ctrl/Cmd+O outside Monaco', () => {
 	assert.match(markdownViewer, /cmdOrCtrl[\s\S]*key === 'o'[\s\S]*selectFile\(\)/);
 });
 

@@ -119,9 +119,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	let findBar = $state<{ reapply: () => void; clearHighlights: () => void } | null>(null);
 
 	// Decide where Cmd/Ctrl+F should land based on what's visible and where
-	// focus is. Used by both the JS keydown handler (Win/Linux + macOS in-page
-	// shortcut) and the macOS native menu listener (which fires Cmd+F via the
-	// Edit menu accelerator and bypasses the JS keydown path).
+	// focus is. The in-window shortcut remains the canonical route on every
+	// platform.
 	function triggerFindAction() {
 		const active = document.activeElement as Node | null;
 		const editorHasFocus = !!editorPaneEl && !!active && editorPaneEl.contains(active);
@@ -2268,17 +2267,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		const key = e.key.toLowerCase();
 		const code = e.code;
 
-		// On macOS the native menu accelerators (⌘T, ⌘W, ⌘S, ⌘Q) take priority
-		// via NSMenu; the JS keydown handler should not also fire for them, or
-		// we'd double-handle (e.g. open two new tabs on ⌘T). The !e.shiftKey
-		// guards keep ⌘⇧T (undo close tab) routed through this handler as
-		// before — only the bare combos are claimed by the menu.
+		// The macOS application menu owns ⌘Q. Document shortcuts remain in the
+		// in-window controls, so they continue to act on the current webview.
 		if (settings.osType === 'macos' && cmdOrCtrl && !e.shiftKey) {
 			if (key === 'q') return; // → menu-app-quit
-			if (key === 'w') return; // → menu-file-close
-			if (key === 's') return; // → menu-file-save
-			if (key === 't') return; // → menu-file-new
-			if (key === 'o') return; // → menu-file-open
 		}
 
 		const isSplit = tabManager.activeTab?.isSplit;
@@ -2374,7 +2366,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 		if (cmdOrCtrl && key === ',') {
 			e.preventDefault();
-			showSettings = !showSettings;
+			showSettings = true;
 		}
 		// Ctrl/Cmd+F: route to either Monaco's built-in find or the preview
 		// FindBar depending on focus and which panes are visible. We only
@@ -2664,16 +2656,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				}),
 			);
 			unlisteners.push(
-				await appWindow.listen('menu-edit-file', () => {
-					toggleEdit();
-				}),
-			);
-			unlisteners.push(
-				await appWindow.listen('menu-edit-find', () => {
-					triggerFindAction();
-				}),
-			);
-			unlisteners.push(
 				await appWindow.listen('menu-tab-rename', async (event) => {
 					const tabId = event.payload as string;
 					const tab = tabManager.tabs.find((t) => t.id === tabId);
@@ -2763,26 +2745,17 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				}),
 			);
 			unlisteners.push(
+				await appWindow.listen('menu-app-settings', () => {
+					showSettings = true;
+				}),
+			);
+			unlisteners.push(
 				await appWindow.listen('menu-check-updates', () => {
 					updateStore.openDialog();
 				}),
 			);
-			// Native macOS menubar — Markpad ▸ Quit and File ▸ * — bridged
-			// to the same handlers the in-window burger button uses, so the
-			// menu and the burger stay behaviourally identical. Save mirrors
-			// the keydown guard (`isEditing || isSplit`) so menu ⌘S in pure
-			// view mode is a no-op, matching the keyboard shortcut.
+			// Native macOS application menu only owns application-level actions.
 			unlisteners.push(await appWindow.listen('menu-app-quit',         () => appExit()));
-			unlisteners.push(await appWindow.listen('menu-file-new',         () => handleNewFile()));
-			unlisteners.push(await appWindow.listen('menu-file-open',        () => selectFile()));
-			unlisteners.push(await appWindow.listen('menu-file-reload',      () => reloadFromDisk()));
-			unlisteners.push(await appWindow.listen('menu-file-close',       () => closeFile()));
-			unlisteners.push(await appWindow.listen('menu-file-save',        () => {
-				if (isEditing || tabManager.activeTab?.isSplit) saveContent();
-			}));
-			unlisteners.push(await appWindow.listen('menu-file-save-as',     () => saveContentAs()));
-			unlisteners.push(await appWindow.listen('menu-file-export-html', () => exportAsHtml()));
-			unlisteners.push(await appWindow.listen('menu-file-export-pdf', () => exportAsPdf()));
 			unlisteners.push(
 				await appWindow.onCloseRequested(async (event) => {
 					console.log('onCloseRequested triggered');

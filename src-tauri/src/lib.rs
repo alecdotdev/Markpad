@@ -1358,6 +1358,9 @@ pub fn run() {
 
                 let check_item =
                     MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
+                let settings_item = MenuItemBuilder::with_id("menu-app-settings", "Settings…")
+                    .accelerator("CmdOrCtrl+,")
+                    .build(app)?;
 
                 let app_submenu = SubmenuBuilder::new(app, &app_name)
                     .item(&PredefinedMenuItem::about(
@@ -1366,13 +1369,12 @@ pub fn run() {
                         None,
                     )?)
                     .separator()
+                    .item(&settings_item)
                     .item(&check_item)
                     .separator()
                     .item(&PredefinedMenuItem::services(app, None)?)
                     .separator()
                     .item(&PredefinedMenuItem::hide(app, None)?)
-                    .item(&PredefinedMenuItem::hide_others(app, None)?)
-                    .item(&PredefinedMenuItem::show_all(app, None)?)
                     .separator()
                     .item(
                         &MenuItemBuilder::with_id(
@@ -1384,72 +1386,8 @@ pub fn run() {
                     )
                     .build()?;
 
-                let file_submenu = SubmenuBuilder::new(app, "File")
-                    .item(
-                        &MenuItemBuilder::with_id("menu-file-new", "New File")
-                            .accelerator("CmdOrCtrl+T")
-                            .build(app)?,
-                    )
-                    .item(
-                        &MenuItemBuilder::with_id("menu-file-open", "Open File…")
-                            .accelerator("CmdOrCtrl+O")
-                            .build(app)?,
-                    )
-                    .item(
-                        &MenuItemBuilder::with_id("menu-file-reload", "Reload from Disk")
-                            .accelerator("F5")
-                            .build(app)?,
-                    )
-                    .item(
-                        &MenuItemBuilder::with_id("menu-file-close", "Close")
-                            .accelerator("CmdOrCtrl+W")
-                            .build(app)?,
-                    )
-                    .separator()
-                    .item(
-                        &MenuItemBuilder::with_id("menu-file-save", "Save")
-                            .accelerator("CmdOrCtrl+S")
-                            .build(app)?,
-                    )
-                    .item(
-                        &MenuItemBuilder::with_id("menu-file-save-as", "Save As…")
-                            .accelerator("CmdOrCtrl+Shift+S")
-                            .build(app)?,
-                    )
-                    .separator()
-                    .item(
-                        &MenuItemBuilder::with_id("menu-file-export-html", "Export as HTML")
-                            .build(app)?,
-                    )
-                    .item(
-                        &MenuItemBuilder::with_id("menu-file-export-pdf", "Export as PDF")
-                            .build(app)?,
-                    )
-                    .build()?;
-
-                let edit_submenu = SubmenuBuilder::new(app, "Edit")
-                    .item(&PredefinedMenuItem::undo(app, None)?)
-                    .item(&PredefinedMenuItem::redo(app, None)?)
-                    .separator()
-                    .item(&PredefinedMenuItem::cut(app, None)?)
-                    .item(&PredefinedMenuItem::copy(app, None)?)
-                    .item(&PredefinedMenuItem::paste(app, None)?)
-                    .item(&PredefinedMenuItem::select_all(app, None)?)
-                    .separator()
-                    .item(
-                        &MenuItemBuilder::with_id("menu-edit-find", "Find…")
-                            .accelerator("CmdOrCtrl+F")
-                            .build(app)?,
-                    )
-                    .build()?;
-
-                let window_submenu = SubmenuBuilder::new(app, "Window")
-                    .item(&PredefinedMenuItem::minimize(app, None)?)
-                    .item(&PredefinedMenuItem::close_window(app, None)?)
-                    .build()?;
-
                 let menu = MenuBuilder::new(app)
-                    .items(&[&app_submenu, &file_submenu, &edit_submenu, &window_submenu])
+                    .items(&[&app_submenu])
                     .build()?;
 
                 app.set_menu(menu)?;
@@ -1567,12 +1505,11 @@ pub fn run() {
                 .or_else(|| app.get_webview_window("main"));
             let Some(window) = target else { return };
 
-            if id == "check-updates" {
+            if id == "menu-app-settings" {
+                let _ = app.emit_to(window.label(), "menu-app-settings", ());
+            } else if id == "check-updates" {
                 let _ = app.emit_to(window.label(), "menu-check-updates", ());
-            } else if id == "menu-app-quit"
-                || id.starts_with("menu-file-")
-                || id.starts_with("menu-edit-")
-            {
+            } else if id == "menu-app-quit" {
                 let _ = app.emit_to(window.label(), id, ());
             }
         })
