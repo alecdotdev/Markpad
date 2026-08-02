@@ -24,6 +24,7 @@
 	import { askToOpenExportedFile } from './utils/openExportedFile.js';
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
+import { sanitizeMarkdownHtml } from './utils/sanitize.js';
 import {
 	rememberDiagramSource,
 	renderDiagramsForPrint,
@@ -199,17 +200,20 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	let frontMatterTagEditIndexes = $state<Record<string, number | null>>({});
 	let frontMatterTagEditDrafts = $state<Record<string, string>>({});
 	let isFrontMatterCollapsed = $derived(frontMatterCollapsedByKey[frontMatterPanelKey] ?? true);
-	const markdownLinkExtensions = ['.md', '.markdown', '.mdown', '.mkd', '.txt'];
 	let isMarkdown = $derived(hasMarkdownLinkExtension(currentFile));
 	let editorLanguage = $derived(getLanguage(currentFile));
 	let htmlContent = $derived(tabManager.activeTab?.content ?? '');
-	const markdownLinkExtensionPattern = markdownLinkExtensions
-		.map((ext) => ext.slice(1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-		.join('|');
-	const allowedMarkdownUriPattern = new RegExp(`^(?:(?:[a-z]:[^?#]*\\.(?:${markdownLinkExtensionPattern})(?:[?#].*)?$)|(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|asset|tauri):|[^a-z]|[a-z+.\\-]+(?:[^a-z+.\\-:]|$))`, 'i');
-	let sanitizedHtml = $derived(DOMPurify.sanitize(htmlContent, {
-		ALLOWED_URI_REGEXP: allowedMarkdownUriPattern,
-	}));
+	// This string is injected into the app's own document, so it runs the same
+	// policy the export runs — the one place a document is untrusted must not
+	// have its own private copy of the rules. The preview used to inline a
+	// duplicate of the URI pattern and nothing else, which left a `style` tag (on
+	// DOMPurify's default allowlist, CSS unfiltered) live inside the app's
+	// document: an author stylesheet is not scoped to the article, so it could
+	// hide the title bar and beacon out through `background-image: url(https://…)`,
+	// neither of which the app CSP blocks (`style-src 'unsafe-inline'`,
+	// `img-src … https:`). See ./utils/sanitize.ts for the policy itself, and
+	// renderMarkdownPreview below for why this path sanitizes last.
+	let sanitizedHtml = $derived(sanitizeMarkdownHtml(htmlContent));
 	let scrollTop = $derived(tabManager.activeTab?.scrollTop ?? 0);
 	let isScrolled = $derived(scrollTop > 0);
 	let windowTitle = $derived(tabManager.activeTab?.title ?? 'Markpad');
@@ -772,6 +776,20 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	}
 
+	// The preview and the export run the same filter in opposite orders, on
+	// purpose. The export sanitizes the renderer output first and processes
+	// afterwards, because the bytes it writes are read by another program and
+	// running the filter over Markpad's own generated markup would let a future
+	// tightening of the policy silently delete parts of the exported file; the
+	// exported document carries a CSP as the second line of defence.
+	//
+	// The preview has no second line: what it produces is injected straight into
+	// the live application document by `{@html sanitizedHtml}`. So the filter runs
+	// last, on exactly the string that gets injected — the processed HTML is
+	// cached in `tab.content` and re-sanitized at the sink (see `sanitizedHtml`),
+	// which means no parse/serialize round trip happens after the sanitizer has
+	// had its say. Moving the call here instead would inject a string the
+	// sanitizer never saw.
 	async function renderMarkdownPreview(raw: string, filePath: string) {
 		const body = getMarkdownBodyWithoutFrontMatter(raw);
 		const html = (await invoke('render_markdown', { content: body })) as string;
