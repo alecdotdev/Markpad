@@ -6,18 +6,30 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Every push to a pull request queued another full matrix while the previous
+# one was still waiting for a runner, and both then competed for the same
+# scarce macOS capacity. Only the newest revision of a branch is worth
+# building.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     strategy:
       fail-fast: false
       matrix:
         include:
+          # One macOS entry, targeting the universal binary the release
+          # actually ships. Two separate arch entries cost two runners from a
+          # pool an order of magnitude smaller than the Linux and Windows
+          # ones -- macOS jobs here finish in 6-8 minutes but were waiting
+          # 20-30 for a slot -- while covering strictly less: universal
+          # compiles both architectures, so an Intel-only break still fails
+          # the check, and it fails on the same artifact the release produces.
           - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
-            os-name: 'macos-aarch64'
-          - platform: 'macos-latest'
-            args: '--target x86_64-apple-darwin'
-            os-name: 'macos-x64'
+            args: '--target universal-apple-darwin'
+            os-name: 'macos-universal'
           - platform: 'ubuntu-22.04'
             args: ''
             os-name: 'linux'
@@ -48,6 +60,18 @@ jobs:
 
       - name: install frontend dependencies
         run: npm ci
+
+      # test.yml runs the suites on Linux only, so a Windows- or macOS-only
+      # regression in the cfg-gated code paths reaches a release build
+      # unchallenged. Running them here makes the platform matrix prove
+      # behaviour, not just that the tree compiles.
+      - name: run frontend behavior tests
+        shell: bash
+        run: npm test
+
+      - name: run cargo test
+        working-directory: src-tauri
+        run: cargo test
 
       - name: Build app
         env:

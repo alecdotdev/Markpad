@@ -12,3 +12,7 @@ test.md
 test_image.png
 src-tauri/output.txt
 
+# Build output and local working directories
+dist/
+.cache/
+.worktrees/
