@@ -50,6 +50,14 @@ import {
 	resolveMarkdownTargetPath,
 	type MarkdownLinkTarget as RelativeMarkdownTarget,
 } from './utils/markdownLinks.js';
+import {
+	dropRecentFile,
+	isRecentFilesStorageEvent,
+	promoteRecentFile,
+	readStoredRecentFiles,
+	renameRecentFile,
+	updateStoredRecentFiles,
+} from './utils/recentFiles.js';
 
 	const appWindow = getCurrentWindow();
 
@@ -1624,28 +1632,38 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 
 
+	/*
+	 * All three mutations go through `updateStoredRecentFiles`, which re-reads
+	 * the stored list first. Writing `JSON.stringify(recentFiles)` from this
+	 * window's copy published a snapshot from whenever this window last looked,
+	 * so with two windows open the later write erased the other's entries.
+	 */
 	function saveRecentFile(path: string) {
-		let files = [...recentFiles].filter((f) => f !== path);
-		files.unshift(path);
-		recentFiles = files.slice(0, 9);
-		localStorage.setItem('recent-files', JSON.stringify(recentFiles));
+		recentFiles = updateStoredRecentFiles((current) => promoteRecentFile(current, path));
 	}
 
 	function loadRecentFiles() {
-		const stored = localStorage.getItem('recent-files');
-		if (stored) {
-			try {
-				recentFiles = JSON.parse(stored);
-			} catch (e) {
-				console.error('Error parsing recent files:', e);
-			}
-		}
+		recentFiles = readStoredRecentFiles();
 	}
 
 	function deleteRecentFile(path: string) {
-		recentFiles = recentFiles.filter((f) => f !== path);
-		localStorage.setItem('recent-files', JSON.stringify(recentFiles));
+		recentFiles = updateStoredRecentFiles((current) => dropRecentFile(current, path));
 	}
+
+	/*
+	 * localStorage fires `storage` in every *other* same-origin document, so
+	 * this is how a window learns that a sibling opened or removed a file. Home
+	 * screens in other windows used to keep showing a stale list until restart,
+	 * and — worse — that stale list was what their next write published.
+	 */
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const onStorage = (event: StorageEvent) => {
+			if (isRecentFilesStorageEvent(event)) recentFiles = readStoredRecentFiles();
+		};
+		window.addEventListener('storage', onStorage);
+		return () => window.removeEventListener('storage', onStorage);
+	});
 
 	function removeRecentFile(path: string, event: MouseEvent) {
 		event.stopPropagation();
@@ -2864,8 +2882,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 							await invoke('rename_file', { oldPath, newPath });
 							tabManager.renameTab(tabId, newPath);
 							// Update recent files if needed
-							recentFiles = recentFiles.map((f) => (f === oldPath ? newPath : f));
-							localStorage.setItem('recent-files', JSON.stringify(recentFiles));
+							recentFiles = updateStoredRecentFiles((current) => renameRecentFile(current, oldPath, newPath));
 						} catch (e) {
 							console.error('Failed to rename file', e);
 							await askCustom(`Failed to rename file: ${e}`, { title: 'Error', kind: 'error' });
