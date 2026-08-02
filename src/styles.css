@@ -1420,6 +1420,21 @@ body {
 		display: none !important;
 	}
 
+	/* The find bar is hidden above, but its marks wrap document text. Adding
+	   them to the list would delete the matched words from the export, so the
+	   highlight is neutralised instead of removed. `!important` is what
+	   decides here: FindBar.svelte paints the mark from a `:global()` rule of
+	   equal specificity, and the order between a component style and this
+	   sheet is not guaranteed. */
+	.markdown-body mark.markpad-find-match,
+	.markdown-body mark.markpad-find-match.active {
+		background-color: transparent !important;
+		box-shadow: none !important;
+		color: inherit !important;
+		border-radius: 0 !important;
+		padding: 0 !important;
+	}
+
 	html,
 	body,
 	#app,
@@ -1602,6 +1617,28 @@ body {
 		max-width: 100% !important;
 		height: auto !important;
 		margin: 1em auto;
+	}
+
+	/* Images and diagrams are replaced content: they cannot be fragmented, so
+	   the `break-inside: avoid` above crops anything taller than the printable
+	   column instead of moving it to the next page. Cap the height so they
+	   scale to fit — `height: auto` and the intrinsic ratio bring the width
+	   down with it.
+
+	   `@page` has no margin and `.markdown-body` adds 0.75in top and bottom,
+	   leaving 9.5in on Letter and 10.19in on A4. One absolute cap below both
+	   fits either sheet; viewport units would be shorter to write but resolve
+	   against the page box inconsistently across the platform webviews. */
+	.markdown-body img,
+	.markdown-body .mermaid-diagram svg {
+		max-height: 9in !important;
+		object-fit: contain !important;
+	}
+
+	/* `.mermaid-diagram` scrolls horizontally on screen, and that same overflow
+	   would clip on paper the diagram the cap just made fit. */
+	.markdown-body .mermaid-diagram {
+		overflow: visible !important;
 	}
 
 	.markdown-body table {

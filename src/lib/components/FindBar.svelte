@@ -19,6 +19,19 @@
 	const MAX_MATCHES = 5000;
 	const DEBOUNCE_MS = 80;
 
+	// A collapsed fold keeps its text in the DOM behind `height: 0; overflow:
+	// hidden`, so matches inside one were counted but could never be shown —
+	// a state none of the reference implementations produce. VS Code unfolds
+	// the region it navigates into, and Chrome makes `hidden=until-found` and
+	// closed `<details>` content matchable precisely because it can reveal it
+	// (content the browser cannot reveal, `display: none`, is not matched at
+	// all). So the matches stay in the count and the fold opens on the way to
+	// them.
+	const FOLD_CONTENT_SELECTOR =
+		'.foldable-content-wrapper.is-collapsed, .markdown-alert-content.is-collapsed';
+	// styles.css animates the fold height for 0.25s.
+	const FOLD_TRANSITION_MS = 300;
+
 	let inputEl = $state<HTMLInputElement>();
 	let query = $state('');
 	let caseSensitive = $state(false);
@@ -51,6 +64,47 @@
 			curr = curr.parentNode;
 		}
 		return false;
+	}
+
+	/**
+	 * The control a user would click to open this fold.
+	 *
+	 * Expanding by clearing `is-collapsed` here would work for exactly one
+	 * frame: MarkdownViewer owns `collapsedHeaders`, re-applies the class on
+	 * every re-render and hands the same set to the table of contents. Going
+	 * through the affordance keeps that bookkeeping the single source of
+	 * truth — the same reason Chrome fires `beforematch` before it reveals
+	 * `hidden=until-found` content.
+	 */
+	function foldToggleFor(container: Element, root: HTMLElement): HTMLElement | null {
+		if (container.classList.contains('foldable-content-wrapper')) {
+			const header = container.id
+				? root.querySelector(`.foldable-header[data-fold-target="${CSS.escape(container.id)}"]`)
+				: null;
+			return (header?.querySelector('.header-fold-icon') as HTMLElement | null) ?? null;
+		}
+		return (container.closest('.callout-foldable')?.querySelector('.callout-toggle') as HTMLElement | null) ?? null;
+	}
+
+	/** Opens every collapsed fold between `mark` and the preview root. */
+	function revealFoldsAround(mark: HTMLElement): boolean {
+		const root = markdownBody as HTMLElement | null;
+		if (!root) return false;
+
+		const collapsed: Element[] = [];
+		let curr: Element | null = mark.parentElement;
+		while (curr && curr !== root) {
+			if (curr.matches(FOLD_CONTENT_SELECTOR)) collapsed.push(curr);
+			curr = curr.parentElement;
+		}
+		if (collapsed.length === 0) return false;
+
+		// Collected innermost first; open the outermost fold first so a nested
+		// one is already on screen by the time its own toggle fires.
+		for (const container of collapsed.reverse()) {
+			foldToggleFor(container, root)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+		}
+		return true;
 	}
 
 	export function clearHighlights() {
@@ -188,7 +242,20 @@
 		marks.forEach((m, i) => m.classList.toggle(FIND_MARK_ACTIVE_CLASS, i === safe));
 		activeIndex = safe;
 		if (scroll) {
-			marks[safe].scrollIntoView({ block: 'center', behavior: 'smooth' });
+			const target = marks[safe];
+			const revealed = revealFoldsAround(target);
+			target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+			if (revealed) {
+				// The fold animates its height open, so the scroll above aimed
+				// at a target that was still moving. Re-aim once it settles.
+				// A match that has since been cleared is detached, and the
+				// isConnected guard keeps the late timer from scrolling the
+				// preview for a search that is already gone.
+				setTimeout(() => {
+					if (!target.isConnected) return;
+					target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+				}, FOLD_TRANSITION_MS);
+			}
 		}
 	}
 
