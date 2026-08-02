@@ -1491,9 +1491,29 @@ body {
 	}
 
 	/* The viewer pane carries an inline split ratio during normal interaction.
-	   Width alone cannot override that flex value in the print layout. */
-	.pane.viewer-pane {
+	   Width alone cannot override that flex value in the print layout.
+
+	   The `#app` is not decoration. Edit mode collapses the preview with a
+	   MarkdownViewer.svelte rule that Svelte scopes to
+	   `.layout-container:not(.split).editing.svelte-xxx .viewer-pane:where(...)`
+	   — five classes, against two for `.pane.viewer-pane`. Two `!important`
+	   declarations are decided by specificity, so the component won and the
+	   pane the whole print layout is built around stayed at `width: 0`. That
+	   is why Export PDF from the editor printed a blank page. `#app` is the
+	   application root element (see app.html); its id is the only handle this
+	   sheet has that outranks a component's scoped selector.
+
+	   `opacity` is listed for the same reason `.foldable-content-wrapper`
+	   above lists it: the collapse is size *and* opacity, so restoring the
+	   width alone prints a correctly sized blank rectangle.
+
+	   The pane also animates its flex, and a print taken mid-transition would
+	   capture an intermediate width. */
+	#app .pane.viewer-pane {
+		width: 100% !important;
 		flex: none !important;
+		opacity: 1 !important;
+		transition: none !important;
 	}
 
 	.markdown-body {

@@ -1994,7 +1994,55 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	}
 
+	/**
+	 * Bring the preview DOM up to date with the buffer before it is printed.
+	 *
+	 * The effect that keeps `tab.content` in step with `tab.rawContent` only
+	 * runs while the preview is on screen — split view, or the editor with the
+	 * TOC open, because the TOC is built from the rendered headings. In plain
+	 * edit mode with the TOC closed nothing re-renders, so `tab.content` is
+	 * still whatever was rendered when the file was opened.
+	 *
+	 * Export PDF prints the live DOM. Revealing the pane (see the `#app
+	 * .pane.viewer-pane` rule in styles.css) without this would export the
+	 * document as it was before the editing session — a worse failure than the
+	 * blank page it replaces, because it looks like it worked. Rendering here
+	 * pays the cost once per export instead of once per keystroke, which is
+	 * what the narrow effect condition exists to avoid.
+	 *
+	 * Reading mode is left alone: its DOM came from `loadMarkdown` rendering
+	 * this same buffer, and re-rendering would throw away the scroll position
+	 * and the fold/find state the user is looking at.
+	 */
+	async function syncPreviewForPrint() {
+		const tab = tabManager.activeTab;
+		if (!tab || !(tab.isEditing || tab.isSplit)) return;
+		const tabId = tab.id;
+		const rawContent = tab.rawContent;
+		if (rawContent === undefined) return;
+		if ((tab as any)._lastRenderedRawContent === rawContent) return;
+		try {
+			const processed = await renderMarkdownPreview(rawContent, tab.path);
+			const current = tabManager.activeTab;
+			if (tabManager.activeTabId !== tabId || current?.rawContent !== rawContent) return;
+			tabManager.updateTabContent(tabId, processed);
+			(current as any)._lastRenderedRawContent = rawContent;
+			await tick();
+			// Awaited, unlike the on-screen path: Mermaid, KaTeX and
+			// highlight.js all replace nodes asynchronously, and the diagram
+			// re-theming below reads the nodes this produces.
+			await renderRichContent();
+			await tick();
+		} catch (error) {
+			// Printing the stale DOM is still better than not printing, but the
+			// user must not be told a fresh export happened.
+			console.error('Failed to refresh the preview before export', error);
+			addToast('Exported PDF may not include the latest edits', 'warning');
+		}
+	}
+
 	async function exportAsPdf() {
+		await syncPreviewForPrint();
 		const tab = tabManager.activeTab;
 		// Mermaid bakes the screen theme into the SVG it emits, so a dark
 		// preview exports unreadable diagrams. Rebuild them light for the
