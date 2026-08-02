@@ -764,6 +764,116 @@ mod tests {
         );
         assert_eq!(escape_html_attribute("plain.png"), "plain.png");
     }
+
+    /// Creates `<root>/src<i>/<name>` holding `body` and returns its path.
+    fn drop_source(root: &Path, index: usize, name: &str, body: &[u8]) -> PathBuf {
+        let dir = root.join(format!("src{index}"));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(name);
+        fs::write(&file, body).unwrap();
+        file
+    }
+
+    fn drop_into_img(src: &Path, doc_dir: &Path) -> String {
+        copy_file_to_img_blocking(src.to_str().unwrap(), doc_dir.to_str().unwrap(), "img").unwrap()
+    }
+
+    #[test]
+    fn repeated_drops_of_the_same_name_never_overwrite_an_earlier_copy() {
+        // Three same-named images from different folders, dropped in the same
+        // second. The conflict name used to be a *second-resolution* timestamp
+        // that was never re-checked for existence, so drops #2 and #3 computed
+        // the identical name and #3 silently replaced the bytes behind a link
+        // the document had already been given.
+        let root = temp_path("imgcopy-repeat");
+        let doc_dir = root.join("doc");
+        fs::create_dir_all(&doc_dir).unwrap();
+        let bodies: [&[u8]; 3] = [b"first", b"second", b"third"];
+        let sources: Vec<PathBuf> = bodies
+            .iter()
+            .enumerate()
+            .map(|(i, body)| drop_source(&root, i, "a.png", body))
+            .collect();
+
+        let written: Vec<String> = sources.iter().map(|src| drop_into_img(src, &doc_dir)).collect();
+
+        let distinct: std::collections::HashSet<&String> = written.iter().collect();
+        assert_eq!(distinct.len(), written.len(), "two drops shared a name: {written:?}");
+        for (rel, body) in written.iter().zip(bodies.iter()) {
+            assert_eq!(
+                fs::read(doc_dir.join(rel)).unwrap(),
+                *body,
+                "{rel} no longer holds the image that was dropped for it",
+            );
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_conflicting_dotfile_name_does_not_grow_a_trailing_dot() {
+        // ".png" is a dotfile, not an extension: the frontend's drop filter
+        // reads the name with `split('.').pop()` and sees "png", so it lets it
+        // through, while Rust's `Path::extension()` returns None. The old
+        // format string appended the separator unconditionally, so the conflict
+        // name ended in a dot. Windows strips a trailing dot when creating the
+        // file, so the link written into the document named a file that does
+        // not exist on disk; mac/Linux keep the dot and the link resolves.
+        let root = temp_path("imgcopy-dotfile");
+        let doc_dir = root.join("doc");
+        fs::create_dir_all(&doc_dir).unwrap();
+        let first = drop_source(&root, 0, ".png", b"first");
+        let second = drop_source(&root, 1, ".png", b"second");
+
+        drop_into_img(&first, &doc_dir);
+        let rel = drop_into_img(&second, &doc_dir);
+
+        assert!(!rel.ends_with('.'), "conflict name ends in a dot: {rel}");
+        assert_eq!(fs::read(doc_dir.join(&rel)).unwrap(), b"second");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn concurrent_drops_of_the_same_name_each_get_their_own_file() {
+        // Two windows dropping the same image at the same moment: an
+        // `exists()` test followed by a separate copy leaves a window in which
+        // both callers see the name as free and one copy lands on top of the
+        // other.
+        const DROPS: usize = 8;
+        let root = temp_path("imgcopy-concurrent");
+        let doc_dir = root.join("doc");
+        fs::create_dir_all(&doc_dir).unwrap();
+        let sources: Vec<(PathBuf, Vec<u8>)> = (0..DROPS)
+            .map(|i| {
+                let body = format!("image-{i}").into_bytes();
+                (drop_source(&root, i, "a.png", &body), body)
+            })
+            .collect();
+
+        let written: Vec<(String, Vec<u8>)> = std::thread::scope(|scope| {
+            let handles: Vec<_> = sources
+                .iter()
+                .map(|(src, body)| {
+                    let doc_dir = doc_dir.clone();
+                    scope.spawn(move || (drop_into_img(src, &doc_dir), body.clone()))
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+
+        let distinct: std::collections::HashSet<&String> = written.iter().map(|(rel, _)| rel).collect();
+        assert_eq!(distinct.len(), DROPS, "concurrent drops shared a name: {written:?}");
+        for (rel, body) in &written {
+            assert_eq!(
+                &fs::read(doc_dir.join(rel)).unwrap(),
+                body,
+                "{rel} no longer holds the image that was dropped for it",
+            );
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 mod setup;
@@ -1944,6 +2054,33 @@ async fn copy_file_to_img(
     .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// How many conflict names to try before giving up. Chromium's download path
+/// reservation gives up after 100 for the same reason: past that, the user is
+/// better served by an error than by an unbounded directory scan.
+const MAX_IMG_NAME_ATTEMPTS: u32 = 100;
+
+/// Builds the `attempt`-th conflict name, e.g. `photo_1.png`, `photo_2.png`.
+///
+/// Every mainstream implementation resolves a name conflict with an
+/// incrementing counter — Chrome/Firefox downloads (`photo (1).png`), Windows
+/// Explorer (`photo (2).png`), macOS Finder (`photo 2.png`) — and none uses a
+/// timestamp. They disagree only on the decoration, so this picks the one that
+/// survives the destination: the name is about to be pasted into a Markdown
+/// link, where parentheses are metacharacters and spaces need escaping, while
+/// `_` needs neither. It is also the separator this function already used.
+///
+/// An empty extension gets no separator: `Path::extension()` is `None` for a
+/// dotfile such as `.png`, and appending the dot unconditionally produced
+/// `photo_1.` — a name Windows silently creates *without* the trailing dot,
+/// leaving the link written into the document pointing at nothing.
+fn img_conflict_name(stem: &str, ext: &str, attempt: u32) -> String {
+    if ext.is_empty() {
+        format!("{stem}_{attempt}")
+    } else {
+        format!("{stem}_{attempt}.{ext}")
+    }
+}
+
 fn copy_file_to_img_blocking(
     src_path: &str,
     parent_dir: &str,
@@ -1960,19 +2097,60 @@ fn copy_file_to_img_blocking(
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| "Invalid source filename".to_string())?;
+    let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-    // Handle name conflicts by appending timestamp if exists
+    let mut source = fs::File::open(src).map_err(|e| e.to_string())?;
+
+    // The destination name is claimed with `create_new`, which is a single
+    // atomic syscall (`O_EXCL` / `CREATE_NEW`): whoever creates the file wins
+    // and everyone else gets `AlreadyExists` and moves to the next name. The
+    // previous code tested `exists()` and then copied, so two drops that
+    // computed the same name — trivially, since the name carried a
+    // second-resolution timestamp that was never re-checked — both saw the
+    // name as free and the second overwrote an image the document already
+    // linked to.
+    //
+    // Residual races: `O_EXCL` is not reliable on old NFSv2 mounts, and
+    // nothing stops an outside process from deleting our file after we create
+    // it. Neither is a same-app data-loss path, which is what this guards.
+    // Streaming into the handle we just created, rather than `fs::copy`, also
+    // means the copy no longer inherits the source's permission bits — a
+    // read-only original used to produce a read-only file in `img/`.
     let mut dest_name = file_name.to_string();
-    let dest_path = img_dir.join(&dest_name);
-    if dest_path.exists() {
-        let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
-        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
-        dest_name = format!("{}_{}.{}", stem, chrono::Local::now().timestamp(), ext);
+    let mut attempt: u32 = 0;
+    loop {
+        let candidate = img_dir.join(&dest_name);
+        ensure_path_within_root(&root, &candidate)?;
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut dest) => {
+                // The name is ours; only the bytes can still fail. Drop the
+                // placeholder if they do, so a failed drop does not leave a
+                // truncated image behind under a name the user may reuse.
+                if let Err(e) = std::io::copy(&mut source, &mut dest) {
+                    drop(dest);
+                    let _ = fs::remove_file(&candidate);
+                    return Err(e.to_string());
+                }
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                attempt += 1;
+                if attempt > MAX_IMG_NAME_ATTEMPTS {
+                    return Err(format!(
+                        "Too many images named \"{}\" in this folder",
+                        file_name
+                    ));
+                }
+                dest_name = img_conflict_name(stem, ext, attempt);
+            }
+            Err(e) => return Err(e.to_string()),
+        }
     }
-
-    let final_dest = img_dir.join(&dest_name);
-    ensure_path_within_root(&root, &final_dest)?;
-    fs::copy(src, &final_dest).map_err(|e| e.to_string())?;
 
     let rel_path = if image_directory.is_empty() {
         dest_name
