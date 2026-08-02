@@ -137,7 +137,7 @@ test('custom copy keeps Monaco\'s whole-line copy on an empty selection', () => 
 	// (editor.emptySelectionClipboard) and Sublime Text behave the same. Since
 	// custom-copy overrides the native copy action, bailing out on an empty
 	// selection deleted the behaviour outright.
-	const copyAction = sliceBlock(editor, 'id: "custom-copy"', 'editor.addCommand');
+	const copyAction = sliceBlock(editor, 'id: "custom-copy"', 'id: "toggle-minimap"');
 
 	assert.doesNotMatch(
 		copyAction,
