@@ -65,7 +65,10 @@
 		} catch (e: any) {
 			error = e.toString();
 			installing = false;
-			if (error.includes('Access is denied') && (isInstalled ? installedAllUsers : allUsers)) {
+			// Match on the code the backend emits, not on a Windows error string:
+			// `Access is denied` only appears on English installs, so localized
+			// systems fell through to the raw exception text.
+			if (error.startsWith('ELEVATION_REQUIRED')) {
 				error = t('installer.accessDenied');
 			}
 		}
