@@ -23,8 +23,10 @@ function slice(source: string, from: string, to: string): string {
 test('serializeState writes window state only', () => {
 	const fn = slice(tabs, 'serializeState()', 'restoreState(');
 	assert.match(fn, /version: 2/);
-	// untitled tabs have no disk backing; they are resolved at close, never persisted
-	assert.match(fn, /filter\(\(t\) => t\.path !== ''\)/);
+	// untitled tabs have no disk backing; they are resolved at close, never
+	// persisted — and neither is the home tab, whose path is the sentinel
+	// string 'HOME' rather than a file (homeSentinelSnapshot.test.ts)
+	assert.match(fn, /filter\(\(t\) => hasRealFilePath\(t\.path\)\)/);
 	// no full-object spread and no content fields in the snapshot
 	assert.doesNotMatch(fn, /\.\.\.t/);
 	assert.doesNotMatch(fn, /rawContent/);
@@ -35,8 +37,9 @@ test('serializeState writes window state only', () => {
 
 test('restoreState rebuilds clean tabs and drops legacy untitled entries', () => {
 	const fn = slice(tabs, 'restoreState(', 'addTab(');
-	// path is the identity of a restored tab; entries without one are skipped
-	assert.match(fn, /saved\.path === ''\) continue;/);
+	// path is the identity of a restored tab; entries without a real file path
+	// are skipped, including 'HOME' entries left by older builds
+	assert.match(fn, /!hasRealFilePath\(saved\.path\)\) continue;/);
 	// restored tabs start clean; content is read from disk afterwards
 	assert.match(fn, /isDirty: false/);
 	assert.match(fn, /rawContent: ''/);
@@ -47,8 +50,13 @@ test('restoreState rebuilds clean tabs and drops legacy untitled entries', () =>
 test('startup restore reads content from disk, not from the snapshot', () => {
 	const restore = slice(session, 'async function restore', 'async function claimTransferredTab');
 	assert.match(restore, /read_file_content/);
-	// a missing file drops its tab instead of restoring a ghost
-	assert.match(restore, /options\.dropRestoredTab\(tab\.id\);/);
+	// a file that cannot be read keeps its tab and its place in the snapshot —
+	// dropping it here also dropped it from the snapshot written moments later
+	// (sessionRestoreResilience.test.ts)
+	assert.match(restore, /tabManager\.markTabContentUnavailable\(tab\.id\);/);
+	// dropping is reserved for an entry that is not a file at all — a legacy
+	// 'HOME' sentinel (homeSentinelSnapshot.test.ts)
+	assert.match(restore, /if \(!hasRealFilePath\(tab\.path\)\) \{\s*\n\s*options\.dropRestoredTab\(tab\.id\);/);
 	assert.match(viewer, /await windowSession\.restore\(\);/);
 });
 
@@ -93,17 +101,14 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 		session,
 		/localStorage\.getItem\(options\.windowStateKey\) \?\?\n?\s*localStorage\.getItem\(options\.legacyStateKey\)/,
 	);
-	// The shared helper clears the Rust snapshot and both localStorage keys;
-	// explicit exit and interrupted restore both use this same cleanup path.
+	// The shared helper clears the Rust snapshot and both localStorage keys.
+	// Only explicit exit uses it: a restore that goes wrong must never delete
+	// the record of which documents were open (interruptedSessionRestore.test.ts).
 	const discardStart = session.indexOf('async function discardPersistedState');
-	const discardScope = session.slice(discardStart, session.indexOf('\n\t}\n\n\tasync function persistState', discardStart));
+	const discardScope = session.slice(discardStart, session.indexOf('\n\t}\n\n\tfunction readProgress', discardStart));
 	assert.match(discardScope, /clear_window_state/);
 	assert.match(discardScope, /removeItem\(options\.windowStateKey\)/);
 	assert.match(discardScope, /removeItem\(options\.legacyStateKey\)/);
-	assert.match(
-		session,
-		/if \(localStorage\.getItem\(options\.restoreInProgressKey\)\)[\s\S]*?await discardPersistedState\(\)/,
-	);
 	// Explicit exit delegates to the same cleanup path.
 	const exitFn = viewer.slice(viewer.indexOf('async function appExit'));
 	const exitScope = exitFn.slice(0, exitFn.indexOf('\n\t}'));

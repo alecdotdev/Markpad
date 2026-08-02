@@ -1,6 +1,7 @@
 import { t } from '../utils/i18n.js';
 import { nextUntitledTitle } from '../utils/untitledTitle.js';
 import { settings } from './settings.svelte.js';
+import { hasRealFilePath } from '../utils/tabFileActions.js';
 import { buildTransferredTab, type TransferableTab } from '../utils/tabTransfer.js';
 import {
 	canGoBackInHistory,
@@ -88,6 +89,13 @@ class TabManager {
 	 * handled exclusively by the close dialogs, never smuggled through here.
 	 * Untitled tabs have no disk backing and are resolved at close, so they
 	 * are not persisted.
+	 *
+	 * The filter is `hasRealFilePath`, not `path !== ''`: the home screen sits
+	 * in a tab whose path is the sentinel string `'HOME'`, which passes the
+	 * non-empty test and used to be written into the snapshot. Restoring it
+	 * then asked the backend to read a file called `HOME`, and the failure left
+	 * a permanently unreadable phantom tab — or, when HOME was the only tab, a
+	 * window that came back empty.
 	 */
 	serializeState(): string {
 		const stateData = {
@@ -95,7 +103,7 @@ class TabManager {
 			windowTag: this.windowTag,
 			activeTabId: this.activeTabId,
 			tabs: this.tabs
-				.filter((t) => t.path !== '')
+				.filter((t) => hasRealFilePath(t.path))
 				.map((t) => ({
 					id: t.id,
 					path: t.path,
@@ -117,6 +125,11 @@ class TabManager {
 	 * the caller reads each file from disk afterwards. Also accepts the legacy
 	 * full-tab format, from which only the window-state fields are taken
 	 * (legacy untitled entries are dropped).
+	 *
+	 * Entries are accepted only for real file paths. Snapshots written by
+	 * earlier builds can still contain the `'HOME'` sentinel, so the read side
+	 * has to reject it too — otherwise those users keep restoring a tab that
+	 * can never be read.
 	 */
 	restoreState(jsonBuffer: string) {
 		try {
@@ -137,7 +150,7 @@ class TabManager {
 
 			const restored: Tab[] = [];
 			for (const saved of data.tabs) {
-				if (!saved || typeof saved.path !== 'string' || saved.path === '') continue;
+				if (!saved || typeof saved.path !== 'string' || !hasRealFilePath(saved.path)) continue;
 				const filename = saved.path.split('\\').pop()?.split('/').pop() || saved.path;
 				const fileHistory = createFileHistory(saved.path, '');
 				restored.push({
@@ -349,6 +362,30 @@ class TabManager {
 			tab.isDirty = false;
 			tab.isTruncated = isTruncated;
 		}
+	}
+
+	/**
+	 * The tab's file could not be read. The tab stays open with its path — the
+	 * file may be on a share that is temporarily down, a drive that is not
+	 * plugged in, or a file another program has locked, and none of those are
+	 * the user's decision to close a document — but its empty buffer is flagged
+	 * incomplete so nothing can mistake it for the document and write it back.
+	 *
+	 * This is the same flag the large-file preview read uses, deliberately: it
+	 * already means "this buffer is not the whole file", every writer already
+	 * refuses it, and `documentSession.ensureFullContent` already re-reads the
+	 * file and clears the flag the next time the user opens the tab for
+	 * editing — which is how a tab recovers once the drive is plugged back in.
+	 *
+	 * A dirty buffer is never touched: unsaved text the user typed outranks a
+	 * failed read of the file it came from.
+	 */
+	markTabContentUnavailable(id: string) {
+		const tab = this.tabs.find((t) => t.id === id);
+		if (!tab || tab.isDirty) return;
+		tab.rawContent = '';
+		tab.originalContent = '';
+		tab.isTruncated = true;
 	}
 
 	/**
