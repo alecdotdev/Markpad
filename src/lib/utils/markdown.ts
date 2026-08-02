@@ -1,17 +1,4 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import DOMPurify from "dompurify";
-
-export const highlightColorMap: Record<string, string> = {
-	default: "color-mix(in srgb, var(--color-accent-fg) 40%, transparent)",
-	yellow: "rgba(255, 208, 0, 0.4)",
-	orange: "rgba(255, 140, 0, 0.4)",
-	red: "rgba(255, 60, 60, 0.4)",
-	pink: "rgba(255, 105, 180, 0.4)",
-	purple: "rgba(164, 108, 244, 0.4)",
-	blue: "rgba(67, 138, 243, 0.4)",
-	cyan: "rgba(43, 185, 178, 0.4)",
-	green: "rgba(77, 177, 88, 0.4)",
-};
 
 const alertIcons: Record<string, string> = {
 	note: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-pencil"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>',
@@ -39,7 +26,7 @@ export function resolvePath(basePath: string, relativePath: string): string {
 	return parts.join("/");
 }
 
-export function isYoutubeLink(url: string): boolean {
+function isYoutubeLink(url: string): boolean {
 	return (
 		url.includes("youtube.com/watch") ||
 		url.includes("youtube.com/embed/") ||
@@ -49,7 +36,7 @@ export function isYoutubeLink(url: string): boolean {
 	);
 }
 
-export function getYoutubeId(url: string): string | null {
+function getYoutubeId(url: string): string | null {
 	const match = url.match(
 		/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/,
 	);
@@ -68,32 +55,6 @@ function replaceWithYoutubeLink(element: Element, videoId: string, href: string)
 	link.appendChild(thumbnail);
 
 	element.replaceWith(link);
-}
-
-export function getLanguage(path: string): string {
-	if (!path) return "markdown";
-	const ext = path.split(".").pop()?.toLowerCase();
-	switch (ext) {
-		case "js":
-		case "jsx":
-			return "javascript";
-		case "ts":
-		case "tsx":
-			return "typescript";
-		case "html":
-			return "html";
-		case "css":
-			return "css";
-		case "json":
-			return "json";
-		case "md":
-		case "markdown":
-		case "mdown":
-		case "mkd":
-			return "markdown";
-		default:
-			return "plaintext";
-	}
 }
 
 function processInlineMath(root: Element) {
@@ -723,146 +684,4 @@ export function processMarkdownHtml(
 	});
 
 	return doc.body.innerHTML;
-}
-
-export async function renderRichContent(
-	markdownBody: HTMLElement,
-	hljs: any,
-	katex: any,
-	renderMathInElement: any,
-	mermaid: any,
-	theme: string,
-	invoke: (cmd: string, args?: any) => Promise<any>,
-) {
-	if (!hljs || !renderMathInElement || !mermaid) return;
-
-	const isSystemDark = window.matchMedia(
-		"(prefers-color-scheme: dark)",
-	).matches;
-	const datasetThemeType = document.documentElement.dataset.themeType;
-	const isDark =
-		datasetThemeType === "dark" ||
-		theme === "dark" ||
-		(theme === "system" && isSystemDark);
-	const effectiveTheme = isDark ? "dark" : "neutral";
-	mermaid.initialize({ startOnLoad: false, theme: effectiveTheme });
-
-	const codeBlocks = Array.from(markdownBody.querySelectorAll("pre code"));
-	for (const block of codeBlocks) {
-		const codeEl = block as HTMLElement;
-		const preEl = codeEl.parentElement as HTMLPreElement;
-
-		if (codeEl.classList.contains("language-mermaid")) {
-			try {
-				const mermaidCode = codeEl.textContent || "";
-				const id = `mermaid-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-				const { svg } = await mermaid.render(id, mermaidCode);
-				const container = document.createElement("div");
-				container.className = "mermaid-diagram";
-				container.innerHTML = DOMPurify.sanitize(svg, {
-					ADD_TAGS: ["foreignObject"],
-					ADD_ATTR: ["dominant-baseline", "text-anchor"],
-				});
-				preEl.replaceWith(container);
-			} catch (error) {
-				console.error("Failed to render Mermaid diagram:", error);
-				const errorDiv = document.createElement("div");
-				errorDiv.className = "mermaid-error";
-				errorDiv.style.color = "red";
-				errorDiv.style.padding = "1em";
-				errorDiv.textContent = `Error rendering Mermaid diagram: ${error}`;
-				preEl.replaceWith(errorDiv);
-			}
-			continue;
-		}
-
-		const hasExplicitLang = Array.from(codeEl.classList).some((c) =>
-			c.startsWith("language-"),
-		);
-
-		if (hasExplicitLang) {
-			hljs.highlightElement(codeEl);
-		}
-
-		const langClass = Array.from(codeEl.classList).find((c) =>
-			c.startsWith("language-"),
-		);
-
-		if (preEl && preEl.tagName === "PRE") {
-			preEl.querySelectorAll(".lang-label").forEach((l) => l.remove());
-			const codeContent = codeEl.textContent || "";
-			const existingWrapper = preEl.parentElement?.classList.contains(
-				"code-block-shell",
-			)
-				? (preEl.parentElement as HTMLDivElement)
-				: null;
-			existingWrapper
-				?.querySelectorAll(":scope > .lang-label")
-				.forEach((l) => l.remove());
-
-			const wrapper = existingWrapper ?? document.createElement("div");
-			if (!existingWrapper) {
-				wrapper.className = "code-block-shell";
-				preEl.replaceWith(wrapper);
-				wrapper.appendChild(preEl);
-			}
-
-			const copyCode = () => {
-				const codeToCopy = codeContent.replace(/\n$/, "");
-				invoke("clipboard_write_text", { text: codeToCopy })
-					.then(() => {
-						const originalContent = label.innerHTML;
-						label.innerHTML = "Copied!";
-						label.classList.add("copied");
-						setTimeout(() => {
-							label.innerHTML = originalContent;
-							label.classList.remove("copied");
-						}, 1500);
-					})
-					.catch((err) => {
-						console.error("Failed to copy code:", err);
-					});
-			};
-
-			const label = document.createElement("button");
-			label.className = "lang-label";
-			label.title = "Click to copy code";
-			label.onclick = copyCode;
-
-			if (hasExplicitLang && langClass) {
-				label.textContent = langClass.replace("language-", "");
-				wrapper.appendChild(label);
-			} else {
-				label.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
-				wrapper.appendChild(label);
-			}
-		}
-	}
-
-	if (katex) {
-		const mathElements = markdownBody.querySelectorAll("[data-math]");
-		for (const el of Array.from(mathElements)) {
-			const isDisplay = el.getAttribute("data-math") === "display";
-			const mathSource = el.getAttribute("data-math-source") || el.textContent || "";
-			try {
-				katex.render(mathSource, el as HTMLElement, {
-					displayMode: isDisplay,
-					throwOnError: false,
-				});
-			} catch (e) {
-				console.error("KaTeX rendering error:", e);
-			}
-		}
-	}
-
-	if (renderMathInElement) {
-		renderMathInElement(markdownBody, {
-			delimiters: [
-				{ left: "$$", right: "$$", display: true },
-				{ left: "\\(", right: "\\)", display: false },
-				{ left: "\\[", right: "\\]", display: true },
-			],
-			throwOnError: false,
-		});
-	}
 }

@@ -1180,13 +1180,6 @@
 		return 1;
 	}
 
-	function getEditorScrollMax() {
-		if (!editor) return 0;
-
-		const layout = editor.getLayoutInfo();
-		return Math.max(0, editor.getScrollHeight() - layout.height);
-	}
-
 	function getEditorContentScrollMax() {
 		if (!editor) return 0;
 
@@ -1525,9 +1518,7 @@
 	export const getValue = () => editor?.getValue() || "";
 	export const setValue = (val: string) => editor?.setValue(val);
 	export const focus = () => editor?.focus();
-	export const getViewState = () => editor?.saveViewState();
 	export const restoreViewState = (state: any) => editor?.restoreViewState(state);
-	export const revealLine = (line: number) => editor?.revealLineInCenter(line);
 </script>
 
 <div class="editor-outer">

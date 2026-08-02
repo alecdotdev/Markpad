@@ -86,9 +86,6 @@ const SANITIZE_CALL_SITES: Record<string, number> = {
 	// DOMPurify keeps mermaid's `<style>` under the diagram config and strips it
 	// under MARKDOWN_SANITIZE_CONFIG, which would flatten every diagram.
 	'src/lib/MarkdownViewer.svelte': 1,
-	// Dead export kept in step with the viewer's copy of the same diagram
-	// sanitizer; nothing imports it (see markdown.ts renderRichContent).
-	'src/lib/utils/markdown.ts': 1,
 };
 
 function walk(dir: string): string[] {

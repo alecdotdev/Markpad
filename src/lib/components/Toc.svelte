@@ -169,9 +169,14 @@
 	}
 
 	$effect(() => {
-		if (markdownBody) {
-			markdownBody.addEventListener('scroll', handleScroll, { passive: true });
-			return () => markdownBody.removeEventListener('scroll', handleScroll);
+		// Capture the element the listener was attached to: the cleanup must
+		// detach from that same node, not from whatever `markdownBody` points at
+		// when the effect re-runs (a changed prop would leak the old listener, a
+		// null prop would throw).
+		const el: HTMLElement | null = markdownBody;
+		if (el) {
+			el.addEventListener('scroll', handleScroll, { passive: true });
+			return () => el.removeEventListener('scroll', handleScroll);
 		}
 	});
 
