@@ -876,7 +876,7 @@
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 									</div>
-									<span class="slider-value">px</span>
+									<span class="slider-value">px · {EDITOR_FONT_SIZE_RANGE.min}–{EDITOR_FONT_SIZE_RANGE.max} · {t('settings.default', settings.language)} {EDITOR_FONT_SIZE_RANGE.default}</span>
 								</div>
 							</div>
 
@@ -907,7 +907,7 @@
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 									</div>
-									<span class="slider-value">chars</span>
+									<span class="slider-value">chars · {EDITOR_MAX_WIDTH_RANGE.min}–{EDITOR_MAX_WIDTH_RANGE.max} · {t('settings.default', settings.language)} {EDITOR_MAX_WIDTH_RANGE.default}</span>
 								</div>
 							</div>
 
@@ -1101,7 +1101,7 @@
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 									</div>
-									<span class="slider-value">px</span>
+									<span class="slider-value">px · {PREVIEW_FONT_SIZE_RANGE.min}–{PREVIEW_FONT_SIZE_RANGE.max} · {t('settings.default', settings.language)} {PREVIEW_FONT_SIZE_RANGE.default}</span>
 								</div>
 							</div>
 
@@ -1152,7 +1152,7 @@
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 									</div>
-									<span class="slider-value">px</span>
+									<span class="slider-value">px · {CODE_FONT_SIZE_RANGE.min}–{CODE_FONT_SIZE_RANGE.max} · {t('settings.default', settings.language)} {CODE_FONT_SIZE_RANGE.default}</span>
 								</div>
 							</div>
 						</div>
