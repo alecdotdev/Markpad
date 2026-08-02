@@ -8,7 +8,17 @@ use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)!\[\[(.*?)\]\]").unwrap());
+/// `![[target]]` / `![[target|size]]`. Deliberately NOT `(?s)`: `.` must not
+/// match a newline, so the pattern cannot pair a lone `![[` in prose with the
+/// `]]` of a real embed several lines below. Obsidian's embed syntax does not
+/// span lines either, so a stray opener is simply not an embed.
+///
+/// This is a line-count question, not only a correctness one — see the line
+/// contract in `mod tests`. With `(?s)` the lazy `.*?` swallowed every line in
+/// between into an `<img src>`, destroying the prose *and* renumbering every
+/// task checkbox below it. Not matching (rather than matching and bailing out)
+/// also leaves the later, well-formed embed free to render.
+static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[(.*?)\]\]").unwrap());
 /// `[[target]]` / `[[target|alias]]` where the target names a heading — either
 /// in this document (`#Setup`) or in another file (`Notes#Setup`). The `#` is
 /// required: a wikilink without one is a bare note link, which Markpad has
@@ -19,9 +29,19 @@ static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)!\
 /// The inner text stops at the first `]`, as the narrower `[[#…]]` pattern
 /// this replaced also did.
 static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]]*#[^\]]*)\]\]").unwrap());
-static BLOCK_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)\s+\^([a-zA-Z0-9_-]+)$").unwrap());
+/// ` ^block-id` at the end of a line. The leading whitespace is captured
+/// because Obsidian also accepts a block id alone on the line after the block
+/// it names, and `\s+` then spans the newline: the replacement has to put that
+/// newline back, or the anchor is folded onto the previous line and every line
+/// below it moves up one (see the line contract in `mod tests`).
+static BLOCK_ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)(\s+)\^([a-zA-Z0-9_-]+)$").unwrap());
 static HIGHLIGHT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"==([^=\n]+)==").unwrap());
-static INLINE_FOOTNOTE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\^\[([^\]]+)\]").unwrap());
+/// Obsidian's inline footnote `^[text]`, which is a single-line form — the
+/// multi-line spelling is the separate `[^ref]` + `[^ref]: …` pair. Excluding
+/// the newline also keeps the line contract: collapsing a wrapped `^[…]` into
+/// one `[^ifn-N]` reference renumbered every line below it.
+static INLINE_FOOTNOTE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\^\[([^\]\n]+)\]").unwrap());
 static TASK_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"<li data-sourcepos="(?<sourcepos>(?<line>\d+):\d+-\d+:\d+)">(?<input><input type="checkbox" disabled=""(?: checked="")? />)"#,
@@ -1233,6 +1253,281 @@ mod tests {
 
         fs::remove_dir_all(root).unwrap();
     }
+
+    // ---------------------------------------------------------------------
+    // The line-number contract of `convert_markdown`
+    //
+    // `convert_markdown` preprocesses the raw buffer, renders the *result*
+    // with `sourcepos = true`, and hands those line numbers to the frontend.
+    // The frontend then writes task-checkbox toggles back into the *raw*
+    // buffer at that line number. So every preprocessing step has to map
+    // input line N to output line N; a step that quietly eats or inserts a
+    // line makes the reading-mode checkbox rewrite a different line of the
+    // user's document (issue #352).
+    //
+    // A step MAY append after the last input line — the inline-footnote step
+    // parks its `[^ifn-N]: …` definitions there, which cannot shift the
+    // number of any line that already existed. It must never insert or drop
+    // a line inside the document.
+    //
+    // ⚠️ EVERY preprocessing step of `convert_markdown` MUST be registered in
+    // `line_preserving_transforms()` below. It is not optional and it is not
+    // best-effort: `every_convert_markdown_preprocessing_step_is_registered`
+    // re-reads this source file, extracts the calls `convert_markdown`
+    // actually makes, and fails if one of them is missing from the list.
+    // Adding a fifth transform without registering it turns that test red.
+    // ---------------------------------------------------------------------
+
+    type LineTransform = fn(&str) -> String;
+
+    /// The registry the contract test walks. Add every new preprocessing step.
+    fn line_preserving_transforms() -> Vec<(&'static str, LineTransform)> {
+        vec![
+            (
+                "process_parenthesized_autolinks",
+                (|s| process_parenthesized_autolinks(s).into_owned()) as LineTransform,
+            ),
+            (
+                "process_internal_embeds",
+                (|s| process_internal_embeds(s).into_owned()) as LineTransform,
+            ),
+            (
+                "process_wikilinks",
+                (|s| process_wikilinks(s).into_owned()) as LineTransform,
+            ),
+            (
+                "protect_display_math_underscores",
+                protect_display_math_underscores as LineTransform,
+            ),
+        ]
+    }
+
+    /// Documents exercising every syntax the preprocessing steps claim, plus
+    /// the malformed spellings of each one — a lone `![[`, an unterminated
+    /// `^[`, a wikilink split over two lines — because those are exactly the
+    /// inputs where a lazy or newline-crossing pattern runs away.
+    const LINE_CONTRACT_CORPUS: &[&str] = &[
+        // A stray embed opener with a real embed further down.
+        "Prose with ![[ a stray opener.\n\n- [ ] task one\n\nLater an image ![[real.png]] here.\n",
+        // An inline footnote whose text wraps onto a second line.
+        "Some claim^[See the long explanation\nthat wraps to a second line] and more.\n\n- [ ] task\n",
+        // A block id sitting on its own line, Obsidian's block-reference form.
+        "A quotable paragraph.\n^blockid\n\n- [ ] task\n",
+        // A block id at the end of its own line.
+        "A quotable paragraph. ^blockid\n\n- [ ] task\n",
+        // Every well-formed spelling at once.
+        "![[pic.png|300x200]] [[#Setup|jump]] [[Notes#Setup]] ==mark== text^[note]\n\n- [ ] task\n",
+        // A wikilink split over two lines (already guarded, kept as a pin).
+        "[[#first\nsecond|alias]]\n- [ ] task\n",
+        // Code fences and spans, which every step must leave alone.
+        "```\n![[inside.md]]\n^[inside]\n==inside==\n```\n\n`==x==` ![[out.png]]\n",
+        // Unclosed fence, longer fences, tilde fences.
+        "~~~\n![[a.md]]\n\n````\n```\n![[b.md]]\n````\n\n```\n![[never-closed.md]]\n",
+        // Parenthesized autolink with nested parentheses.
+        "See (https://example.com/a(b)c)text here\n\n- [ ] task\n",
+        // Display math with underscores.
+        "$$\na_b\nc_d\n$$\n\nx^[note] and $$y_1$$\n\n- [ ] task\n",
+        // Headings, quotes, tables, nested and quoted tasks.
+        "# Head\n\n> quote ^qid\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n- [ ] task\n  - [x] nested\n\n> - [ ] quoted\n",
+        // Unbalanced brackets and carets in prose.
+        "A ^[ dangling footnote opener and a [[ dangling wikilink\n\n- [ ] task\n",
+        // Multibyte content — offsets are bytes, line numbers are not.
+        "中文段落 ![[图片.png]] ^[脚注]\n\n- [ ] 任务\n",
+        // Blank lines, CRLF, and no trailing newline.
+        "one\r\ntwo ![[x.png]]\r\n\r\n- [ ] task",
+    ];
+
+    const LINE_CONTRACT_SENTINEL: &str = "MPLINECONTRACTSENTINEL";
+
+    fn sentinel_line(text: &str) -> Option<usize> {
+        text.lines()
+            .position(|line| line.contains(LINE_CONTRACT_SENTINEL))
+    }
+
+    /// Asserts that `transform` keeps a marker line at the same line number.
+    ///
+    /// The marker is appended to every line-prefix of `input`, not just to
+    /// the whole document: a step that drops one line and inserts another
+    /// would leave the total unchanged, but no prefix boundary between the
+    /// two survives. Checking the sentinel rather than the raw line count is
+    /// what lets the inline-footnote step append its definitions afterwards.
+    fn assert_transform_preserves_line_numbers(
+        name: &str,
+        transform: LineTransform,
+        input: &str,
+    ) {
+        let lines: Vec<&str> = input.split_inclusive('\n').collect();
+        for take in 0..=lines.len() {
+            let mut probe = lines[..take].concat();
+            if !probe.is_empty() && !probe.ends_with('\n') {
+                probe.push('\n');
+            }
+            probe.push_str(LINE_CONTRACT_SENTINEL);
+            probe.push('\n');
+
+            let expected = sentinel_line(&probe).expect("the probe carries the sentinel");
+            let output = transform(&probe);
+            let actual = sentinel_line(&output).unwrap_or_else(|| {
+                panic!(
+                    "{name} swallowed the sentinel line entirely\n  input:  {probe:?}\n  output: {output:?}"
+                )
+            });
+            assert_eq!(
+                expected, actual,
+                "{name} moved line {expected} to line {actual}\n  input:  {probe:?}\n  output: {output:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn every_preprocessing_step_preserves_source_line_numbers() {
+        for (name, transform) in line_preserving_transforms() {
+            for input in LINE_CONTRACT_CORPUS {
+                assert_transform_preserves_line_numbers(name, transform, input);
+            }
+        }
+    }
+
+    #[test]
+    fn the_whole_preprocessing_pipeline_preserves_source_line_numbers() {
+        // Individually line-preserving steps could still compose badly: one
+        // step's output is the next one's input, so a rewrite that creates a
+        // new `^[` or `![[` opener would only show up here.
+        let pipeline: LineTransform = |content| {
+            let autolinks = process_parenthesized_autolinks(content);
+            let embeds = process_internal_embeds(&autolinks);
+            let links = process_wikilinks(&embeds);
+            protect_display_math_underscores(&links)
+        };
+        for input in LINE_CONTRACT_CORPUS {
+            assert_transform_preserves_line_numbers("the preprocessing pipeline", pipeline, input);
+        }
+    }
+
+    #[test]
+    fn every_convert_markdown_preprocessing_step_is_registered() {
+        // Re-reads this file so that a fifth preprocessing step cannot be
+        // added to `convert_markdown` without also being put under the line
+        // contract. The needle is assembled at runtime so that it does not
+        // match this test's own source text.
+        //
+        // Line endings are normalised first. Git checks this file out with
+        // CRLF wherever `core.autocrlf` is on — the default on Windows, and
+        // what the Windows CI runner does — and the `\n`-anchored needles
+        // below are about the shape of the source, not about how the working
+        // tree happens to store it.
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
+        let needle = format!("\nfn {}(content: &str) -> String {{", "convert_markdown");
+        let start = source
+            .find(&needle)
+            .expect("convert_markdown must keep its `&str -> String` signature");
+        let rest = &source[start + needle.len()..];
+        let body = &rest[..rest.find("\n}\n").expect("convert_markdown must be terminated")];
+
+        // Bare `name(` calls: `.method(` and `Type::assoc(` are excluded by
+        // the leading character class.
+        let call = Regex::new(r"(?:^|[^A-Za-z0-9_:.])([a-z_][a-z0-9_]*)\s*\(").unwrap();
+        // Calls in `convert_markdown` that are not preprocessing steps.
+        // `annotate_task_checkboxes` runs on the rendered HTML, after
+        // sourcepos numbers exist; it is the fail-safe for this contract
+        // rather than a participant in it.
+        let not_a_transform = ["markdown_to_html", "annotate_task_checkboxes"];
+
+        let mut found: Vec<String> = call
+            .captures_iter(body)
+            .map(|caps| caps[1].to_string())
+            .filter(|name| !not_a_transform.contains(&name.as_str()))
+            .collect();
+        found.sort();
+        found.dedup();
+
+        let mut registered: Vec<String> = line_preserving_transforms()
+            .into_iter()
+            .map(|(name, _)| name.to_string())
+            .collect();
+        registered.sort();
+
+        assert_eq!(
+            found, registered,
+            "convert_markdown's preprocessing steps and the line-contract \
+             registry have drifted apart — register every new step in \
+             line_preserving_transforms() (or, if the call is not a \
+             preprocessing step, add it to not_a_transform and say why)",
+        );
+    }
+
+    #[test]
+    fn a_stray_embed_opener_leaves_the_document_and_its_tasks_intact() {
+        let markdown =
+            "Prose with ![[ a stray opener.\n\n- [ ] task one\n\nLater an image ![[real.png]] here.\n";
+        let html = convert_markdown(markdown);
+        assert!(
+            html.contains("task one"),
+            "the stray opener swallowed the prose: {html}",
+        );
+        assert!(
+            html.contains("data-task-checkbox"),
+            "the stray opener shifted the task source position: {html}",
+        );
+        // A real embed further down still renders.
+        assert!(html.contains("<img src=\"real.png\""), "got: {html}");
+    }
+
+    #[test]
+    fn a_multiline_inline_footnote_does_not_shift_task_source_positions() {
+        let html = convert_markdown(
+            "Some claim^[See the long explanation\nthat wraps to a second line] and more.\n\n- [ ] task\n",
+        );
+        assert!(
+            html.contains("data-task-checkbox"),
+            "the multiline inline footnote shifted the task source position: {html}",
+        );
+    }
+
+    #[test]
+    fn a_block_id_on_its_own_line_does_not_shift_task_source_positions() {
+        let markdown = "A quotable paragraph.\n^blockid\n\n- [ ] task\n";
+        let html = convert_markdown(markdown);
+        assert!(
+            html.contains("id=\"blockid\""),
+            "the block id anchor disappeared: {html}",
+        );
+        assert!(
+            html.contains("data-task-checkbox"),
+            "the block id shifted the task source position: {html}",
+        );
+    }
+
+    #[test]
+    fn task_checkboxes_stay_inert_when_the_html_and_the_buffer_disagree() {
+        // The fail-safe in `annotate_task_checkboxes`. Feed it HTML whose
+        // sourcepos numbers came from one document and the raw buffer of a
+        // different one — the shape a broken line contract produces. Line 3
+        // of the buffer is a fence, so annotating would let a click write a
+        // "- [x]" marker into a code block (issue #352).
+        let rendered =
+            convert_markdown("intro paragraph\n\n- [ ] task\n").replace(" data-task-checkbox=\"\"", "");
+        assert!(
+            rendered.contains("data-sourcepos=\"3:1-3:10\"><input type=\"checkbox\""),
+            "expected an unannotated task input on line 3: {rendered}",
+        );
+
+        let mismatched = annotate_task_checkboxes(
+            rendered.clone(),
+            "- [ ] real task\n\n```\nnot a task\n```\n",
+        );
+        assert!(
+            !mismatched.contains("data-task-checkbox"),
+            "the fail-safe let a checkbox through onto a line that is not a task: {mismatched}",
+        );
+
+        // Control: the same HTML against the buffer it was rendered from.
+        let matching = annotate_task_checkboxes(rendered, "intro paragraph\n\n- [ ] task\n");
+        assert!(
+            matching.contains("data-task-checkbox"),
+            "the fail-safe rejected a genuine task line: {matching}",
+        );
+    }
 }
 
 mod setup;
@@ -1611,10 +1906,15 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
             if in_code_region(&regions, full.start()) {
                 return full.as_str().to_string();
             }
-            let id = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            // Re-emit the matched whitespace verbatim. For the common
+            // trailing form (" ^id") that is the same single space this used
+            // to hardcode; for an id on its own line it is the newline that
+            // keeps the following lines at their original numbers.
+            let leading = caps.get(1).map(|m| m.as_str()).unwrap_or(" ");
+            let id = caps.get(2).map(|m| m.as_str()).unwrap_or("");
             format!(
-                " <a id=\"{}\" class=\"block-id-anchor\" data-label=\"{}\"></a>",
-                id, id
+                "{}<a id=\"{}\" class=\"block-id-anchor\" data-label=\"{}\"></a>",
+                leading, id, id
             )
         });
         processed = Cow::Owned(replaced.into_owned());
@@ -1748,6 +2048,12 @@ fn protect_display_math_underscores(content: &str) -> String {
         .join("$$")
 }
 
+/// ⚠️ Every preprocessing step below is bound by a line-number contract:
+/// `sourcepos` describes the *preprocessed* text, but the frontend uses those
+/// line numbers to edit the *raw* buffer, so input line N must stay output
+/// line N. The contract, the rationale and the tests that enforce it live in
+/// `mod tests` under "The line-number contract of `convert_markdown`" —
+/// a new step here must also be registered in `line_preserving_transforms()`.
 #[tauri::command]
 fn convert_markdown(content: &str) -> String {
     let processed_autolinks = process_parenthesized_autolinks(content);
@@ -1778,6 +2084,28 @@ fn convert_markdown(content: &str) -> String {
     annotate_task_checkboxes(html, content)
 }
 
+/// Marks the rendered task checkboxes the frontend is allowed to toggle.
+///
+/// `markdown` is the **raw, unpreprocessed** buffer — deliberately, and not a
+/// bug. This is the fail-safe for the line contract described in `mod tests`.
+///
+/// The `data-sourcepos` line numbers in `html` describe the *preprocessed*
+/// text, while a click on the checkbox makes the frontend rewrite that line
+/// number of the *raw* buffer (`documentSession.toggleTaskCheckbox`). The two
+/// only agree while every preprocessing step preserves line numbers. Checking
+/// the raw buffer here is what turns a broken step into "the checkbox stays
+/// disabled" instead of "the checkbox writes a `- [x]` marker into whatever
+/// happens to sit on that line" — the P0 that issue #352 fixed, where the
+/// marker could land inside a fenced code block.
+///
+/// So do NOT "unify" this with the preprocessed text that produced the HTML.
+/// Passing `&processed_links` here would make the two sides agree by
+/// definition, delete the guard, and turn every future line-count regression
+/// straight into document corruption. Keep the contract honest in the
+/// transforms instead; `every_preprocessing_step_preserves_source_line_numbers`
+/// is what enforces it, and
+/// `task_checkboxes_stay_inert_when_the_html_and_the_buffer_disagree` pins
+/// this guard.
 fn annotate_task_checkboxes(html: String, markdown: &str) -> String {
     let markdown_lines = markdown.lines().collect::<Vec<_>>();
 
