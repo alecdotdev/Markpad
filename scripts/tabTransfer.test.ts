@@ -37,6 +37,7 @@ function makeTab(overrides: Partial<Tab> = {}): Tab {
 		isSplit: true,
 		splitRatio: 0.3,
 		isScrollSynced: true,
+		hasReplacementChars: false,
 		...overrides,
 	};
 }

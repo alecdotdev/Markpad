@@ -80,8 +80,8 @@ function reset() {
 /** Open a >50KB file and leave the background full read pending forever. */
 async function openPartial(path = '/docs/big.md') {
 	handleInvoke = (cmd) => {
-		if (cmd === 'open_markdown_preview') return ['<p>preview</p>', PARTIAL, false];
-		if (cmd === 'read_file_content') return new Promise(() => {});
+		if (cmd === 'open_markdown_preview') return ['<p>preview</p>', PARTIAL, false, false];
+		if (cmd === 'read_file_content_checked') return new Promise(() => {});
 		throw new Error(`unexpected invoke: ${cmd}`);
 	};
 	const session = makeSession();
@@ -104,7 +104,7 @@ test('a partially loaded buffer is marked as incomplete', async () => {
 test('a fully loaded buffer is not marked as incomplete', async () => {
 	reset();
 	handleInvoke = (cmd) => {
-		if (cmd === 'open_markdown_preview') return ['<p>full</p>', FULL, true];
+		if (cmd === 'open_markdown_preview') return ['<p>full</p>', FULL, true, false];
 		throw new Error(`unexpected invoke: ${cmd}`);
 	};
 	const session = makeSession();
@@ -151,7 +151,7 @@ test('completing a partial buffer replaces it with the whole file and unblocks s
 test('completing a buffer that is already whole does not re-read the file', async () => {
 	reset();
 	handleInvoke = (cmd) => {
-		if (cmd === 'open_markdown_preview') return ['<p>full</p>', FULL, true];
+		if (cmd === 'open_markdown_preview') return ['<p>full</p>', FULL, true, false];
 		throw new Error(`unexpected invoke: ${cmd}`);
 	};
 	const session = makeSession();
@@ -186,8 +186,8 @@ test('a load into an editable pane reads the whole file instead of the preview s
 	// arms auto-save on it.
 	reset();
 	handleInvoke = (cmd) => {
-		if (cmd === 'open_markdown_preview') return ['<p>preview</p>', PARTIAL, false];
-		if (cmd === 'read_file_content') return FULL;
+		if (cmd === 'open_markdown_preview') return ['<p>preview</p>', PARTIAL, false, false];
+		if (cmd === 'read_file_content_checked') return [FULL, false];
 		throw new Error(`unexpected invoke: ${cmd}`);
 	};
 	tabManager.addTab('/docs/big.md', '');
@@ -210,8 +210,8 @@ test('toggling a task checkbox completes the buffer before writing it', async ()
 	const doc = `- [ ] first\n\n${'y'.repeat(PREVIEW_BYTES)}\n\n- [ ] last\n`;
 	const partial = doc.slice(0, PREVIEW_BYTES);
 	handleInvoke = (cmd) => {
-		if (cmd === 'open_markdown_preview') return ['<p>preview</p>', partial, false];
-		if (cmd === 'read_file_content') return new Promise(() => {});
+		if (cmd === 'open_markdown_preview') return ['<p>preview</p>', partial, false, false];
+		if (cmd === 'read_file_content_checked') return new Promise(() => {});
 		throw new Error(`unexpected invoke: ${cmd}`);
 	};
 	const session = makeSession();

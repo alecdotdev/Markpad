@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { tabManager } from '../stores/tabs.svelte.js';
 import { validateTransferPayload, type TransferableTab } from '../utils/tabTransfer.js';
 
 type RestoredTab = {
@@ -76,9 +77,15 @@ export function createWindowSession(options: WindowSessionOptions) {
 				options.restoreState(savedData);
 				for (const tab of options.restoredTabs()) {
 					try {
-						const raw = (await invoke('read_file_content', { path: tab.path })) as string;
+						// `_checked`, because restore fills an editable buffer: reads
+						// decode leniently, so a file in a legacy encoding comes back
+						// as U+FFFD mojibake that must never be written over its
+						// source. Without this, reopening the app laundered the flag
+						// away and the next auto-save destroyed the document.
+						const [raw, lossy] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean];
 						if (options.isDisposed()) return;
 						await options.applyRestoredContent(tab.id, raw);
+						tabManager.setTabDecodedLossy(tab.id, lossy);
 						if (options.isDisposed()) return;
 					} catch (error) {
 						if (options.isDisposed()) return;

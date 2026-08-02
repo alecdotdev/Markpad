@@ -144,20 +144,40 @@ pub(crate) fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Text decoded from a file, together with the fidelity of that decode.
+struct DecodedText {
+    content: String,
+    /// `true` when the bytes were not valid UTF-8 and every offending byte was
+    /// replaced with U+FFFD. `content` is then a destructive rendering of the
+    /// file: the original bytes cannot be recovered from it, so writing it
+    /// back over the source file destroys the document permanently. This is
+    /// known exactly once — at the moment of decoding — so it travels to the
+    /// frontend with the text it describes, and the frontend refuses that
+    /// write (see `documentSession.saveContent`).
+    lossy: bool,
+}
+
 /// Decode `bytes` as UTF-8, substituting U+FFFD for invalid sequences rather
 /// than rejecting the whole file. `read_to_string` refuses a document on its
 /// first invalid byte, which made a legacy-encoded (GBK/Big5/Shift-JIS) file
 /// openable or not purely by size: the truncated-preview path has always
 /// decoded leniently, so the same file failed at 50 KB and succeeded at
-/// 51 KB. Every read path now uses one decoder.
-fn decode_utf8_lossy(bytes: Vec<u8>) -> String {
+/// 51 KB. Every read path now uses one decoder — and every read path reports
+/// whether that decoder had to destroy anything.
+fn decode_utf8_lossy(bytes: Vec<u8>) -> DecodedText {
     match String::from_utf8(bytes) {
-        Ok(text) => text,
-        Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
+        Ok(content) => DecodedText {
+            content,
+            lossy: false,
+        },
+        Err(error) => DecodedText {
+            content: String::from_utf8_lossy(error.as_bytes()).into_owned(),
+            lossy: true,
+        },
     }
 }
 
-fn read_to_string_lossy(path: &str) -> std::io::Result<String> {
+fn read_to_string_lossy(path: &str) -> std::io::Result<DecodedText> {
     Ok(decode_utf8_lossy(fs::read(path)?))
 }
 
@@ -397,9 +417,106 @@ mod tests {
 
         let decoded = read_to_string_lossy(path.to_str().unwrap())
             .expect("lenient decoding must open the file instead of failing");
-        assert!(decoded.contains('\u{FFFD}'), "got: {decoded:?}");
+        assert!(decoded.content.contains('\u{FFFD}'), "got: {:?}", decoded.content);
 
         fs::remove_file(path).unwrap();
+    }
+
+    // --- Decode fidelity ------------------------------------------------
+    //
+    // Opening these files leniently is deliberate (above). What must never
+    // follow is writing the result back: U+FFFD is not reversible, so an
+    // auto-save 1.5s after the first keystroke would destroy a document that
+    // was merely in another encoding. Every read path therefore reports
+    // whether its decode was destructive, and the frontend refuses that write
+    // (documentSession.saveContent). These pin the reporting half.
+    const GBK_ZHONGWEN: &[u8] = &[0xD6, 0xD0, 0xCE, 0xC4];
+
+    #[test]
+    fn gbk_bytes_are_reported_as_a_lossy_decode() {
+        let decoded = decode_utf8_lossy(GBK_ZHONGWEN.to_vec());
+        assert!(decoded.lossy, "GBK bytes cannot decode faithfully as UTF-8");
+        assert!(
+            decoded.content.contains('\u{FFFD}'),
+            "expected replacement characters, got {:?}",
+            decoded.content,
+        );
+    }
+
+    #[test]
+    fn valid_utf8_is_reported_as_faithful() {
+        let decoded = decode_utf8_lossy("中文".as_bytes().to_vec());
+        assert!(!decoded.lossy);
+        assert_eq!(decoded.content, "中文");
+    }
+
+    #[test]
+    fn read_file_content_checked_reports_a_lossy_file() {
+        // The tripwire that used to assert `read_file_content` REFUSES these
+        // bytes. #371 made every read path lenient, so refusing is no longer
+        // the protection — reporting is. A caller that fills an editable
+        // buffer must use this command and carry the flag onto the tab.
+        let path = temp_path("gbk-checked.md");
+        fs::write(&path, GBK_ZHONGWEN).unwrap();
+
+        let decoded = read_to_string_lossy(path.to_str().unwrap()).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(
+            decoded.lossy,
+            "read_file_content_checked returned mojibake without reporting it",
+        );
+        assert!(decoded.content.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn a_small_non_utf8_file_is_flagged_by_the_preview_too() {
+        // The ≤max_bytes branch. Before #371 it decoded strictly and could
+        // only fail, so it needed no flag; now it opens the same mojibake the
+        // truncated branch always did, and needs the same guard.
+        let path = temp_path("gbk-small.md");
+        let mut bytes = b"# ".to_vec();
+        bytes.extend_from_slice(GBK_ZHONGWEN);
+        fs::write(&path, &bytes).unwrap();
+
+        let preview = build_markdown_preview(&path, 50_000).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(preview.is_full, "this file fits in the preview budget");
+        assert!(preview.lossy, "the save guard has nothing to go on without this");
+        assert!(preview.content.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn an_oversized_non_utf8_preview_is_flagged() {
+        let path = temp_path("gbk-preview.md");
+        let mut bytes = b"# ".to_vec();
+        bytes.extend_from_slice(GBK_ZHONGWEN);
+        bytes.extend_from_slice(b"\nplus enough text to exceed the preview budget\n");
+        fs::write(&path, &bytes).unwrap();
+
+        let preview = build_markdown_preview(&path, 8).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(!preview.is_full);
+        assert!(preview.lossy);
+        assert!(preview.content.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn an_oversized_utf8_preview_is_not_flagged() {
+        // The preview budget lands inside a multi-byte character. Reporting
+        // that as lossy would lock every large CJK or emoji document out of
+        // saving — a guard worse than the bug it protects against.
+        let path = temp_path("utf8-preview.md");
+        fs::write(&path, "中文标题很长".as_bytes()).unwrap();
+
+        let preview = build_markdown_preview(&path, 4).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(!preview.is_full);
+        assert!(!preview.lossy, "unexpected flag on {:?}", preview.content);
+        assert_eq!(preview.content, "中");
     }
 
     #[test]
@@ -1285,37 +1402,75 @@ async fn open_markdown(path: String) -> Result<String, String> {
     .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+struct MarkdownPreview {
+    html: String,
+    content: String,
+    is_full: bool,
+    lossy: bool,
+}
+
+/// The body of `open_markdown_preview`, kept synchronous and path-taking so
+/// the decode-fidelity behaviour can be exercised against real files.
+fn build_markdown_preview(path: &Path, max_bytes: usize) -> Result<MarkdownPreview, String> {
+    use std::io::Read;
+    let path_str = path.to_str().ok_or("Invalid path")?;
+    let mut f = fs::File::open(path).map_err(|e| e.to_string())?;
+
+    let metadata = f.metadata().map_err(|e| e.to_string())?;
+    if metadata.len() <= max_bytes as u64 {
+        let decoded = read_to_string_lossy(path_str).map_err(|e| e.to_string())?;
+        let html = convert_markdown(&decoded.content);
+        return Ok(MarkdownPreview {
+            html,
+            content: decoded.content,
+            is_full: true,
+            lossy: decoded.lossy,
+        });
+    }
+
+    // `Read::read` only guarantees *at most* `buf.len()` bytes and may
+    // return a short read for reasons that have nothing to do with EOF,
+    // truncating the preview well below the requested budget.
+    // `take(..).read_to_end(..)` keeps reading to the limit or EOF.
+    let mut vec_buf = Vec::new();
+    Read::by_ref(&mut f)
+        .take(max_bytes as u64)
+        .read_to_end(&mut vec_buf)
+        .map_err(|e| e.to_string())?;
+    // The cut lands on a raw byte offset, which can slice a multi-byte
+    // character in half; drop the partial tail instead of rendering it as
+    // a replacement character. This also keeps a perfectly good UTF-8 file
+    // from being reported as a lossy decode just because the preview budget
+    // fell inside one of its characters.
+    vec_buf.truncate(utf8_truncation_boundary(&vec_buf));
+
+    let preview = decode_utf8_lossy(vec_buf);
+
+    let html = convert_markdown(&preview.content);
+    Ok(MarkdownPreview {
+        html,
+        content: preview.content,
+        is_full: false,
+        lossy: preview.lossy,
+    })
+}
+
+/// Returns `(html, content, is_full, lossy)`. See `DecodedText::lossy`: the
+/// frontend uses it to refuse writing the buffer back over a file it could
+/// not decode faithfully.
 #[tauri::command]
-async fn open_markdown_preview(path: String, max_bytes: usize) -> Result<(String, String, bool), String> {
+async fn open_markdown_preview(
+    path: String,
+    max_bytes: usize,
+) -> Result<(String, String, bool, bool), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        use std::io::Read;
-        let mut f = fs::File::open(&path).map_err(|e| e.to_string())?;
-        
-        let metadata = f.metadata().map_err(|e| e.to_string())?;
-        if metadata.len() <= max_bytes as u64 {
-            let content = read_to_string_lossy(&path).map_err(|e| e.to_string())?;
-            let html = convert_markdown(&content);
-            return Ok((html, content, true));
-        }
-
-        // `Read::read` only guarantees *at most* `buf.len()` bytes and may
-        // return a short read for reasons that have nothing to do with EOF,
-        // truncating the preview well below the requested budget.
-        // `take(..).read_to_end(..)` keeps reading to the limit or EOF.
-        let mut vec_buf = Vec::new();
-        Read::by_ref(&mut f)
-            .take(max_bytes as u64)
-            .read_to_end(&mut vec_buf)
-            .map_err(|e| e.to_string())?;
-        // The cut lands on a raw byte offset, which can slice a multi-byte
-        // character in half; drop the partial tail instead of rendering it as
-        // a replacement character.
-        vec_buf.truncate(utf8_truncation_boundary(&vec_buf));
-
-        let preview_content = decode_utf8_lossy(vec_buf);
-
-        let html = convert_markdown(&preview_content);
-        Ok((html, preview_content, false))
+        let preview = build_markdown_preview(Path::new(&path), max_bytes)?;
+        Ok((
+            preview.html,
+            preview.content,
+            preview.is_full,
+            preview.lossy,
+        ))
     })
     .await
     .unwrap_or_else(|e| Err(e.to_string()))
@@ -1339,7 +1494,26 @@ async fn render_markdown(content: String) -> Result<String, String> {
 #[tauri::command]
 async fn read_file_content(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        read_to_string_lossy(&path).map_err(|e| e.to_string())
+        read_to_string_lossy(&path)
+            .map(|decoded| decoded.content)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
+}
+
+/// `read_file_content` plus the fidelity of the decode: returns
+/// `(content, lossy)`. Since every read path decodes leniently, a caller that
+/// puts the text into an EDITABLE buffer must use this one and carry `lossy`
+/// onto the tab — otherwise the first auto-save writes U+FFFD over a file
+/// that was merely in another encoding. The bare `read_file_content` remains
+/// for callers that re-read a file whose tab is already flagged.
+#[tauri::command]
+async fn read_file_content_checked(path: String) -> Result<(String, bool), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        read_to_string_lossy(&path)
+            .map(|decoded| (decoded.content, decoded.lossy))
+            .map_err(|e| e.to_string())
     })
     .await
     .unwrap_or_else(|e| Err(e.to_string()))
@@ -2226,6 +2400,7 @@ pub fn run() {
             render_markdown,
             send_markdown_path,
             read_file_content,
+            read_file_content_checked,
             read_file_as_data_url,
             save_file_content,
             export_pdf_windows,

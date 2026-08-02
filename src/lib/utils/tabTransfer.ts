@@ -24,6 +24,14 @@ export interface TransferableTab {
 	isEditing: boolean;
 	isSplit: boolean;
 	isScrollSynced: boolean;
+	/**
+	 * Travels with the buffer because the guard it feeds is about the buffer,
+	 * not about the window: a tab whose text was decoded with U+FFFD
+	 * substitutions must keep refusing to overwrite its source file after it
+	 * moves. Dropping it here would hand the destination window a buffer that
+	 * looks safe to save. See `Tab.hasReplacementChars`.
+	 */
+	hasReplacementChars: boolean;
 	splitRatio: number;
 	scrollTop: number;
 	scrollPercentage: number;
@@ -33,7 +41,13 @@ export interface TransferableTab {
 }
 
 const STRING_FIELDS = ['path', 'title', 'rawContent', 'originalContent'] as const;
-const BOOLEAN_FIELDS = ['isDirty', 'isEditing', 'isSplit', 'isScrollSynced'] as const;
+const BOOLEAN_FIELDS = [
+	'isDirty',
+	'isEditing',
+	'isSplit',
+	'isScrollSynced',
+	'hasReplacementChars',
+] as const;
 const NUMBER_FIELDS = [
 	'splitRatio',
 	'scrollTop',
@@ -53,6 +67,7 @@ export function snapshotTab(tab: Tab): TransferableTab {
 		isEditing: tab.isEditing,
 		isSplit: tab.isSplit,
 		isScrollSynced: tab.isScrollSynced,
+		hasReplacementChars: tab.hasReplacementChars,
 		splitRatio: tab.splitRatio,
 		scrollTop: tab.scrollTop,
 		scrollPercentage: tab.scrollPercentage,
@@ -105,6 +120,7 @@ export function validateTransferPayload(json: string): TransferableTab | null {
 		isEditing: obj.isEditing as boolean,
 		isSplit: obj.isSplit as boolean,
 		isScrollSynced: obj.isScrollSynced as boolean,
+		hasReplacementChars: obj.hasReplacementChars as boolean,
 		splitRatio: obj.splitRatio as number,
 		scrollTop: obj.scrollTop as number,
 		scrollPercentage: obj.scrollPercentage as number,
@@ -163,5 +179,6 @@ export function buildTransferredTab(
 		isSplit: snap.isSplit,
 		splitRatio: snap.splitRatio,
 		isScrollSynced: snap.isScrollSynced,
+		hasReplacementChars: snap.hasReplacementChars,
 	};
 }

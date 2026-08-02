@@ -1,8 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { settings } from '../stores/settings.svelte.js';
-import { tabManager } from '../stores/tabs.svelte.js';
+import { tabManager, type Tab } from '../stores/tabs.svelte.js';
 import { getMarkdownBodyWithoutFrontMatter } from '../utils/frontMatter.js';
+import { t } from '../utils/i18n.js';
 import { hasMarkdownLinkExtension } from '../utils/markdownLinks.js';
 
 export type LoadMarkdownOptions = {
@@ -115,6 +116,11 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		if (!tab.path) return true;
 		if (tab.isDirty) return false;
 		try {
+			// Safe on the bare command: this only re-reads a file whose tab was
+			// already flagged by `loadMarkdown`, and `setTabRawContent` does not
+			// clear that flag. Migrating it to `read_file_content_checked` is
+			// still worth doing — see the note on the two MarkdownViewer call
+			// sites — but nothing depends on it today.
 			const full = (await invoke('read_file_content', { path: tab.path })) as string;
 			tabManager.setTabRawContent(tabId, full);
 			return true;
@@ -122,6 +128,44 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			options.onError('Error loading the rest of the file', error);
 			return false;
 		}
+	}
+
+	// Tabs already told about a refused save. Auto-save re-arms on every
+	// edit, so an undeduplicated toast would fire every 1.5s while typing.
+	const lossySaveWarnedTabs = new Set<string>();
+
+	/**
+	 * Refuse to write a buffer back over the file it was decoded from when
+	 * that decode was lossy: the file is not UTF-8, the bytes it disagreed
+	 * with are already U+FFFD in the buffer, and the original is unrecoverable
+	 * from it. Every writer — Ctrl+S, the auto-save timer in
+	 * MarkdownViewer.svelte, the close dialogs in canCloseTab, the task
+	 * checkbox — funnels through saveContent/saveContentAs, so this is the
+	 * one place that has to hold.
+	 *
+	 * Only the SOURCE file is protected. Save As to any other path writes a
+	 * genuine UTF-8 file, which is correct and is the user's way out; an
+	 * untitled buffer (path === '') has no source file to destroy.
+	 *
+	 * This is damage control, not encoding support: Markpad cannot read GBK
+	 * or Shift-JIS in the first place (that needs a real decoder), and this
+	 * only stops it from overwriting what it could not read.
+	 *
+	 * Known boundary: the comparison is exact string equality, so on a
+	 * case-insensitive filesystem (macOS, Windows) a Save As typed as
+	 * `/notes/Legacy.md` for a tab opened as `/notes/legacy.md` reads as a
+	 * different path and is allowed through. Closing that needs the backend
+	 * to canonicalize both sides; the same-path check is a courtesy on top of
+	 * the guard that matters, which is saveContent.
+	 */
+	function refuseIfLossilyDecoded(tab: Tab, targetPath: string): boolean {
+		if (!tab.hasReplacementChars || targetPath === '' || targetPath !== tab.path) return false;
+		console.warn('Refusing to overwrite a file that was decoded lossily', tab.path);
+		if (!lossySaveWarnedTabs.has(tab.id)) {
+			lossySaveWarnedTabs.add(tab.id);
+			options.onError(t('toast.lossySaveBlocked', settings.language), tab.path);
+		}
+		return true;
 	}
 
 	function updateLoading(tabId: string, loading: boolean) {
@@ -167,12 +211,18 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				// from disk" take while edit or split mode is preserved.
 				let content: string;
 				let isFull: boolean;
+				let lossy: boolean;
 				if (initialIsEditing || initialIsSplit) {
-					content = (await invoke('read_file_content', { path: filePath })) as string;
+					[content, lossy] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean];
 					isFull = true;
 				} else {
-					[, content, isFull] = (await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 })) as [string, string, boolean];
+					[, content, isFull, lossy] = (await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 })) as [string, string, boolean, boolean];
 				}
+				// Decided on every load, before the buffer can reach a writer.
+				// Both branches report it, so this also CLEARS the flag on a
+				// file the user has since converted to UTF-8.
+				tabManager.setTabDecodedLossy(activeId, lossy);
+				lossySaveWarnedTabs.delete(activeId);
 				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath);
 				const processed = await options.renderMarkdown(content, filePath);
 				tabManager.updateTabContent(activeId, processed);
@@ -188,8 +238,8 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 					};
 					updateLoading(activeId, true);
 					options.measureInitialViewport();
-					(invoke('read_file_content', { path: filePath }) as Promise<string>)
-						.then((fullContent) => {
+					(invoke('read_file_content_checked', { path: filePath }) as Promise<[string, boolean]>)
+						.then(([fullContent, fullLossy]) => {
 							const applyFull = () => {
 								try {
 									if (options.isScrolling()) return void setTimeout(applyFull, 100);
@@ -199,6 +249,11 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 											if (!canApplyFullLoad()) return updateLoading(activeId, false);
 											tabManager.updateTabContent(activeId, fullProcessed);
 											tabManager.setTabRawContent(activeId, fullContent);
+											// This buffer REPLACES the preview's, so it
+											// carries its own verdict — the preview only
+											// saw the first 50KB and a file can be valid
+											// UTF-8 up to there and not after.
+											tabManager.setTabDecodedLossy(activeId, fullLossy);
 											updateLoading(activeId, false);
 											if (tabManager.activeTabId === activeId) setTimeout(options.renderRichContent, 10);
 										})
@@ -220,7 +275,9 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 						});
 				}
 			} else {
-				const content = (await invoke('read_file_content', { path: filePath })) as string;
+				const [content, lossy] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean];
+				tabManager.setTabDecodedLossy(activeId, lossy);
+				lossySaveWarnedTabs.delete(activeId);
 				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath);
 				if (tab) tab.isEditing = true;
 				tabManager.setTabRawContent(activeId, content);
@@ -258,6 +315,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			if (!selected) return false;
 			targetPath = selected;
 		}
+		if (refuseIfLossilyDecoded(tab, targetPath)) return false;
 		const snapshot = tab.rawContent;
 		markSelfWrite(targetPath);
 		try {
@@ -293,12 +351,19 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			defaultPath: tab.path || undefined,
 		});
 		if (!selected) return false;
+		// Picking the source file again in the dialog is the same destructive
+		// overwrite, just reached another way.
+		if (refuseIfLossilyDecoded(tab, selected)) return false;
 		const snapshot = tab.rawContent;
 		markSelfWrite(selected);
 		try {
 			await invoke('save_file_content', { path: selected, content: snapshot });
 			markSelfWrite(selected);
 			tabManager.updateTabPath(tab.id, selected);
+			// The buffer now has a UTF-8 file of its own that it matches
+			// exactly, so it is safe to save from here on.
+			tabManager.setTabDecodedLossy(tab.id, false);
+			lossySaveWarnedTabs.delete(tab.id);
 			options.saveRecentFile(selected);
 			tab.originalContent = snapshot;
 			tab.isDirty = tab.rawContent !== snapshot;

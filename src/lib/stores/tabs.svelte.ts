@@ -39,6 +39,17 @@ export interface Tab {
 	 * from a cross-window transfer payload always arrive complete.
 	 */
 	isTruncated?: boolean;
+	/**
+	 * `rawContent` was decoded with U+FFFD substitutions because the file is
+	 * not UTF-8 (GBK, Big5, Shift-JIS ...). The buffer is NOT a copy of the
+	 * file and the original bytes cannot be recovered from it, so writing it
+	 * back over that file destroys the document — documentSession.saveContent
+	 * refuses to. Required, not optional: unlike `isTruncated` above, this one
+	 * DOES travel through a transfer payload, and a construction site that
+	 * forgets it would default to "safe to overwrite" — the failure mode here
+	 * is a destroyed document, so the compiler asks every one of them.
+	 */
+	hasReplacementChars: boolean;
 }
 
 class TabManager {
@@ -147,7 +158,8 @@ class TabManager {
 					isSplit: saved.isSplit === true,
 					splitRatio: typeof saved.splitRatio === 'number' ? saved.splitRatio : 0.5,
 					isScrollSynced: saved.isScrollSynced === true,
-					isTruncated: false
+					isTruncated: false,
+					hasReplacementChars: false
 				});
 			}
 
@@ -188,7 +200,8 @@ class TabManager {
 			isSplit: false,
 			splitRatio: 0.5,
 			isScrollSynced: false,
-			isTruncated: false
+			isTruncated: false,
+			hasReplacementChars: false
 		});
 
 		this.activeTabId = id;
@@ -219,7 +232,8 @@ class TabManager {
 			isSplit: false,
 			splitRatio: 0.5,
 			isScrollSynced: false,
-			isTruncated: false
+			isTruncated: false,
+			hasReplacementChars: false
 		});
 
 		this.activeTabId = id;
@@ -251,7 +265,8 @@ class TabManager {
 			isSplit: false,
 			splitRatio: 0.5,
 			isScrollSynced: false,
-			isTruncated: false
+			isTruncated: false,
+			hasReplacementChars: false
 		});
 
 		this.activeTabId = id;
@@ -333,6 +348,18 @@ class TabManager {
 			tab.originalContent = raw;
 			tab.isDirty = false;
 			tab.isTruncated = isTruncated;
+		}
+	}
+
+	/**
+	 * Record whether this buffer came from a lossy decode. Set on every load,
+	 * both ways: a file the user has since converted to UTF-8 must clear the
+	 * flag, and Save As clears it once the buffer has a UTF-8 file of its own.
+	 */
+	setTabDecodedLossy(id: string, lossy: boolean) {
+		const tab = this.tabs.find((t) => t.id === id);
+		if (tab) {
+			tab.hasReplacementChars = lossy;
 		}
 	}
 
