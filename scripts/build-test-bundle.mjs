@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -9,9 +9,13 @@ if (!identifier || !identifier.startsWith('dev.') || identifier === 'com.alecdot
 	throw new Error('Set MARKPAD_TEST_BUNDLE_ID to a non-production identifier beginning with dev.');
 }
 
+// Read the version instead of hardcoding it: a stale literal here is a third
+// place the app version lives, and it silently disagreed with package.json.
+const { version } = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+
 const config = JSON.stringify({
 	identifier,
-	productName: 'Markpad 2.7.0 Test',
+	productName: `Markpad ${version} Test`,
 	bundle: { targets: ['app'], createUpdaterArtifacts: false },
 });
 const rustRoot = resolve(root, '.local-rust');

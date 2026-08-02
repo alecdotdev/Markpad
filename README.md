@@ -46,7 +46,7 @@
 #### Windows (Chocolatey)
 
 ```powershell
-choco install markpad-app --version=2.5.0 # version flag is temporary for now
+choco install markpad-app
 ```
 
 #### Linux (Snap)

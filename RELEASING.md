@@ -30,7 +30,7 @@ The build workflow reads both at signing time on macOS, Windows, and Linux runne
 
 ### 3. Send the public key content
 
-Send the **single-line content** of `~/.tauri/markpad-updater.key.pub` (no comments, no header lines) to the developer who'll commit it to `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`. Until that placeholder is replaced, auto-update is inert — the app surfaces a clean error state instead of contacting the update server.
+Send the **single-line content** of `~/.tauri/markpad-updater.key.pub` (no comments, no header lines) to the developer who'll commit it to `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`. This already happened for the current keypair — the committed value is the live public key, not a placeholder — so steps 1–3 are kept as history for anyone who ever has to redo the setup. While the field held a placeholder, auto-update was inert: the app surfaced a clean error state instead of contacting the update server.
 
 ### 4. CRITICAL: the pubkey is permanent
 
@@ -44,7 +44,7 @@ If you ever lose the private key:
 
 ## Per-release workflow
 
-The workflow uses `npm ci`, so its installed dependency graph is exactly the committed lockfile. Do not replace it with `npm install` in release jobs.
+The workflow uses `npm ci`, so its installed dependency graph is exactly the committed lockfile. Do not replace it with `npm install` in release jobs. The same applies to [`snapcraft.yaml`](snapcraft.yaml), which builds the snap outside GitHub Actions; `scripts/releaseWorkflow.test.ts` guards both.
 
 1. **Bump version in both files** (mandatory — Tauri reads runtime version from `Cargo.toml`):
    - [`package.json`](package.json) `version`

@@ -15,10 +15,10 @@
       "csp": {
         "default-src": "'self'",
         "script-src": "'self' 'unsafe-inline'",
-        "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "style-src": "'self' 'unsafe-inline'",
         "img-src": "'self' asset: https: http://asset.localhost blob: data:",
         "connect-src": "'self'",
-        "font-src": "'self' https://fonts.gstatic.com"
+        "font-src": "'self'"
       },
       "assetProtocol": {
         "enable": true,

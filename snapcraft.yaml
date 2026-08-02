@@ -67,7 +67,7 @@ parts:
     override-build: |
       set -e
       craftctl set version="$(node -p "require('./package.json').version")"
-      npm install
+      npm ci
       export CARGO_BUILD_JOBS=2
       npx tauri build --no-bundle
       
