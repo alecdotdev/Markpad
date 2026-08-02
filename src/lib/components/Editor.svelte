@@ -3,6 +3,7 @@
 	import { tabManager } from "../stores/tabs.svelte.js";
 	import { settings } from "../stores/settings.svelte.js";
 	import { t } from '../utils/i18n.js';
+	import { managedImageFromCopy, type ManagedImage } from '../utils/managedImages.js';
 
 	import * as monaco from "monaco-editor";
 	import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
@@ -61,11 +62,7 @@
 	let vimStatusNode = $state<HTMLDivElement>();
 	let editor: monaco.editor.IStandaloneCodeEditor;
 	let isApplyingExternalScroll = false;
-	const managedImages: {
-		embed: string;
-		filename: string;
-		parentDir: string;
-	}[] = $state([]);
+	const managedImages: ManagedImage[] = $state([]);
 
 	let cursorPosition = $state<monaco.Position | null>(null);
 	let selectionCount = $state(0);
@@ -764,11 +761,10 @@
 				const last = managedImages[managedImages.length - 1];
 				if (!currentContent.includes(last.embed)) {
 					managedImages.pop();
-						const imgDirName = settings.imageDirectory || "img";
-						const imgPath = `${last.parentDir}/${imgDirName}/${last.filename}`;
+						const imgPath = `${last.parentDir}/${last.imageDirectory}/${last.filename}`;
 						invoke("delete_file", { path: imgPath })
 							.then(() => {
-								invoke("cleanup_empty_img_dir", { parentDir: last.parentDir, imageDirectory: imgDirName });
+								invoke("cleanup_empty_img_dir", { parentDir: last.parentDir, imageDirectory: last.imageDirectory });
 							})
 							.catch(console.error);
 				}
@@ -905,7 +901,7 @@
 								},
 							]);
 
-							managedImages.push({ embed, filename, parentDir });
+							managedImages.push(managedImageFromCopy({ embed, parentDir, imageDirectory: imgDirName, relativePath: relPath }));
 							return;
 						}
 					}
@@ -1295,8 +1291,7 @@
 				],
 			);
 
-			const actualFilename = path.split(/[/\\]/).pop() || "image";
-			managedImages.push({ embed, filename: actualFilename, parentDir });
+			managedImages.push(managedImageFromCopy({ embed, parentDir, imageDirectory: imgDirName, relativePath: relPath }));
 		} catch (err) {
 			console.error("Failed to copy dropped file:", err);
 		}
