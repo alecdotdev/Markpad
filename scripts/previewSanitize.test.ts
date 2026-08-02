@@ -34,6 +34,7 @@ const POC_STYLE = '<style>.titlebar{display:none} body{background-image:url("htt
 
 const viewerSource = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 const sanitizeSource = readFileSync('src/lib/utils/sanitize.ts', 'utf8');
+const richContentSource = readFileSync('src/lib/utils/richContent.ts', 'utf8');
 
 test('the preview sanitizes through the shared policy, not a local config', () => {
 	assert.match(
@@ -85,7 +86,9 @@ const SANITIZE_CALL_SITES: Record<string, number> = {
 	// configuration on a different input. Verified in a browser: the pinned
 	// DOMPurify keeps mermaid's `<style>` under the diagram config and strips it
 	// under MARKDOWN_SANITIZE_CONFIG, which would flatten every diagram.
-	'src/lib/MarkdownViewer.svelte': 1,
+	// It sits next to the only thing that produces diagrams, which is now the
+	// renderer the preview and the HTML export share.
+	'src/lib/utils/richContent.ts': 1,
 };
 
 function walk(dir: string): string[] {
@@ -115,7 +118,7 @@ test('the diagram sanitizer stays separate from the document policy', () => {
 	// Both halves of the split are asserted so a later "let us unify these"
 	// change has to confront the reason: the diagram config must keep the tag
 	// the document config forbids.
-	assert.match(viewerSource, /ADD_TAGS: \['foreignObject'\]/);
+	assert.match(richContentSource, /ADD_TAGS: \['foreignObject'\]/);
 	assert.ok(!MARKDOWN_SANITIZE_CONFIG.FORBID_TAGS.includes('foreignObject'));
 	assert.ok(MARKDOWN_SANITIZE_CONFIG.FORBID_TAGS.includes('style'));
 });

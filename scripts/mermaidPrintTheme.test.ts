@@ -12,6 +12,7 @@ import {
 } from '../src/lib/utils/mermaidPrint.js';
 
 const viewer = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
+const richContent = readFileSync(new URL('../src/lib/utils/richContent.ts', import.meta.url), 'utf8');
 
 /**
  * Minimal stand-ins for the DOM pieces the helper touches. Enough to drive
@@ -152,7 +153,14 @@ test('the PDF export wraps the print render and always restores', () => {
 	assert.match(viewer, /const restoreDiagrams = await renderDiagramsForPrint\(\{/);
 	assert.match(viewer, /\} finally \{\n\t\t\trestoreDiagrams\(\);\n\t\t\}/);
 	// The screen render must record the source, or there is nothing to rebuild.
-	assert.match(viewer, /rememberDiagramSource\(container, mermaidCode\);/);
-	// One theme decision, shared by the screen render and the restore.
-	assert.match(viewer, /mermaid\.initialize\(\{ startOnLoad: false, theme: currentMermaidTheme\(\) \}\)/);
+	// It moved into the shared renderer in #4xx, when the HTML export started
+	// calling the same function; the assertion follows it rather than being
+	// relaxed, because "some path renders diagrams without remembering the
+	// source" is exactly the drift that deleted the markdown.ts copy.
+	assert.match(richContent, /rememberDiagramSource\(container, mermaidCode\);/);
+	// One theme decision, shared by the screen render and the restore: the
+	// viewer resolves it once and hands it to both.
+	assert.match(richContent, /mermaid\.initialize\(\{ startOnLoad: false, theme: options\.mermaidTheme \}\)/);
+	assert.match(viewer, /mermaidTheme: currentMermaidTheme\(\),/);
+	assert.match(viewer, /screenTheme: currentMermaidTheme\(\),/);
 });

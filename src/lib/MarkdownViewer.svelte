@@ -26,10 +26,15 @@
 import { processMarkdownHtml } from './utils/markdown';
 import { sanitizeMarkdownHtml } from './utils/sanitize.js';
 import {
-	rememberDiagramSource,
 	renderDiagramsForPrint,
 	resolveMermaidTheme,
 } from './utils/mermaidPrint.js';
+import {
+	loadRichContentLibraries,
+	renderRichContent as renderRichContentInto,
+	sanitizeDiagramSvg,
+	type RichContentLibraries,
+} from './utils/richContent.js';
 import { observeFoldLayout } from './utils/foldLayout.js';
 import {
 	addFrontMatterListItems,
@@ -63,7 +68,6 @@ import {
 
 	const appWindow = getCurrentWindow();
 
-	import DOMPurify from 'dompurify';
 	import HomePage from './components/HomePage.svelte';
 import { tabManager } from './stores/tabs.svelte.js';
 import { snapshotTab } from './utils/tabTransfer.js';
@@ -73,11 +77,12 @@ import { t } from './utils/i18n.js';
 import { createWindowSession } from './sessions/windowSession.svelte.js';
 import { createDocumentSession, type LoadMarkdownOptions } from './sessions/documentSession.svelte.js';
 
-	// syntax highlighting & latex
-	let hljs: any = $state(null);
-	let katex: any = $state(null);
-	let renderMathInElement: any = $state(null);
-	let mermaid: any = $state(null);
+	// syntax highlighting & latex — loaded through the shared module so the
+	// preview and the HTML export cannot end up with different libraries.
+	let richLibraries = $state<RichContentLibraries | null>(null);
+	let hljs = $derived(richLibraries ? richLibraries.hljs : null);
+	let renderMathInElement = $derived(richLibraries ? richLibraries.renderMathInElement : null);
+	let mermaid = $derived(richLibraries ? richLibraries.mermaid : null);
 
 	import 'highlight.js/styles/github-dark.css';
 	import 'katex/dist/katex.min.css';
@@ -1028,85 +1033,21 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		});
 	}
 
-	// Mermaid puts text inside foreignObject, so the diagram sanitizer is more
-	// permissive than the document one; keep the two in one place.
-	function sanitizeDiagramSvg(svg: string) {
-		return DOMPurify.sanitize(svg, {
-			ADD_TAGS: ['foreignObject'],
-			ADD_ATTR: ['dominant-baseline', 'text-anchor'],
-		});
-	}
-
+	/**
+	 * The preview half of the shared renderer: same function the HTML export
+	 * calls, pointed at the live preview element and given the copy-to-clipboard
+	 * behaviour an exported file cannot have.
+	 */
 	async function renderRichContent() {
-		if (!markdownBody) return;
+		if (!markdownBody || !richLibraries) return;
 
-		if (!hljs || !renderMathInElement || !mermaid) return;
-
-		mermaid.initialize({ startOnLoad: false, theme: currentMermaidTheme() });
-
-		// Process code blocks
-		const codeBlocks = Array.from(markdownBody.querySelectorAll('pre code'));
-		for (const block of codeBlocks) {
-			const codeEl = block as HTMLElement;
-			const preEl = codeEl.parentElement as HTMLPreElement;
-
-			// Check for Mermaid blocks
-			if (codeEl.classList.contains('language-mermaid')) {
-				try {
-					const mermaidCode = codeEl.textContent || '';
-					const id = `mermaid-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-
-					// Render the diagram
-					const { svg } = await mermaid.render(id, mermaidCode);
-
-					// Create container and replace the <pre> block
-					const container = document.createElement('div');
-					container.className = 'mermaid-diagram';
-					// Kept so the export can rebuild the diagram with a light
-					// theme instead of recolouring Mermaid's output.
-					rememberDiagramSource(container, mermaidCode);
-					container.innerHTML = sanitizeDiagramSvg(svg);
-					preEl.replaceWith(container);
-				} catch (error) {
-					console.error('Failed to render Mermaid diagram:', error);
-					// Display error in place of diagram
-					const errorDiv = document.createElement('div');
-					errorDiv.className = 'mermaid-error';
-					errorDiv.style.color = 'red';
-					errorDiv.style.padding = '1em';
-					errorDiv.textContent = `Error rendering Mermaid diagram: ${error}`;
-					preEl.replaceWith(errorDiv);
-				}
-				continue; // Skip highlight.js for this block
-			}
-
-			// Existing highlight.js logic
-			// Check if language was explicitly specified BEFORE highlight.js runs
-			const hasExplicitLang = Array.from(codeEl.classList).some((c) => c.startsWith('language-'));
-			
-			// Only highlight if explicit language is specified
-			if (hasExplicitLang) {
-				hljs.highlightElement(codeEl);
-			}
-
-			const langClass = Array.from(codeEl.classList).find((c) => c.startsWith('language-'));
-
-			if (preEl && preEl.tagName === 'PRE') {
-				preEl.querySelectorAll('.lang-label').forEach((l) => l.remove());
-				const codeContent = codeEl.textContent || '';
-				const existingWrapper = preEl.parentElement?.classList.contains('code-block-shell') ? preEl.parentElement as HTMLDivElement : null;
-				existingWrapper?.querySelectorAll(':scope > .lang-label').forEach((l) => l.remove());
-
-				const wrapper = existingWrapper ?? document.createElement('div');
-				if (!existingWrapper) {
-					wrapper.className = 'code-block-shell';
-					preEl.replaceWith(wrapper);
-					wrapper.appendChild(preEl);
-				}
-
-				const copyCode = () => {
-					const codeToCopy = codeContent.replace(/\n$/, '');
-					invoke('clipboard_write_text', { text: codeToCopy }).then(() => {
+		await renderRichContentInto({
+			root: markdownBody,
+			libraries: richLibraries,
+			mermaidTheme: currentMermaidTheme(),
+			onCopyCode: (code, label) => {
+				invoke('clipboard_write_text', { text: code.replace(/\n$/, '') })
+					.then(() => {
 						const originalContent = label.innerHTML;
 						label.innerHTML = 'Copied!';
 						label.classList.add('copied');
@@ -1114,53 +1055,12 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 							label.innerHTML = originalContent;
 							label.classList.remove('copied');
 						}, 1500);
-					}).catch((err) => {
+					})
+					.catch((err) => {
 						console.error('Failed to copy code:', err);
 					});
-				};
-
-				const label = document.createElement('button');
-				label.className = 'lang-label';
-				label.title = 'Click to copy code';
-				label.onclick = copyCode;
-
-				if (hasExplicitLang && langClass) {
-					label.textContent = langClass.replace('language-', '');
-					wrapper.appendChild(label);
-				} else {
-					label.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
-					wrapper.appendChild(label);
-				}
-			}
-		}
-
-		// KaTeX math rendering
-		if (katex) {
-			const mathElements = markdownBody.querySelectorAll('[data-math]');
-			for (const el of Array.from(mathElements)) {
-				const isDisplay = el.getAttribute('data-math') === 'display';
-				const mathSource = el.getAttribute('data-math-source') || el.textContent || '';
-				try {
-					katex.render(mathSource, el as HTMLElement, {
-						displayMode: isDisplay,
-						throwOnError: false,
-					});
-				} catch (e) {
-					console.error('KaTeX rendering error:', e);
-				}
-			}
-		}
-
-		if (renderMathInElement) {
-			renderMathInElement(markdownBody, {
-				delimiters: [
-					{ left: '$$', right: '$$', display: true },
-					{ left: '\\(', right: '\\)', display: false },
-					{ left: '\\[', right: '\\]', display: true },
-				],
-				throwOnError: false,
-			});
-		}
+			},
+		});
 	}
 
 	$effect(() => {
@@ -1974,6 +1874,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			rawContent,
 			tabTitle: tab?.title || '',
 			tabPath: tab?.path || '',
+			// The exported page carries the appearance it was made in (see
+			// `exportThemeAttribute`), and Mermaid bakes its theme into the SVG,
+			// so the diagrams have to be rendered for the same appearance.
+			mermaidTheme: currentMermaidTheme(),
+			libraries: richLibraries,
 		});
 		if (result?.missingImages) {
 			addToast(`Exported HTML, but ${result.missingImages} local image(s) could not be embedded.`, 'warning');
@@ -2876,29 +2781,12 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		loadRecentFiles();
 		isDisposed = false;
 
-		// @ts-ignore
-		Promise.all([import('highlight.js'), import('highlightjs-svelte'), import('katex'), import('mermaid')]).then(async ([hljsModule, svelteModule, katexMainModule, mermaidModule]) => {
-			if (isDisposed) return;
-			hljs = hljsModule.default;
-			try {
-				svelteModule.default(hljs);
-			} catch(e) { console.error('svelte hljs error', e); }
-			
-			katex = katexMainModule.default;
-			// some extensions bind to window.katex
-			(window as any).katex = katex;
-			
-			// @ts-ignore
-			const [autoRenderModule] = await Promise.all([
-				import('katex/dist/contrib/auto-render.js'),
-				import('katex/dist/contrib/mhchem.js'),
-				import('katex/dist/contrib/copy-tex.js')
-			]);
-			if (isDisposed) return;
-			
-			renderMathInElement = autoRenderModule.default;
-			mermaid = mermaidModule.default;
-		});
+		loadRichContentLibraries()
+			.then((libraries) => {
+				if (isDisposed) return;
+				richLibraries = libraries;
+			})
+			.catch((error) => console.error('Failed to load rich content libraries', error));
 
 		let unlisteners: (() => void)[] = [];
 

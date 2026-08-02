@@ -34,7 +34,7 @@ const RULES: Rule[] = [
 		name: 'mermaid rendering remembers the diagram source',
 		why: 'PDF/HTML export re-renders Mermaid in the light theme from data-mermaid-source; a render path without rememberDiagramSource exports blank or dark-themed diagrams (#359).',
 		marker: /mermaid\.render\(/g,
-		allowed: ['src/lib/MarkdownViewer.svelte', 'src/lib/utils/mermaidPrint.ts'],
+		allowed: ['src/lib/utils/richContent.ts', 'src/lib/utils/mermaidPrint.ts'],
 		requires: {
 			pattern: /rememberDiagramSource/,
 			message: 'a Mermaid render site must record the source via rememberDiagramSource',
@@ -67,13 +67,16 @@ const RULES: Rule[] = [
 		name: 'DOMPurify is configured in one place',
 		why: 'The sanitize contract lives in utils/sanitize.ts; an inline DOMPurify config elsewhere is a second, unreviewed sanitizer.',
 		marker: /from\s+["']dompurify["']/g,
-		allowed: ['src/lib/utils/sanitize.ts', 'src/lib/MarkdownViewer.svelte'],
+		allowed: ['src/lib/utils/sanitize.ts', 'src/lib/utils/richContent.ts'],
 	},
 	{
 		name: 'rich-content rendering has one implementation',
-		why: 'The viewer owns the render pipeline (highlight.js + KaTeX + Mermaid); a second renderRichContent is a fork that drifts from it.',
-		marker: /function\s+renderRichContent\s*\(/g,
-		allowed: ['src/lib/MarkdownViewer.svelte'],
+		why: 'utils/richContent.ts owns the render pipeline (highlight.js + KaTeX + Mermaid) for both the preview and the HTML export; a second renderRichContent is a fork that drifts from it — which is exactly how the export ended up shipping raw LaTeX and unhighlighted code.',
+		// The viewer keeps a same-named wrapper that supplies the live element and
+		// the copy-button behaviour, so the marker pins the implementation (the
+		// one that takes an options object) rather than the name.
+		marker: /function\s+renderRichContent\s*\(\s*options/g,
+		allowed: ['src/lib/utils/richContent.ts'],
 	},
 	{
 		name: 'editor language mapping has one implementation',

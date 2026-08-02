@@ -252,6 +252,20 @@ class ShimClassList {
 		return this.tokens().includes(name);
 	}
 
+	/**
+	 * A real `DOMTokenList` is iterable, and the render pipeline reads class
+	 * lists that way (`Array.from(el.classList).some(c => c.startsWith(…))`).
+	 * Without this the copy silently yields `[]` and every such test passes for
+	 * the wrong reason.
+	 */
+	[Symbol.iterator](): IterableIterator<string> {
+		return this.tokens()[Symbol.iterator]();
+	}
+
+	get length(): number {
+		return this.tokens().length;
+	}
+
 	toggle(name: string, force?: boolean) {
 		const present = this.contains(name);
 		const next = force ?? !present;

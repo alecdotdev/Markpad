@@ -9,11 +9,39 @@ import {
 	rewriteMarkdownHrefForExport,
 } from './exportHtml.js';
 import { sanitizeMarkdownHtml } from './sanitize.js';
+import {
+	loadRichContentLibraries,
+	renderRichContent,
+	type RichContentLibraries,
+} from './richContent.js';
+import {
+	absolutizeKatexFontUrls,
+	collectUsedKatexFamilies,
+	fetchFontDataUrls,
+	inlineKatexFontFaces,
+	katexFontUrlsToEmbed,
+} from './exportFonts.js';
 
 interface ExportContext {
 	rawContent: string;
 	tabTitle: string;
 	tabPath: string;
+	/**
+	 * Mermaid's theme name for the appearance this export is being made in.
+	 * Unlike the PDF route — paper is always white, so that one forces a light
+	 * theme — an HTML export deliberately carries the author's theme (see
+	 * `exportThemeAttribute` below), so the diagrams have to be baked to match.
+	 */
+	mermaidTheme: string;
+	/**
+	 * The libraries the preview is already using, handed in the same way
+	 * `renderDiagramsForPrint` takes `mermaid` and `sanitizeSvg`. Passing the
+	 * viewer's own instances is what guarantees the exported document was
+	 * produced by the same highlight.js language registry and the same KaTeX
+	 * the user was looking at. `null` (an export triggered before the lazy load
+	 * finished) falls back to the shared loader.
+	 */
+	libraries: RichContentLibraries | null;
 }
 
 export type ExportHtmlResult = {
@@ -193,7 +221,66 @@ ${input.articleHtml}
 </html>`;
 }
 
-async function buildExportArticle(ctx: ExportContext): Promise<{ html: string; embeddedImages: number; missingImages: number }> {
+/**
+ * Runs the preview's renderer over the detached export DOM.
+ *
+ * Placed *after* `sanitizeMarkdownHtml` on purpose, and the document-level
+ * filter is deliberately not run again afterwards. Two reasons, and they point
+ * the same way:
+ *
+ *   - The filter's job is to see the untrusted document, which it already did:
+ *     everything added from here on is markup Markpad's own libraries generate.
+ *     highlight.js re-emits the code block as escaped text; KaTeX builds nodes
+ *     itself and runs with its default `trust: false`, so `\href`, `\url` and
+ *     `\includegraphics` are inert; Mermaid's SVG goes through
+ *     `sanitizeDiagramSvg`, the same filter the preview uses.
+ *   - Running the document policy over Mermaid's SVG would destroy it.
+ *     `MARKDOWN_SANITIZE_CONFIG` sets `FORBID_TAGS: ['style']`, and Mermaid
+ *     ships every diagram's fills, strokes and label colours as a `<style>`
+ *     inside the SVG. Strip it and the diagram arrives as an unstyled skeleton.
+ *
+ * That `<style>` is the one genuinely new thing an export now carries, so it is
+ * worth being explicit about why it is acceptable here:
+ *
+ *   - It is namespaced. Mermaid compiles the block through stylis with a
+ *     middleware that prefixes every rule with `#<svg-id>` and drops any at-rule
+ *     outside a small allowlist (`@import` and `@font-face` are removed). The
+ *     id is one Markpad generates, not one the document chose. So the block
+ *     cannot restyle anything outside its own diagram, and cannot pull in a
+ *     remote stylesheet or font.
+ *   - It is not a new capability. A diagram's `classDef` declarations do reach
+ *     the block, so a hostile document could in principle land a
+ *     `url(https://…)` in it and have the exported file phone home when opened.
+ *     But the export already leaves remote `<img src="https://…">` exactly as
+ *     the author wrote it, and the export CSP allows `img-src https: http:`
+ *     precisely so those keep working. A document that wants to beacon on open
+ *     can already do it in one line of Markdown, with no diagram involved.
+ *   - The exported file is a *less* privileged place for it than the preview,
+ *     which has been injecting this same `<style>` into the app's live document
+ *     since diagrams were added. There, `<style>` is worth forbidding at the
+ *     document level (it can hide the title bar); in a standalone file whose
+ *     entire content is the user's own document, there is nothing to hide.
+ */
+async function renderExportRichContent(root: HTMLElement, ctx: ExportContext): Promise<void> {
+	try {
+		const libraries = ctx.libraries ?? (await loadRichContentLibraries());
+		await renderRichContent({
+			root,
+			libraries,
+			mermaidTheme: ctx.mermaidTheme,
+			onError: (error) => console.error('Rich content failed to render for HTML export', error),
+			// `onCopyCode` is deliberately not passed: an exported file cannot
+			// run script, so the language label there is a static label rather
+			// than a copy button that silently does nothing.
+		});
+	} catch (error) {
+		// An export that ships the raw block is worse than one that does not,
+		// but it is much better than an export that never happens.
+		console.error('Failed to render rich content for HTML export', error);
+	}
+}
+
+async function buildExportArticle(ctx: ExportContext): Promise<{ root: HTMLElement; embeddedImages: number; missingImages: number }> {
 	const body = getMarkdownBodyWithoutFrontMatter(ctx.rawContent);
 	const rendered = (await invoke('render_markdown', { content: body })) as string;
 	// The export used to write `rendered` to disk untouched. comrak runs with
@@ -222,6 +309,13 @@ async function buildExportArticle(ctx: ExportContext): Promise<{ html: string; e
 	const wrapper = document.createElement('div');
 	wrapper.innerHTML = renderStaticFrontMatterPanel(parseFrontMatter(ctx.rawContent)) + processed;
 
+	// Highlight, typeset and draw before the link and image passes, so those see
+	// the markup that actually ships. The renderer works on this detached
+	// element exactly as it works on the live preview: nothing an exported file
+	// contains can be produced by the file itself, because the policy above
+	// grants it no script privilege, so all of it has to be baked in here.
+	await renderExportRichContent(wrapper, ctx);
+
 	for (const link of Array.from(wrapper.querySelectorAll('a[href]'))) {
 		const href = link.getAttribute('href');
 		if (!href) continue;
@@ -249,10 +343,33 @@ async function buildExportArticle(ctx: ExportContext): Promise<{ html: string; e
 	}
 
 	return {
-		html: wrapper.innerHTML,
+		root: wrapper,
 		embeddedImages,
 		missingImages,
 	};
+}
+
+/**
+ * Replaces KaTeX's `@font-face` rules in the copied stylesheet with the fonts
+ * the finished article actually references, inline as data URIs, and deletes
+ * the rest. See `exportFonts.ts` for why this is now worth doing and why it is
+ * done per family. A document with no math loses ~5 KB of dead rules and gains
+ * nothing else.
+ */
+async function embedExportFonts(styles: string, root: HTMLElement): Promise<string> {
+	try {
+		const usedFamilies = collectUsedKatexFamilies(root, styles);
+		const dataUrls = usedFamilies.size
+			? await fetchFontDataUrls(katexFontUrlsToEmbed(styles, usedFamilies))
+			: new Map<string, string>();
+		return inlineKatexFontFaces(styles, usedFamilies, dataUrls);
+	} catch (error) {
+		// Worst case the export keeps the rules it has always had, which resolve
+		// to nothing next to the file. That is the pre-existing behaviour, not a
+		// regression, and it must not cost the user the export.
+		console.error('Failed to embed export fonts', error);
+		return styles;
+	}
 }
 
 export async function exportAsHtml(ctx: ExportContext): Promise<ExportHtmlResult | null> {
@@ -270,7 +387,9 @@ export async function exportAsHtml(ctx: ExportContext): Promise<ExportHtmlResult
 	for (const sheet of document.styleSheets) {
 		try {
 			for (const rule of sheet.cssRules) {
-				styles += rule.cssText + '\n';
+				// The stylesheet's own URL is the base KaTeX's relative font
+				// sources resolve against, and it is only available here.
+				styles += absolutizeKatexFontUrls(rule.cssText, sheet.href) + '\n';
 			}
 		} catch {
 			// cross-origin sheets
@@ -278,12 +397,13 @@ export async function exportAsHtml(ctx: ExportContext): Promise<ExportHtmlResult
 	}
 
 	const article = await buildExportArticle(ctx);
+	styles = await embedExportFonts(styles, article.root);
 
 	const fullHtml = buildExportDocument({
 		theme: document.documentElement.dataset.theme,
 		title: ctx.tabTitle,
 		styles,
-		articleHtml: article.html,
+		articleHtml: article.root.innerHTML,
 	});
 
 	try {
