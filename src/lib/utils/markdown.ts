@@ -40,7 +40,13 @@ export function resolvePath(basePath: string, relativePath: string): string {
 }
 
 export function isYoutubeLink(url: string): boolean {
-	return url.includes("youtube.com/watch") || url.includes("youtu.be/");
+	return (
+		url.includes("youtube.com/watch") ||
+		url.includes("youtube.com/embed/") ||
+		url.includes("youtube.com/v/") ||
+		url.includes("youtube.com/u/") ||
+		url.includes("youtu.be/")
+	);
 }
 
 export function getYoutubeId(url: string): string | null {
@@ -50,18 +56,18 @@ export function getYoutubeId(url: string): string | null {
 	return match && match[2].length === 11 ? match[2] : null;
 }
 
-function replaceWithYoutubeEmbed(element: Element, videoId: string) {
-	const container = element.ownerDocument.createElement("div");
-	container.className = "video-container";
-	const iframe = element.ownerDocument.createElement("iframe");
-	iframe.src = `https://www.youtube.com/embed/${videoId}`;
-	iframe.title = "YouTube video player";
-	iframe.frameBorder = "0";
-	iframe.allow =
-		"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
-	iframe.allowFullscreen = true;
-	container.appendChild(iframe);
-	element.replaceWith(container);
+function replaceWithYoutubeLink(element: Element, videoId: string, href: string) {
+	const link = element.ownerDocument.createElement("a");
+	link.className = "youtube-link";
+	link.href = href;
+	link.setAttribute("aria-label", "Open YouTube video in browser");
+
+	const thumbnail = element.ownerDocument.createElement("img");
+	thumbnail.src = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+	thumbnail.alt = "YouTube video thumbnail";
+	link.appendChild(thumbnail);
+
+	element.replaceWith(link);
 }
 
 export function getLanguage(path: string): string {
@@ -517,7 +523,7 @@ export function processMarkdownHtml(
 
 			if (isYoutubeLink(src)) {
 				const videoId = getYoutubeId(src);
-				if (videoId) replaceWithYoutubeEmbed(img, videoId);
+				if (videoId) replaceWithYoutubeLink(img, videoId, src);
 			}
 		}
 	}
@@ -532,7 +538,7 @@ export function processMarkdownHtml(
 				parent.childNodes.length === 1
 			) {
 				const videoId = getYoutubeId(href);
-				if (videoId) replaceWithYoutubeEmbed(a, videoId);
+				if (videoId) replaceWithYoutubeLink(a, videoId, href);
 			}
 		}
 	}

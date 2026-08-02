@@ -18,7 +18,6 @@
         "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
         "img-src": "'self' asset: https: http://asset.localhost blob: data:",
         "connect-src": "'self'",
-        "frame-src": "https://www.youtube.com https://www.youtube-nocookie.com",
         "font-src": "'self' https://fonts.gstatic.com"
       },
       "assetProtocol": {

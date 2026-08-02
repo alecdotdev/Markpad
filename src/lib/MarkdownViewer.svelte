@@ -3558,21 +3558,17 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	}
 
-	:global(.video-container) {
-		position: relative;
-		padding-bottom: 56.25%;
-		height: 0;
-		overflow: hidden;
+	:global(.youtube-link) {
+		display: block;
 		max-width: 100%;
 		margin: 1em 0;
 	}
 
-	:global(.video-container iframe) {
-		position: absolute;
-		top: 0;
-		left: 0;
+	:global(.youtube-link img) {
+		display: block;
 		width: 100%;
-		height: 100%;
+		aspect-ratio: 16 / 9;
+		object-fit: cover;
 		border-radius: 8px;
 	}
 
