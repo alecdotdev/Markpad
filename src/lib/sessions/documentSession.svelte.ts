@@ -12,6 +12,16 @@ export type LoadMarkdownOptions = {
 	resetScrollHistory?: boolean;
 };
 
+/**
+ * What to do about a file the watcher reported as changed on disk.
+ * `conflict` means the owning tab has unsaved edits, so the choice belongs
+ * to the user rather than to a background reload.
+ */
+export type ExternalChangeOutcome =
+	| { action: 'ignore' }
+	| { action: 'reload'; tabId: string; path: string }
+	| { action: 'conflict'; tabId: string; path: string };
+
 type DocumentSessionOptions = {
 	setShowHome: (value: boolean) => void;
 	currentFile: () => string;
@@ -53,6 +63,67 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		return true;
 	}
 
+	/**
+	 * Decide what a `file-changed` event should do. The event names the file
+	 * that changed, so the tab that OWNS that path is the one affected —
+	 * reloading "the active tab" would pull one document's disk content over
+	 * a different document's buffer.
+	 *
+	 * A tab with unsaved edits is never reloaded: `setTabRawContent` replaces
+	 * `originalContent` too, so the overwrite would also erase the evidence
+	 * that anything was lost. The caller offers the user the choice instead.
+	 */
+	function resolveExternalChange(changedPath: string): ExternalChangeOutcome {
+		if (!changedPath) return { action: 'ignore' };
+		if (!shouldReloadExternalChange(changedPath)) return { action: 'ignore' };
+
+		const active = tabManager.activeTab;
+		const owner =
+			active && active.path === changedPath
+				? active
+				: tabManager.tabs.find((tab) => tab.path === changedPath);
+		if (!owner) return { action: 'ignore' };
+
+		if (owner.isDirty) return { action: 'conflict', tabId: owner.id, path: changedPath };
+
+		// `loadMarkdown` always writes into the active tab, so a background
+		// owner cannot be refreshed through it. The watcher only ever follows
+		// the active file, so this is a guard against a stale in-flight event,
+		// not a dropped update.
+		if (owner.id !== tabManager.activeTabId) return { action: 'ignore' };
+
+		return { action: 'reload', tabId: owner.id, path: changedPath };
+	}
+
+	/**
+	 * Replace a partial buffer (the >50KB preview read) with the whole file.
+	 * Must be awaited by every path that can lead to a write — entering the
+	 * editor or split view, editing front matter, toggling a task checkbox,
+	 * moving the tab to another window — because writing the partial buffer
+	 * back permanently truncates the document.
+	 *
+	 * Returns false when the buffer is still partial afterwards. A partial
+	 * buffer that already carries edits is left alone: replacing it would
+	 * trade the file's tail for the user's typing, so the caller has to stop
+	 * instead. Every editing entry point calls this first, which is what makes
+	 * that state unreachable in practice.
+	 */
+	async function ensureFullContent(tabId: string): Promise<boolean> {
+		const tab = tabManager.tabs.find((item) => item.id === tabId);
+		if (!tab) return false;
+		if (!tab.isTruncated) return true;
+		if (!tab.path) return true;
+		if (tab.isDirty) return false;
+		try {
+			const full = (await invoke('read_file_content', { path: tab.path })) as string;
+			tabManager.setTabRawContent(tabId, full);
+			return true;
+		} catch (error) {
+			options.onError('Error loading the rest of the file', error);
+			return false;
+		}
+	}
+
 	function updateLoading(tabId: string, loading: boolean) {
 		if (loading) loadingTabs.add(tabId);
 		else loadingTabs.delete(tabId);
@@ -87,11 +158,28 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				if (tab && !loadOptions.preserveEditState && !existing) tab.isEditing = settings.startInEditor;
 				const initialIsEditing = tab?.isEditing ?? false;
 				const initialIsSplit = tab?.isSplit ?? false;
-				const [, content, isFull] = (await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 })) as [string, string, boolean];
+				// `open_markdown_preview` returns only the first 50KB of a large
+				// file, which is fine behind a read-only preview because the
+				// background read below completes it. An editor bound to that
+				// partial buffer is one keystroke away from auto-saving it back
+				// over the whole document, so a pane that can write always gets
+				// the complete file up front — this is the path F5 and "reload
+				// from disk" take while edit or split mode is preserved.
+				let content: string;
+				let isFull: boolean;
+				if (initialIsEditing || initialIsSplit) {
+					content = (await invoke('read_file_content', { path: filePath })) as string;
+					isFull = true;
+				} else {
+					[, content, isFull] = (await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 })) as [string, string, boolean];
+				}
 				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath);
 				const processed = await options.renderMarkdown(content, filePath);
 				tabManager.updateTabContent(activeId, processed);
-				tabManager.setTabRawContent(activeId, content);
+				// `isFull === false` means this is only the leading slice of a
+				// large file. Marking the tab keeps anything downstream from
+				// mistaking it for the whole document and writing it back.
+				tabManager.setTabRawContent(activeId, content, !isFull);
 
 				if (!isFull) {
 					const canApplyFullLoad = () => {
@@ -151,6 +239,13 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	async function saveContent(tabId?: string): Promise<boolean> {
 		const tab = tabId ? tabManager.tabs.find((item) => item.id === tabId) : tabManager.activeTab;
 		if (!tab) return false;
+		// Backstop, not the main defence: every path that lets the user change
+		// a large file completes its buffer first. If one is ever missed, the
+		// write must fail loudly rather than silently truncate the document.
+		if (tab.isTruncated) {
+			options.onError('Refusing to save a partially loaded document', new Error(tab.path));
+			return false;
+		}
 		let targetPath = tab.path;
 		if (!targetPath) {
 			const selected = await save({
@@ -185,6 +280,11 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	async function saveContentAs(): Promise<boolean> {
 		const tab = tabManager.activeTab;
 		if (!tab) return false;
+		// A partial buffer would produce a silently incomplete copy.
+		if (tab.isTruncated) {
+			options.onError('Refusing to save a partially loaded document', new Error(tab.path));
+			return false;
+		}
 		const selected = await save({
 			filters: [
 				{ name: 'Markdown', extensions: ['md'] },
@@ -213,6 +313,9 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	async function toggleTaskCheckbox(sourceLine: number, nowChecked: boolean) {
 		const tab = tabManager.activeTab;
 		if (!tab || !tab.path) return false;
+		// Reading mode can reach a large file before its full buffer arrives.
+		// Editing and saving the preview slice would drop everything past it.
+		if (!(await ensureFullContent(tab.id))) return false;
 		const raw = tab.rawContent;
 		const body = getMarkdownBodyWithoutFrontMatter(raw);
 		const updatedBody = body.replace(/^(\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+)\[( |x|X)\]/gm, (match, prefix, _state, offset) => {
@@ -250,5 +353,5 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		return true;
 	}
 
-	return { loadMarkdown, saveContent, saveContentAs, toggleTaskCheckbox, shouldReloadExternalChange, canCloseTab };
+	return { loadMarkdown, saveContent, saveContentAs, toggleTaskCheckbox, shouldReloadExternalChange, resolveExternalChange, ensureFullContent, canCloseTab };
 }

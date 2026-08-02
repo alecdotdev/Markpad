@@ -30,6 +30,15 @@ export interface Tab {
 	isSplit: boolean;
 	splitRatio: number;
 	isScrollSynced: boolean;
+	/**
+	 * True while `rawContent` holds only the leading slice of a large file
+	 * (the >50KB preview read) instead of the whole document. Such a buffer
+	 * looks clean and authoritative but writing it back truncates the file,
+	 * so every path that can reach disk must complete it first — see
+	 * `ensureFullContent` in documentSession. Optional because tabs built
+	 * from a cross-window transfer payload always arrive complete.
+	 */
+	isTruncated?: boolean;
 }
 
 class TabManager {
@@ -137,7 +146,8 @@ class TabManager {
 					anchorLine: typeof saved.anchorLine === 'number' ? saved.anchorLine : 0,
 					isSplit: saved.isSplit === true,
 					splitRatio: typeof saved.splitRatio === 'number' ? saved.splitRatio : 0.5,
-					isScrollSynced: saved.isScrollSynced === true
+					isScrollSynced: saved.isScrollSynced === true,
+					isTruncated: false
 				});
 			}
 
@@ -177,7 +187,8 @@ class TabManager {
 			anchorLine: 0,
 			isSplit: false,
 			splitRatio: 0.5,
-			isScrollSynced: false
+			isScrollSynced: false,
+			isTruncated: false
 		});
 
 		this.activeTabId = id;
@@ -207,7 +218,8 @@ class TabManager {
 			anchorLine: 0,
 			isSplit: false,
 			splitRatio: 0.5,
-			isScrollSynced: false
+			isScrollSynced: false,
+			isTruncated: false
 		});
 
 		this.activeTabId = id;
@@ -238,7 +250,8 @@ class TabManager {
 			anchorLine: 0,
 			isSplit: false,
 			splitRatio: 0.5,
-			isScrollSynced: false
+			isScrollSynced: false,
+			isTruncated: false
 		});
 
 		this.activeTabId = id;
@@ -302,12 +315,24 @@ class TabManager {
 		}
 	}
 
-	setTabRawContent(id: string, raw: string) {
+	/**
+	 * Replace a tab's buffer with what was just read from disk: the new text
+	 * becomes both the buffer and the saved baseline, so the tab is clean.
+	 *
+	 * `isTruncated` says whether that read covered the whole file. It defaults
+	 * to false because every caller but the large-file preview read supplies a
+	 * complete document, and a stale `true` is the dangerous direction: it
+	 * would block saving a file that is actually intact. The opposite mistake
+	 * — a partial buffer that claims to be whole — is what truncates files, so
+	 * the preview read must pass it explicitly.
+	 */
+	setTabRawContent(id: string, raw: string, isTruncated = false) {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
 			tab.rawContent = raw;
 			tab.originalContent = raw;
 			tab.isDirty = false;
+			tab.isTruncated = isTruncated;
 		}
 	}
 

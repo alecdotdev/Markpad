@@ -252,7 +252,13 @@ export const translations: Record<LanguageCode, Translation> = {
             autoSaveFailed: 'Auto-save failed — unsaved changes still in memory',
 			noOtherWindows: 'No other windows to merge',
             savedNewerEdits: 'Saved — staying in edit mode because you have newer edits',
-            openExportedFileFailed: 'Could not open exported file'
+            openExportedFileFailed: 'Could not open exported file',
+            partialDocument: 'Cannot edit yet — this file is not fully loaded'
+        },
+        externalChange: {
+            message: 'This file changed on disk while you had unsaved changes.',
+            reload: 'Reload from disk',
+            keepMine: 'Keep my version'
         },
         modal: {
             confirmExit: 'Confirm Exit',
@@ -589,7 +595,13 @@ export const translations: Record<LanguageCode, Translation> = {
             autoSaveFailed: '自动保存失败 — 未保存的更改仍在内存中',
 			noOtherWindows: '没有其他可合并的窗口',
 			savedNewerEdits: '已保存 — 因为存在更新的编辑,继续保持编辑模式',
-			openExportedFileFailed: '无法打开导出的文件'
+			openExportedFileFailed: '无法打开导出的文件',
+			partialDocument: '暂时无法编辑 — 文件尚未完整加载'
+        },
+        externalChange: {
+            message: '此文件在你有未保存修改时被外部程序改动。',
+            reload: '从磁盘重新加载',
+            keepMine: '保留我的版本'
         },
         modal: {
             confirmExit: '确认退出',

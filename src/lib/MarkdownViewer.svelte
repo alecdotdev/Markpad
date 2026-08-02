@@ -458,13 +458,19 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			if (tabManager.activeTabId === tab.id) tick().then(renderRichContent);
 		},
 		dropRestoredTab: (tabId) => tabManager.closeTab(tabId),
+		// A partially loaded buffer must never be handed to another window.
+		// The transfer payload has no field for "incomplete" (see
+		// tabTransfer.ts) and the destination rebuilds the tab from the
+		// payload alone, so the arriving copy would look authoritative and its
+		// auto-save would truncate the file. handleDetach and moveTabToWindow
+		// complete the buffer first; these predicates are the backstop.
 		canTransfer: (tabId) => {
 			const tab = tabManager.tabs.find((item) => item.id === tabId);
-			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME';
+			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME' && !tab.isTruncated;
 		},
 		canDetach: (tabId) => {
 			const tab = tabManager.tabs.find((item) => item.id === tabId);
-			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME' && tabManager.tabs.length >= 2;
+			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME' && !tab.isTruncated && tabManager.tabs.length >= 2;
 		},
 		transferPayload: (tabId) => {
 			const tab = tabManager.tabs.find((item) => item.id === tabId);
@@ -816,6 +822,13 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	async function handleFrontMatterEdit(field: FrontMatterField, value: string) {
 		const tab = tabManager.activeTab;
 		if (!tab) return;
+		// Front matter is editable from reading mode, which a large file can
+		// reach while its buffer is still the preview slice. Rewriting that
+		// slice and saving it would drop the rest of the document.
+		if (!(await documentSession.ensureFullContent(tab.id))) {
+			addToast(t('toast.partialDocument', settings.language), 'error');
+			return;
+		}
 
 		try {
 			const nextValue = parseFrontMatterEditableValue(field, value);
@@ -894,6 +907,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	async function handleFrontMatterListChange(field: FrontMatterField, nextItems: string[]) {
 		const tab = tabManager.activeTab;
 		if (!tab) return;
+		// Same partial-buffer guard as handleFrontMatterEdit.
+		if (!(await documentSession.ensureFullContent(tab.id))) {
+			addToast(t('toast.partialDocument', settings.language), 'error');
+			return;
+		}
 
 		try {
 			const nextRaw = updateFrontMatterField(tab.rawContent, field.key, nextItems);
@@ -1717,9 +1735,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				} else {
 					try {
 						const content = (await invoke('read_file_content', { path: tab.path })) as string;
-						tab.rawContent = content;
+						// Goes through the store so a tab that held only the
+						// large-file preview slice stops being flagged partial.
+						tabManager.setTabRawContent(tab.id, content);
 						tab.isEditing = true;
-						tab.isDirty = false;
 					} catch (e) {
 						console.error('Failed to read file for editing', e);
 					}
@@ -1731,11 +1750,57 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	}
 
 	async function saveContent(tabId?: string): Promise<boolean> {
-		return documentSession.saveContent(tabId);
+		const saved = await documentSession.saveContent(tabId);
+		// Every route into here is an explicit decision — Cmd+S, the close
+		// dialog, a mode-toggle dialog — and the background debounce is held
+		// back entirely while a conflict is open (see the auto-save effect).
+		// So a save that lands here IS the answer "keep my version": our text
+		// is now the newest on disk and the bar has nothing left to ask.
+		if (saved) clearExternalChangeConflict(tabId ?? tabManager.activeTabId ?? '');
+		return saved;
 	}
 
 	async function saveContentAs(): Promise<boolean> {
 		return documentSession.saveContentAs();
+	}
+
+	// --- External change conflicts ---
+	// A file changed on disk while the tab holding it had unsaved edits. The
+	// reload is NOT performed: `setTabRawContent` replaces originalContent
+	// too, so an automatic reload would erase the edits and the fact that
+	// there were any. The tab is flagged instead and the user picks.
+	let externalChangeConflicts = $state<Record<string, true>>({});
+	let activeExternalChangeConflict = $derived(
+		tabManager.activeTabId ? externalChangeConflicts[tabManager.activeTabId] === true : false,
+	);
+
+	function noteExternalChangeConflict(tabId: string) {
+		if (externalChangeConflicts[tabId]) return;
+		externalChangeConflicts = { ...externalChangeConflicts, [tabId]: true };
+	}
+
+	function clearExternalChangeConflict(tabId: string) {
+		if (!externalChangeConflicts[tabId]) return;
+		const next = { ...externalChangeConflicts };
+		delete next[tabId];
+		externalChangeConflicts = next;
+	}
+
+	/** "Reload": the user chose the disk version over their own edits. */
+	async function resolveExternalChangeByReloading() {
+		const tab = tabManager.activeTab;
+		if (!tab?.path) return;
+		clearExternalChangeConflict(tab.id);
+		await loadMarkdown(tab.path, {
+			preserveEditState: true,
+			skipTabManagement: true,
+			resetScrollHistory: true,
+		});
+	}
+
+	/** "Keep my version": dismiss. The buffer stays dirty and saveable. */
+	function resolveExternalChangeByKeepingBuffer() {
+		if (tabManager.activeTabId) clearExternalChangeConflict(tabManager.activeTabId);
 	}
 
 	/**
@@ -1780,13 +1845,26 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			isDirty: tab.isDirty,
 			editable: tab.isEditing || tab.isSplit,
 			contentRef: tab.rawContent,
+			// Reactive too: clearing a conflict re-arms the timer on the next
+			// keystroke, so answering the bar resumes normal auto-save.
+			hasPendingConflict: externalChangeConflicts[tab.id] === true,
 		}));
 
 		untrack(() => {
 			const seenIds = new Set<string>();
 			for (const s of snapshot) {
 				seenIds.add(s.id);
-				const eligible = s.isDirty && s.path !== '' && s.editable;
+				// A tab with an unanswered external-change conflict is NOT
+				// eligible: the debounce would fire while the bar is still
+				// asking "reload or keep mine", write the buffer, and destroy
+				// the disk version the question was about — leaving the user to
+				// answer a question whose "reload" branch no longer exists.
+				// Only the silent background timer is held back. Every explicit
+				// save (Cmd+S, the close and mode-toggle dialogs) still goes
+				// through: pressing Save IS the answer "keep mine", and the
+				// `saveContent` wrapper clears the conflict so the bar comes
+				// down instead of re-asking.
+				const eligible = s.isDirty && s.path !== '' && s.editable && !s.hasPendingConflict;
 				const prevRef = lastContentRefByTab.get(s.id);
 				const refChanged = prevRef !== s.contentRef;
 
@@ -2265,14 +2343,26 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		if (!tab) return;
 
 		if (!tab.isSplit) {
-			if (!tab.isEditing && !tab.rawContent && tab.path) {
+			// Split view puts an editor on the buffer, and the first keystroke
+			// arms auto-save. Two buffers must never reach that point: an empty
+			// one (restored tab whose content was never read) and a partial one
+			// (large file whose background read has not landed, or was dropped
+			// because the user entered split during the ~2s window). The old
+			// guard was `!tab.rawContent`, which a partial buffer satisfies —
+			// so split view edited the truncated text and auto-save wrote it
+			// back over the whole file. `toggleEdit` always re-reads, which is
+			// why the same bug never reached the full editor.
+			if (tab.path && !tab.isEditing && !tab.rawContent) {
 				try {
 					const content = (await invoke('read_file_content', { path: tab.path })) as string;
-					tab.rawContent = content;
-					tab.originalContent = content;
+					tabManager.setTabRawContent(tab.id, content);
 				} catch (e) {
 					console.error('Failed to load raw content for split view', e);
 				}
+			}
+			if (!(await documentSession.ensureFullContent(tab.id))) {
+				addToast(t('toast.partialDocument', settings.language), 'error');
+				return;
 			}
 			tabManager.setSplitEnabled(tab.id, true);
 			if (liveMode) toggleLiveMode();
@@ -2531,11 +2621,23 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	// the Rust broker (never disk, never localStorage), and the source tab is
 	// deleted only after the destination confirms the claim, so any failure —
 	// window creation error, timeout — leaves the tab exactly where it was.
+	// A large file may still be holding only its preview slice. The receiving
+	// window cannot tell, so the buffer is completed here, before the payload
+	// is built — otherwise the document arrives short and gets written back
+	// that way.
 	async function handleDetach(tabId: string) {
-		await windowSession.detach(tabId);
+		if (!(await documentSession.ensureFullContent(tabId))) {
+			addToast(t('toast.partialDocument', settings.language), 'error');
+			return false;
+		}
+		return windowSession.detach(tabId);
 	}
 
 	async function moveTabToWindow(tabId: string, targetLabel: string, focusAfter = false) {
+		if (!(await documentSession.ensureFullContent(tabId))) {
+			addToast(t('toast.partialDocument', settings.language), 'error');
+			return false;
+		}
 		const moved = await windowSession.transfer(tabId, (token) => invoke('offer_tab_to_window', { targetLabel, token }));
 		if (moved && focusAfter) await invoke('focus_window', { label: targetLabel });
 		return moved;
@@ -2722,12 +2824,19 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			unlisteners.push(
 				await appWindow.listen('file-changed', (event) => {
 					const changedPath = event.payload as string;
-					if (!liveMode || !currentFile || changedPath !== currentFile) return;
-					// Skip events caused by our own auto-save / save invocations,
-					// otherwise the reload would clobber any keystrokes that landed
-					// between fs::write and this listener firing.
-					if (!documentSession.shouldReloadExternalChange(currentFile)) return;
-					loadMarkdown(currentFile);
+					if (!liveMode) return;
+					// The event names the changed file. Which tab that touches —
+					// and whether it may be reloaded at all — is decided by the
+					// session: it owns the self-write grace window (so our own
+					// auto-save does not bounce back) and it refuses to reload a
+					// tab with unsaved edits.
+					const outcome = documentSession.resolveExternalChange(changedPath);
+					if (outcome.action === 'ignore') return;
+					if (outcome.action === 'conflict') {
+						noteExternalChangeConflict(outcome.tabId);
+						return;
+					}
+					loadMarkdown(outcome.path);
 				}),
 			);
 
@@ -3123,6 +3232,18 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		oncloseTab={closeTabAndWindowIfLast} />
 
 	<Settings show={showSettings} {theme} onSetTheme={(t) => (theme = t)} onclose={() => (showSettings = false)} />
+
+	{#if activeExternalChangeConflict && !showHome}
+		<div class="external-change-bar" role="status">
+			<span class="external-change-text">{t('externalChange.message', settings.language)}</span>
+			<button class="external-change-action" onclick={resolveExternalChangeByReloading}>
+				{t('externalChange.reload', settings.language)}
+			</button>
+			<button class="external-change-action primary" onclick={resolveExternalChangeByKeepingBuffer}>
+				{t('externalChange.keepMine', settings.language)}
+			</button>
+		</div>
+	{/if}
 
 	{#if tabManager.activeTab && (tabManager.activeTab.path !== '' || tabManager.activeTab.title !== 'Recents') && !showHome}
 			<div
@@ -3972,6 +4093,49 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
 	}
 
+	/*
+	 * `.layout-container` is absolutely positioned from top: 0, so a bar in
+	 * normal flow would end up underneath it. Pinned just below the 36px
+	 * title bar instead, the way editors surface file-changed-on-disk notices.
+	 */
+	.external-change-bar {
+		position: fixed;
+		top: 36px;
+		left: 0;
+		right: 0;
+		z-index: 40000;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 14px;
+		background: color-mix(in srgb, var(--color-attention-fg, #9a6700) 14%, var(--color-canvas-overlay));
+		border-bottom: 1px solid var(--color-border-default);
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+		color: var(--color-fg-default);
+		font-family: var(--win-font), sans-serif;
+		font-size: 13px;
+	}
+	.external-change-text {
+		flex: 1;
+		min-width: 0;
+	}
+	.external-change-action {
+		flex: none;
+		padding: 4px 10px;
+		border: 1px solid var(--color-border-default);
+		border-radius: 6px;
+		background: var(--color-canvas-default);
+		color: var(--color-fg-default);
+		font-family: inherit;
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.external-change-action:hover {
+		background: color-mix(in srgb, var(--color-accent-fg) 8%, var(--color-canvas-default));
+	}
+	.external-change-action.primary {
+		border-color: color-mix(in srgb, var(--color-accent-fg) 40%, transparent);
+	}
 	.toast-container {
 		position: fixed;
 		bottom: 24px;
