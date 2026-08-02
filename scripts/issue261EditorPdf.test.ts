@@ -20,9 +20,20 @@ test('print layout releases measured fold heights before text reflows', () => {
 		styles,
 		/@media print\s*\{[\s\S]*?\.foldable-content-wrapper\s*\{[\s\S]*?height:\s*auto\s*!important;/,
 	);
+	// This test used to require the opposite of the line below: a collapsed
+	// fold was pinned to `height: 0 !important` on paper, which is how a
+	// collapsed section came to be missing from the PDF entirely while the
+	// HTML export of the same document contained it. The two export routes now
+	// both hand over the whole document; scripts/exportFoldParity.test.ts
+	// resolves the cascade to prove the section is actually visible rather than
+	// merely un-pinned here.
 	assert.match(
 		styles,
-		/@media print\s*\{[\s\S]*?\.foldable-content-wrapper\.is-collapsed\s*\{[\s\S]*?height:\s*0\s*!important;/,
+		/@media print\s*\{[\s\S]*?\.foldable-content-wrapper\.is-collapsed\s*\{[\s\S]*?height:\s*auto\s*!important;/,
+	);
+	assert.doesNotMatch(
+		styles,
+		/@media print\s*\{[\s\S]*?\.foldable-content-wrapper\.is-collapsed\s*\{[^}]*height:\s*0/,
 	);
 });
 

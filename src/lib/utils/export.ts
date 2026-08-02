@@ -57,6 +57,142 @@ const EXPORT_CSP = [
 	"form-action 'none'",
 ].join('; ');
 
+// The app paints itself from CSS variables that are selected by an attribute on
+// the root element: `:root[data-theme="dark"]`, `:root[data-theme="light"]` and
+// — for an imported VS Code theme — `:root[data-theme="vscode"]`, whose rule is
+// generated into a `<style>` tag and therefore travels with the copied
+// stylesheet. Without the attribute on the exported document none of those
+// selectors can ever match, so a file exported from a dark or an imported theme
+// arrived looking like neither.
+//
+// `system` is the deliberate exception. It is not a colour, it is the
+// instruction "use the colours of the machine I am reading this on", and the
+// app implements it by removing the attribute and letting
+// `@media (prefers-color-scheme: dark)` decide. An export carrying no attribute
+// reproduces exactly that: the same document, the same cascade, resolved
+// wherever it is opened. Freezing the exporter's momentary system colour
+// instead would produce a file that disagrees with the author's own screen the
+// next time their machine switches at sunset.
+//
+// The value is validated rather than trusted: it is interpolated into markup,
+// and `data-theme` is a plain string that a future import path could take from
+// a theme file. Anything unexpected degrades to the no-attribute (viewer's
+// system) case rather than escaping the attribute's quotes.
+const SAFE_EXPORT_THEME = /^[A-Za-z0-9_-]{1,32}$/;
+
+export function exportThemeAttribute(theme: string | null | undefined): string {
+	if (typeof theme !== 'string' || !SAFE_EXPORT_THEME.test(theme)) return '';
+	return ` data-theme="${theme}"`;
+}
+
+export interface ExportDocumentInput {
+	/** `document.documentElement.dataset.theme`, i.e. undefined for `system`. */
+	theme: string | null | undefined;
+	title: string;
+	/** The app's own stylesheets, already serialised. */
+	styles: string;
+	/** The finished `.markdown-body` content. */
+	articleHtml: string;
+}
+
+/**
+ * Assembles the single file that leaves the app. Kept separate from
+ * `exportAsHtml` (which owns the file dialog, the renderer round trip and the
+ * image embedding) so the shape of the artefact can be asserted directly.
+ */
+export function buildExportDocument(input: ExportDocumentInput): string {
+	return `<!DOCTYPE html>
+<html lang="en"${exportThemeAttribute(input.theme)}>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeHtmlText(input.title || 'Export')}</title>
+<style>
+${input.styles}
+html, body {
+	overflow: auto !important;
+	height: auto !important;
+	min-height: 100vh;
+	background-color: var(--color-canvas-default, #ffffff);
+	margin: 0;
+	padding: 0;
+}
+.markdown-body {
+	padding: 40px !important;
+	max-width: 900px;
+	margin: 0 auto;
+	height: auto !important;
+	overflow: visible !important;
+	min-height: 100%;
+}
+.lang-label {
+	display: none !important;
+}
+.export-frontmatter-panel {
+	margin: 0 0 24px 0;
+}
+.export-frontmatter-panel .frontmatter-grid {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: 8px 16px;
+	padding: 12px 0 0 0;
+}
+.export-frontmatter-panel .frontmatter-key {
+	color: var(--color-fg-muted, #57606a);
+	font-weight: 600;
+}
+.export-frontmatter-panel .frontmatter-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+.export-frontmatter-panel .frontmatter-tag {
+	border: 1px solid var(--color-border-default, #d0d7de);
+	border-radius: 999px;
+	padding: 2px 8px;
+	background: var(--color-neutral-muted, rgba(175, 184, 193, 0.2));
+}
+.markdown-body pre {
+	white-space: pre-wrap !important;
+	word-break: break-word !important;
+}
+/* Nothing in an exported file can open a fold: the policy above forbids
+   script, and the app's toggles are not there to click. A section that ships
+   collapsed therefore ships unreadable — its text is in the file, clipped to
+   zero height at zero opacity, with nothing that could ever reveal it.
+   Heading folds arrive open already (the render above is handed an empty fold
+   state); a callout written as "> [!note]-" carries its collapsed state in the
+   markup itself and has to be opened here. The print/PDF route takes the same
+   position from the other side, in the @media print block of styles.css. */
+.foldable-content-wrapper.is-collapsed {
+	height: auto !important;
+	opacity: 1 !important;
+	overflow: visible !important;
+}
+.markdown-alert-content.is-collapsed {
+	grid-template-rows: 1fr !important;
+	opacity: 1 !important;
+	overflow: visible !important;
+}
+.foldable-content-wrapper .content-inner,
+.markdown-alert-content .content-inner {
+	overflow: visible !important;
+}
+.header-fold-icon,
+.callout-fold-icon {
+	display: none !important;
+}
+</style>
+</head>
+<body>
+<article class="markdown-body">
+${input.articleHtml}
+</article>
+</body>
+</html>`;
+}
+
 async function buildExportArticle(ctx: ExportContext): Promise<{ html: string; embeddedImages: number; missingImages: number }> {
 	const body = getMarkdownBodyWithoutFrontMatter(ctx.rawContent);
 	const rendered = (await invoke('render_markdown', { content: body })) as string;
@@ -75,6 +211,13 @@ async function buildExportArticle(ctx: ExportContext): Promise<{ html: string; e
 	// DOMParser (inert — no script execution, no resource loads) and only ever
 	// assigns `innerHTML` from its own constant SVG strings.
 	const safeHtml = sanitizeMarkdownHtml(rendered);
+	// No collapsed headers, ever. An export is the act of handing the document
+	// to someone who does not have the app, the fold state or a way to open one,
+	// so every section ships expanded — a fold is a reading convenience of this
+	// session, not part of the document. The print/PDF path is held to the same
+	// rule from the other end (see the `@media print` block in styles.css, which
+	// un-collapses folds instead of clipping them to zero height), so the two
+	// export routes cannot disagree about what is in the file.
 	const processed = processMarkdownHtml(safeHtml, ctx.tabPath, new Set());
 	const wrapper = document.createElement('div');
 	wrapper.innerHTML = renderStaticFrontMatterPanel(parseFrontMatter(ctx.rawContent)) + processed;
@@ -136,70 +279,12 @@ export async function exportAsHtml(ctx: ExportContext): Promise<ExportHtmlResult
 
 	const article = await buildExportArticle(ctx);
 
-	const fullHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtmlText(ctx.tabTitle || 'Export')}</title>
-<style>
-${styles}
-html, body {
-	overflow: auto !important;
-	height: auto !important;
-	min-height: 100vh;
-	background-color: var(--color-canvas-default, #ffffff);
-	margin: 0;
-	padding: 0;
-}
-.markdown-body {
-	padding: 40px !important;
-	max-width: 900px;
-	margin: 0 auto;
-	height: auto !important;
-	overflow: visible !important;
-	min-height: 100%;
-}
-.lang-label {
-	display: none !important;
-}
-.export-frontmatter-panel {
-	margin: 0 0 24px 0;
-}
-.export-frontmatter-panel .frontmatter-grid {
-	display: grid;
-	grid-template-columns: max-content minmax(0, 1fr);
-	gap: 8px 16px;
-	padding: 12px 0 0 0;
-}
-.export-frontmatter-panel .frontmatter-key {
-	color: var(--color-fg-muted, #57606a);
-	font-weight: 600;
-}
-.export-frontmatter-panel .frontmatter-tags {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 6px;
-}
-.export-frontmatter-panel .frontmatter-tag {
-	border: 1px solid var(--color-border-default, #d0d7de);
-	border-radius: 999px;
-	padding: 2px 8px;
-	background: var(--color-neutral-muted, rgba(175, 184, 193, 0.2));
-}
-.markdown-body pre {
-	white-space: pre-wrap !important;
-	word-break: break-word !important;
-}
-</style>
-</head>
-<body>
-<article class="markdown-body">
-${article.html}
-</article>
-</body>
-</html>`;
+	const fullHtml = buildExportDocument({
+		theme: document.documentElement.dataset.theme,
+		title: ctx.tabTitle,
+		styles,
+		articleHtml: article.html,
+	});
 
 	try {
 		await invoke('save_file_content', { path: selected, content: fullHtml });

@@ -1386,6 +1386,18 @@ body {
 		size: auto;
 	}
 
+	/* A fold is a reading convenience of this session, not part of the
+	   document. Exporting is the act of handing the document to someone who
+	   has neither the app nor a way to open a collapsed section, so a print
+	   that clips one to zero height silently deletes text the author can
+	   still see two clicks away — and it disagreed with the HTML export,
+	   which renders every fold open (see utils/export.ts). Both routes now
+	   ship the whole document.
+
+	   Both collapse mechanisms have to be undone, and `opacity` matters as
+	   much as the size: the screen rules pair `height: 0` /
+	   `grid-template-rows: 0fr` with `opacity: 0`, so restoring only the
+	   size would print blank space where the section is. */
 	.foldable-content-wrapper {
 		height: auto !important;
 		transition: none !important;
@@ -1393,8 +1405,33 @@ body {
 	}
 
 	.foldable-content-wrapper.is-collapsed {
-		height: 0 !important;
-		overflow: hidden !important;
+		height: auto !important;
+		overflow: visible !important;
+		opacity: 1 !important;
+	}
+
+	.markdown-alert-content {
+		transition: none !important;
+		overflow: visible !important;
+	}
+
+	.markdown-alert-content.is-collapsed {
+		grid-template-rows: 1fr !important;
+		overflow: visible !important;
+		opacity: 1 !important;
+	}
+
+	.foldable-content-wrapper .content-inner,
+	.markdown-alert-content .content-inner {
+		overflow: visible !important;
+	}
+
+	/* The chevrons are the control for that fold. On paper they control
+	   nothing, and a collapsed one is rotated to point at content that is
+	   now printed open, so it would be actively misleading. */
+	.markdown-body .header-fold-icon,
+	.markdown-body .callout-fold-icon {
+		display: none !important;
 	}
 
 	.custom-title-bar,
