@@ -3,7 +3,14 @@
 	import { tabManager } from "../stores/tabs.svelte.js";
 	import { settings } from "../stores/settings.svelte.js";
 	import { t } from '../utils/i18n.js';
-	import { managedImageFromCopy, type ManagedImage } from '../utils/managedImages.js';
+	import {
+		forgetClosedTabs,
+		imagePathOf,
+		managedImageFromCopy,
+		resolveManagedImageRedo,
+		resolveManagedImageUndo,
+		type ManagedImage,
+	} from '../utils/managedImages.js';
 
 	import * as monaco from "monaco-editor";
 	import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
@@ -62,7 +69,11 @@
 	let vimStatusNode = $state<HTMLDivElement>();
 	let editor: monaco.editor.IStandaloneCodeEditor;
 	let isApplyingExternalScroll = false;
-	const managedImages: ManagedImage[] = $state([]);
+	let managedImages: ManagedImage[] = $state([]);
+	// Entries an undo has already deleted. A redo puts the embed back, so the
+	// entry has to leave this list or the next undo would try to delete the
+	// same file again.
+	let undoneImages: ManagedImage[] = $state([]);
 
 	let cursorPosition = $state<monaco.Position | null>(null);
 	let selectionCount = $state(0);
@@ -756,18 +767,38 @@
 		container.addEventListener("wheel", wheelListener, { capture: true });
 
 		const contentChangeListener = editor.onDidChangeModelContent((e) => {
+			const activeTabId = tabManager.activeTabId;
+			if (!activeTabId) return;
+
 			if (e.isUndoing && managedImages.length > 0) {
-				const currentContent = editor.getValue();
-				const last = managedImages[managedImages.length - 1];
-				if (!currentContent.includes(last.embed)) {
-					managedImages.pop();
-						const imgPath = `${last.parentDir}/${last.imageDirectory}/${last.filename}`;
-						invoke("delete_file", { path: imgPath })
-							.then(() => {
-								invoke("cleanup_empty_img_dir", { parentDir: last.parentDir, imageDirectory: last.imageDirectory });
-							})
-							.catch(console.error);
-				}
+				const { removed, remaining } = resolveManagedImageUndo(
+					managedImages,
+					activeTabId,
+					editor.getValue(),
+				);
+				if (!removed) return;
+				managedImages = remaining;
+				undoneImages = [...undoneImages, removed];
+				invoke("delete_file", { path: imagePathOf(removed) })
+					.then(() =>
+						invoke("cleanup_empty_img_dir", {
+							parentDir: removed.parentDir,
+							imageDirectory: removed.imageDirectory,
+						}),
+					)
+					.catch(console.error);
+				return;
+			}
+
+			if (e.isRedoing && undoneImages.length > 0) {
+				const { restored, remaining } = resolveManagedImageRedo(
+					undoneImages,
+					activeTabId,
+					editor.getValue(),
+				);
+				if (!restored) return;
+				undoneImages = remaining;
+				managedImages = [...managedImages, restored];
 			}
 		});
 
@@ -861,7 +892,12 @@
 			try {
 				// check for image in clipboard via Rust
 				const base64Image = await invoke("clipboard_read_image", { macosImageScaling: settings.macosImageScaling }).catch(() => null) as string | null;
-				if (base64Image && tabManager.activeTab?.path) {
+				// Captured before the first await: the copy and the edit are
+				// several round trips apart, and the tab that owns the embed
+				// is the one active when it was inserted, not whichever is
+				// active when the promise settles.
+				const pasteTabId = tabManager.activeTabId;
+				if (base64Image && pasteTabId && tabManager.activeTab?.path) {
 					const ext = "png"; // output of Rust command is always PNG
 					const filename = `paste_${Date.now()}.${ext}`;
 
@@ -901,7 +937,10 @@
 								},
 							]);
 
-							managedImages.push(managedImageFromCopy({ embed, parentDir, imageDirectory: imgDirName, relativePath: relPath }));
+							managedImages = [
+								...managedImages,
+								managedImageFromCopy({ tabId: pasteTabId, embed, parentDir, imageDirectory: imgDirName, relativePath: relPath }),
+							];
 							return;
 						}
 					}
@@ -1163,6 +1202,17 @@
 		}
 	});
 
+	// Closing a tab ends any claim its images had on being deleted by undo.
+	// Without this the lists grow for the lifetime of the window and keep
+	// entries whose tab -- and whose undo stack -- is long gone.
+	$effect(() => {
+		const openTabIds = new Set(tabManager.tabs.map((tab) => tab.id));
+		const prunedManaged = forgetClosedTabs(managedImages, openTabIds);
+		if (prunedManaged.length !== managedImages.length) managedImages = prunedManaged;
+		const prunedUndone = forgetClosedTabs(undoneImages, openTabIds);
+		if (prunedUndone.length !== undoneImages.length) undoneImages = prunedUndone;
+	});
+
 	$effect(() => {
 		const activeTabId = tabManager.activeTabId;
 		const content = value;
@@ -1262,6 +1312,8 @@
 		const match = tabPath.match(/^(.*)[/\\][^/\\]+$/);
 		if (!match) return;
 		const parentDir = match[1];
+		const dropTabId = tabManager.activeTabId;
+		if (!dropTabId) return;
 
 		try {
 			const imgDirName = settings.imageDirectory || "img";
@@ -1298,7 +1350,10 @@
 				],
 			);
 
-			managedImages.push(managedImageFromCopy({ embed, parentDir, imageDirectory: imgDirName, relativePath: relPath }));
+			managedImages = [
+				...managedImages,
+				managedImageFromCopy({ tabId: dropTabId, embed, parentDir, imageDirectory: imgDirName, relativePath: relPath }),
+			];
 		} catch (err) {
 			console.error("Failed to copy dropped file:", err);
 		}
