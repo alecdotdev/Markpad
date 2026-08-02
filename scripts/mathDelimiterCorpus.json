@@ -1,0 +1,243 @@
+{
+	"$comment": [
+		"Shared math-delimiter corpus. Read by BOTH sides of the render pipeline:",
+		"  src-tauri/src/lib.rs  -> the_backend_recognises_exactly_the_math_the_contract_lists",
+		"  scripts/mathDelimiterContract.test.ts -> the frontend's own decision",
+		"",
+		"The invariant it pins: the set of spans the BACKEND hides from comrak must",
+		"equal the set the FRONTEND renders with KaTeX. Neither side is the",
+		"reference -- both are asserted against the `math` list below.",
+		"  backend narrower  -> comrak mangles the formula before KaTeX sees it (#174/#177/#197)",
+		"  backend wider     -> the text is held back from Markdown and then rendered by nobody",
+		"",
+		"`markdown` and `math` are hand-authored: they state what SHOULD happen.",
+		"`html` is a capture of what convert_markdown really returns, so that the",
+		"frontend test runs on real renderer output; it cannot go stale, because",
+		"the_math_contract_corpus_is_a_live_capture asserts it every `cargo test`.",
+		"To refresh after a comrak upgrade, replace `html` with the value that test",
+		"reports. Never hand-edit `html`, and never edit `math` to match a failure --",
+		"a disagreement here is the bug, not the test.",
+		"",
+		"KNOWN GAP: a same-line `$$x$$` mixed into prose is passed through verbatim",
+		"by convertInlineMathDelimiters, so the frontend's decision about it is not",
+		"observable without re-implementing the rule in the test (which would defeat",
+		"the purpose). Display cases here therefore use the block form, whose",
+		"decision surfaces as data-math-source. Same-line `$$` is covered by the",
+		"Rust-side tests alone."
+	],
+	"cases": [
+		{
+			"name": "two prices in one sentence",
+			"markdown": "It cost $100 and $200 today.\n",
+			"html": "<p data-sourcepos=\"1:1-1:28\">It cost $100 and $200 today.</p>\n",
+			"math": []
+		},
+		{
+			"name": "a single price",
+			"markdown": "The price is $5.\n",
+			"html": "<p data-sourcepos=\"1:1-1:16\">The price is $5.</p>\n",
+			"math": []
+		},
+		{
+			"name": "a price range",
+			"markdown": "Between $5 and $10.\n",
+			"html": "<p data-sourcepos=\"1:1-1:19\">Between $5 and $10.</p>\n",
+			"math": []
+		},
+		{
+			"name": "prices run together",
+			"markdown": "$100$200 back to back.\n",
+			"html": "<p data-sourcepos=\"1:1-1:22\">$100$200 back to back.</p>\n",
+			"math": []
+		},
+		{
+			"name": "a lone dollar sign",
+			"markdown": "A lone $ sign.\n",
+			"html": "<p data-sourcepos=\"1:1-1:14\">A lone $ sign.</p>\n",
+			"math": []
+		},
+		{
+			"name": "a trailing dollar sign",
+			"markdown": "Trailing dollar $\n",
+			"html": "<p data-sourcepos=\"1:1-1:17\">Trailing dollar $</p>\n",
+			"math": []
+		},
+		{
+			"name": "a dollar followed by a space",
+			"markdown": "Costs $ 5 with a space.\n",
+			"html": "<p data-sourcepos=\"1:1-1:23\">Costs $ 5 with a space.</p>\n",
+			"math": []
+		},
+		{
+			"name": "an escaped dollar alone",
+			"markdown": "Costs \\$5 only.\n",
+			"html": "<p data-sourcepos=\"1:1-1:15\">Costs $5 only.</p>\n",
+			"math": []
+		},
+		{
+			"name": "a stray display delimiter in prose",
+			"markdown": "A stray $$ here.\n\nAnd *emphasis* after.\n",
+			"html": "<p data-sourcepos=\"1:1-1:16\">A stray $$ here.</p>\n<p data-sourcepos=\"3:1-3:21\">And <em data-sourcepos=\"3:5-3:14\">emphasis</em> after.</p>\n",
+			"math": []
+		},
+		{
+			"name": "prices on consecutive lines",
+			"markdown": "Costs $5 today\nand $6 tomorrow.\n",
+			"html": "<p data-sourcepos=\"1:1-2:16\">Costs $5 today<br data-sourcepos=\"1:15-1:15\" />\nand $6 tomorrow.</p>\n",
+			"math": []
+		},
+		{
+			"name": "a span may not cross a hard line break",
+			"markdown": "Opens $here\nand closes there$ later.\n",
+			"html": "<p data-sourcepos=\"1:1-2:24\">Opens $here<br data-sourcepos=\"1:12-1:12\" />\nand closes there$ later.</p>\n",
+			"math": []
+		},
+		{
+			"name": "an escaped dollar next to real math",
+			"markdown": "Pay \\$100 for $x$ items.\n",
+			"html": "<p data-sourcepos=\"1:1-1:33\">Pay $100 for $x$ items.</p>\n",
+			"math": [
+				{
+					"kind": "inline",
+					"source": "x"
+				}
+			]
+		},
+		{
+			"name": "a span may not cross an inline code span",
+			"markdown": "$a `x` b$ and $c_1$.\n",
+			"html": "<p data-sourcepos=\"1:1-1:27\">$a <code data-sourcepos=\"1:5-1:5\">x</code> b$ and $c_1$.</p>\n",
+			"math": [
+				{
+					"kind": "inline",
+					"source": "c_1"
+				}
+			]
+		},
+		{
+			"name": "dollars inside inline code are not math",
+			"markdown": "Use `$a$` and $b_1$ here.\n",
+			"html": "<p data-sourcepos=\"1:1-1:32\">Use <code data-sourcepos=\"1:6-1:8\">$a$</code> and $b_1$ here.</p>\n",
+			"math": [
+				{
+					"kind": "inline",
+					"source": "b_1"
+				}
+			]
+		},
+		{
+			"name": "a display delimiter inside a fence does not flip parity",
+			"markdown": "```sh\necho $$\n```\n\n$$\nx_1\n$$\n",
+			"html": "<pre data-sourcepos=\"1:1-3:3\"><code class=\"language-sh\">echo $$\n</code></pre>\n<p data-sourcepos=\"5:1-7:12\">$$<br data-sourcepos=\"5:13-5:13\" />\nx_1<br data-sourcepos=\"6:13-6:13\" />\n$$</p>\n",
+			"math": [
+				{
+					"kind": "display",
+					"source": "x_1"
+				}
+			]
+		},
+		{
+			"name": "currency and math in one CJK sentence",
+			"markdown": "价格是 $5，数学是 $x_1$。\n",
+			"html": "<p data-sourcepos=\"1:1-1:40\">价格是 $5，数学是 $x_1$。</p>\n",
+			"math": [
+				{
+					"kind": "inline",
+					"source": "x_1"
+				}
+			]
+		},
+		{
+			"name": "a price and a formula in one sentence",
+			"markdown": "Costs $5 but $x_1$ is math.\n",
+			"html": "<p data-sourcepos=\"1:1-1:34\">Costs $5 but $x_1$ is math.</p>\n",
+			"math": [
+				{
+					"kind": "inline",
+					"source": "x_1"
+				}
+			]
+		},
+		{
+			"name": "braced subscripts (issue #174)",
+			"markdown": "Let $\\bar{b}_{1} + \\bar{b}_{2}$ be the estimates.\n",
+			"html": "<p data-sourcepos=\"1:1-1:34\">Let $\\bar{b}_{1} + \\bar{b}_{2}$ be the estimates.</p>\n",
+			"math": [
+				{
+					"kind": "inline",
+					"source": "\\bar{b}_{1} + \\bar{b}_{2}"
+				}
+			]
+		},
+		{
+			"name": "adjacent inline spans",
+			"markdown": "$a$$b$\n",
+			"html": "<p data-sourcepos=\"1:1-1:24\">$a$$b$</p>\n",
+			"math": [
+				{
+					"kind": "inline",
+					"source": "a"
+				},
+				{
+					"kind": "inline",
+					"source": "b"
+				}
+			]
+		},
+		{
+			"name": "an inline formula with a caret",
+			"markdown": "Then $E=mc^2$ holds.\n",
+			"html": "<p data-sourcepos=\"1:1-1:24\">Then $E=mc^2$ holds.</p>\n",
+			"math": [
+				{
+					"kind": "inline",
+					"source": "E=mc^2"
+				}
+			]
+		},
+		{
+			"name": "an inline span holding markup characters",
+			"markdown": "$a < b \\& c * d$\n",
+			"html": "<p data-sourcepos=\"1:1-1:12\">$a &lt; b \\&amp; c * d$</p>\n",
+			"math": [
+				{
+					"kind": "inline",
+					"source": "a < b \\& c * d"
+				}
+			]
+		},
+		{
+			"name": "a formula in a task item",
+			"markdown": "- [ ] compute $x_1$\n",
+			"html": "<ul data-sourcepos=\"1:1-1:26\">\n<li data-sourcepos=\"1:1-1:26\"><input type=\"checkbox\" data-task-checkbox=\"\" disabled=\"\" /> compute $x_1$</li>\n</ul>\n",
+			"math": [
+				{
+					"kind": "inline",
+					"source": "x_1"
+				}
+			]
+		},
+		{
+			"name": "aligned rows (issue #197)",
+			"markdown": "$$\n\\begin{aligned}\na &= b \\\\\nc &= d\n\\end{aligned}\n$$\n",
+			"html": "<p data-sourcepos=\"1:1-6:12\">$$<br data-sourcepos=\"1:13-1:13\" />\n\\begin{aligned}<br data-sourcepos=\"2:13-2:13\" />\na &amp;= b \\\\<br data-sourcepos=\"3:13-3:13\" />\nc &amp;= d<br data-sourcepos=\"4:13-4:13\" />\n\\end{aligned}<br data-sourcepos=\"5:13-5:13\" />\n$$</p>\n",
+			"math": [
+				{
+					"kind": "display",
+					"source": "\\begin{aligned}\na &= b \\\\\nc &= d\n\\end{aligned}"
+				}
+			]
+		},
+		{
+			"name": "an escaped percent sign (issue #177)",
+			"markdown": "$$\n\\mathbf{Accuracy: 100\\%}\n$$\n",
+			"html": "<p data-sourcepos=\"1:1-3:12\">$$<br data-sourcepos=\"1:13-1:13\" />\n\\mathbf{Accuracy: 100\\%}<br data-sourcepos=\"2:13-2:13\" />\n$$</p>\n",
+			"math": [
+				{
+					"kind": "display",
+					"source": "\\mathbf{Accuracy: 100\\%}"
+				}
+			]
+		}
+	]
+}

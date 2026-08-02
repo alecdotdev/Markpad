@@ -862,11 +862,359 @@ mod tests {
         assert!(!html.contains("<em"), "unexpected parser output: {html}");
     }
 
+    // -----------------------------------------------------------------
+    // Math delimiters
+    //
+    // comrak runs CommonMark inline rules inside math delimiters, so KaTeX
+    // never sees what the user typed. The three cases below are the
+    // reported symptoms of that one cause; the block after them is the
+    // other half of the bargain, because a rule that mistakes prose for
+    // math breaks far more documents than the bug it fixes.
+    // -----------------------------------------------------------------
+
+    /// The rendered text with the markup taken back out, i.e. roughly what
+    /// `textContent` hands to KaTeX in the frontend.
+    fn rendered_math_source(html: &str) -> String {
+        let mut out = String::new();
+        let mut rest = html;
+        while let Some(at) = rest.find('<') {
+            out.push_str(&rest[..at]);
+            match rest[at..].find('>') {
+                Some(end) => rest = &rest[at + end + 1..],
+                None => {
+                    rest = "";
+                    break;
+                }
+            }
+        }
+        out.push_str(rest);
+        out.replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&amp;", "&")
+    }
+
     #[test]
-    fn display_math_underscore_protection_preserves_escaped_underscores() {
+    fn issue_174_inline_math_keeps_both_braced_subscripts() {
+        // `$\bar{b}_{1} + \bar{b}_{2}$` — the two `_` are both left- and
+        // right-flanking, so CommonMark pairs them into an `<em>` and KaTeX
+        // receives `$\bar{b}<em>{1} + \bar{b}</em>{2}$`. That is the whole of
+        // "only the first subscript can use braces", and why a space before
+        // the first `_` appeared to fix it.
+        let html = convert_markdown("Let $\\bar{b}_{1} + \\bar{b}_{2}$ be the estimates.\n");
+        assert!(!html.contains("<em"), "math was parsed as emphasis: {html}");
+        assert!(
+            html.contains("$\\bar{b}_{1} + \\bar{b}_{2}$"),
+            "the formula did not survive: {html}",
+        );
+    }
+
+    #[test]
+    fn issue_197_display_math_keeps_the_row_separators_of_an_aligned_block() {
+        // `\\` is a CommonMark escape for a literal `\`, so every row
+        // separator of the block is eaten and KaTeX renders "Only One
+        // Long-Long Line" that overflows horizontally.
+        let markdown =
+            "$$\n\\begin{aligned}\na &= b \\\\\nc &= d \\\\\ne &= f\n\\end{aligned}\n$$\n";
+        let html = convert_markdown(markdown);
+        let source = rendered_math_source(&html);
         assert_eq!(
-            protect_display_math_underscores("outside_a $$x\\_y_z$$ outside_b"),
-            format!("outside_a $$x\\{DISPLAY_MATH_UNDERSCORE_SENTINEL}y{DISPLAY_MATH_UNDERSCORE_SENTINEL}z$$ outside_b"),
+            source.matches("\\\\").count(),
+            2,
+            "the row separators were eaten as CommonMark escapes: {html}",
+        );
+        assert!(
+            source.contains("a &= b \\\\"),
+            "the row separators were eaten as CommonMark escapes: {html}",
+        );
+    }
+
+    #[test]
+    fn issue_177_math_keeps_escaped_percent_signs() {
+        // `\%` loses its backslash to CommonMark, and the bare `%` then
+        // starts a TeX comment: KaTeX reports "Unexpected end of input in a
+        // macro argument".
+        let html = convert_markdown("$$\\mathbf{Accuracy: 100\\%}$$\n");
+        assert!(
+            html.contains("\\mathbf{Accuracy: 100\\%}"),
+            "the escaped percent sign was eaten: {html}",
+        );
+    }
+
+    #[test]
+    fn math_delimiters_survive_every_other_commonmark_inline_rule() {
+        // The point of masking the span rather than one character class:
+        // emphasis, escapes and code marks are all TeX here.
+        let html = convert_markdown("$$a*b*c \\_ \\{ \\& ~y~ [z](w)$$\n");
+        assert!(!html.contains("<em"), "got: {html}");
+        assert!(!html.contains("<del"), "got: {html}");
+        assert!(!html.contains("<a "), "got: {html}");
+        assert!(
+            rendered_math_source(&html).contains("$$a*b*c \\_ \\{ \\& ~y~ [z](w)$$"),
+            "got: {html}",
+        );
+    }
+
+    #[test]
+    fn a_multiline_display_math_block_keeps_one_line_per_source_line() {
+        // The mask is per line, so the block still occupies six lines and
+        // the frontend still sees one `<br />` per row.
+        let markdown = "$$\n\\begin{aligned}\nx &= 1\n\\end{aligned}\n$$\n\n- [ ] task\n";
+        let html = convert_markdown(markdown);
+        assert_eq!(html.matches("<br").count(), 4, "got: {html}");
+        assert!(
+            html.contains("data-sourcepos=\"7:1-7:10\""),
+            "the task moved off line 7: {html}",
+        );
+    }
+
+    #[test]
+    fn a_crlf_display_math_block_keeps_its_line_endings() {
+        let html = convert_markdown("$$\r\na_1 \\\\\r\nb_2\r\n$$\r\n");
+        assert!(!html.contains("<em"), "got: {html}");
+        assert!(
+            rendered_math_source(&html).contains("a_1 \\\\"),
+            "got: {html}",
+        );
+    }
+
+    // --- the other half: prose that must NOT become math ----------------
+
+    #[test]
+    fn two_prices_in_one_sentence_are_not_a_math_span() {
+        // The failure mode that matters most. `$100 and $200` pairs under any
+        // naive "next `$` closes it" rule and would silently swallow the
+        // Markdown of every document that mentions two prices.
+        let html = convert_markdown("It cost $100 and $200 today.\n");
+        assert!(
+            html.contains("It cost $100 and $200 today."),
+            "a price was treated as math: {html}",
+        );
+    }
+
+    #[test]
+    fn ordinary_dollar_amounts_are_not_math_spans() {
+        for markdown in [
+            "The price is $5.\n",
+            "Between $5 and $10.\n",
+            "$100$200 back to back.\n",
+            "A lone $ sign.\n",
+            "Trailing dollar $\n",
+            "Costs $ 5 with a space.\n",
+            "$5\n$6\n",
+        ] {
+            let html = convert_markdown(markdown);
+            assert_eq!(
+                rendered_math_source(&html).trim(),
+                markdown.trim(),
+                "input {markdown:?} was rewritten: {html}",
+            );
+        }
+    }
+
+    #[test]
+    fn an_escaped_dollar_never_opens_a_math_span() {
+        let html = convert_markdown("Pay \\$100 for $x$ items.\n");
+        assert!(
+            html.contains("Pay $100 for $x$ items."),
+            "the escaped dollar opened a span: {html}",
+        );
+    }
+
+    #[test]
+    fn dollars_inside_code_never_open_a_math_span() {
+        // A single `$$` inside a fence used to flip the delimiter parity of
+        // the entire document, because the old protection just split on `$$`.
+        let markdown = "```sh\necho $$\n```\n\nA *word* and $$x_1$$ after.\n\n`$a$` stays code.\n";
+        let html = convert_markdown(markdown);
+        assert!(html.contains("<em"), "the fence ate the emphasis: {html}");
+        assert!(
+            html.contains("$$x_1$$"),
+            "the math after the fence lost its protection: {html}",
+        );
+        assert!(
+            html.contains(">$a$</code>"),
+            "an inline code span was treated as math: {html}",
+        );
+    }
+
+    #[test]
+    fn a_math_span_never_reaches_across_an_inline_code_span() {
+        // The frontend cannot pair delimiters across a `<code>` element —
+        // `processInlineMath` rejects the whole subtree — so neither may the
+        // backend: masking here would silently eat the code span.
+        let html = convert_markdown("$a `x` b$ and *emphasis*.\n");
+        assert!(html.contains(">x</code>"), "got: {html}");
+        assert!(html.contains("<em"), "got: {html}");
+    }
+
+    #[test]
+    fn a_math_span_never_reaches_across_a_line_break() {
+        // `hardbreaks` puts each source line in its own text node, so an
+        // unpaired `$` must not reach the next line and blank out its
+        // Markdown.
+        let html = convert_markdown("Costs $5 today\nand *this* is emphasis $\n");
+        assert!(html.contains("<em"), "got: {html}");
+    }
+
+    #[test]
+    fn an_unpaired_display_delimiter_does_not_swallow_the_document() {
+        let markdown = "$$ unpaired\n\nA *word*.\n\nAnother paragraph with $$ too.\n";
+        let html = convert_markdown(markdown);
+        assert!(html.contains("<em"), "the stray `$$` ran away: {html}");
+    }
+
+    #[test]
+    fn a_document_containing_the_mask_prefix_still_round_trips() {
+        // Uniqueness is by construction, not by luck: the prefix grows until
+        // the document does not contain it.
+        let markdown = format!("{MATH_MASK_PREFIX}0{MATH_MASK_SUFFIX} and $x_1$ here.\n");
+        let html = convert_markdown(&markdown);
+        assert!(
+            html.contains(&format!("{MATH_MASK_PREFIX}0{MATH_MASK_SUFFIX}")),
+            "the document's own text was eaten: {html}",
+        );
+        assert!(html.contains("$x_1$"), "the math was lost: {html}");
+        assert!(!html.contains("<em"), "got: {html}");
+    }
+
+    #[test]
+    fn a_masked_span_is_escaped_the_way_comrak_escapes_text() {
+        let html = convert_markdown("$a < b & c > d \"e\"$\n");
+        assert!(
+            html.contains("$a &lt; b &amp; c &gt; d &quot;e&quot;$"),
+            "the restored span was not escaped: {html}",
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // The cross-language math-delimiter contract
+    //
+    // Everything above proves the backend hides the right spans from
+    // comrak. It cannot prove the thing correctness actually rests on:
+    // that the set the backend hides equals the set the *frontend*
+    // renders. Those are two implementations of one rule in two
+    // languages, and until now only one of them was pinned — loosening
+    // `findInlineMathEnd` in markdown.ts would have left every test in
+    // this file green.
+    //
+    //   backend ⊂ frontend → comrak mangles the formula before KaTeX
+    //                        sees it; that is #174, #177 and #197.
+    //   backend ⊃ frontend → the text is held back from Markdown and
+    //                        then rendered by nobody: the reader gets
+    //                        dead text that is neither prose nor a
+    //                        formula.
+    //
+    // So both sides are asserted against one shared, hand-authored
+    // table: scripts/mathDelimiterCorpus.json. The other half lives in
+    // scripts/mathDelimiterContract.test.ts and runs the real frontend.
+    // Change one side's rule and exactly one of the two goes red.
+    // -----------------------------------------------------------------
+
+    #[derive(serde::Deserialize)]
+    struct MathContractSpan {
+        kind: String,
+        source: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct MathContractCase {
+        name: String,
+        markdown: String,
+        html: String,
+        math: Vec<MathContractSpan>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct MathContractCorpus {
+        cases: Vec<MathContractCase>,
+    }
+
+    fn math_contract_corpus() -> MathContractCorpus {
+        serde_json::from_str(include_str!("../../scripts/mathDelimiterCorpus.json"))
+            .expect("scripts/mathDelimiterCorpus.json must stay valid JSON")
+    }
+
+    /// What the backend decided, in the corpus's vocabulary.
+    fn recognised_math(markdown: &str) -> Vec<(String, String)> {
+        let regions = code_region_ranges(markdown);
+        find_math_spans(markdown, &regions)
+            .into_iter()
+            .map(|(start, end)| {
+                let span = &markdown[start..end];
+                match span
+                    .strip_prefix("$$")
+                    .and_then(|inner| inner.strip_suffix("$$"))
+                {
+                    // `extractDisplayMathBlock` trims; mirror it exactly.
+                    Some(inner) => ("display".to_owned(), inner.trim().to_owned()),
+                    None => ("inline".to_owned(), span[1..span.len() - 1].to_owned()),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_backend_recognises_exactly_the_math_the_contract_lists() {
+        for case in math_contract_corpus().cases {
+            let expected: Vec<(String, String)> = case
+                .math
+                .iter()
+                .map(|span| (span.kind.clone(), span.source.clone()))
+                .collect();
+            assert_eq!(
+                recognised_math(&case.markdown),
+                expected,
+                "{}: the backend and the contract disagree about what is math\n  input: {:?}",
+                case.name,
+                case.markdown,
+            );
+        }
+    }
+
+    #[test]
+    fn the_math_contract_corpus_is_a_live_capture() {
+        // Keeps the `html` the frontend test consumes honest: it is what
+        // this renderer produces today, not what it produced once.
+        for case in math_contract_corpus().cases {
+            assert_eq!(
+                convert_markdown(&case.markdown),
+                case.html,
+                "{}: scripts/mathDelimiterCorpus.json no longer matches this \
+                 renderer — replace its `html` with the value on the left, and \
+                 leave `markdown` and `math` alone",
+                case.name,
+            );
+        }
+    }
+
+    #[test]
+    fn math_in_a_heading_keeps_the_anchor_a_wikilink_can_reach() {
+        // comrak derives the heading id from the *rendered* text, so the mask
+        // would otherwise become the anchor and silently break every
+        // `[[#heading]]` pointing at a heading that contains a formula.
+        let heading = "A heading with $x_1$";
+        let html = convert_markdown(&format!("# {heading}\n"));
+        assert!(html.contains("$x_1$"), "the math was lost: {html}");
+        assert_eq!(
+            heading_anchor_id(heading),
+            "a-heading-with-x_1",
+            "the wikilink side changed",
+        );
+        assert!(
+            html.contains("id=\"a-heading-with-x_1\""),
+            "the mask leaked into the anchor: {html}",
+        );
+    }
+
+    #[test]
+    fn math_in_a_link_destination_keeps_the_link_working() {
+        // The token has to survive `escape_href` too, which is why it is
+        // plain ASCII rather than a private-use character.
+        let html = convert_markdown("[t](http://example.com/$a$)\n");
+        assert!(
+            html.contains("href=\"http://example.com/$a$\""),
+            "the link destination was mangled: {html}",
         );
     }
 
@@ -1296,8 +1644,8 @@ mod tests {
                 (|s| process_wikilinks(s).into_owned()) as LineTransform,
             ),
             (
-                "protect_display_math_underscores",
-                protect_display_math_underscores as LineTransform,
+                "mask_math_spans",
+                (|s| mask_math_spans(s).text) as LineTransform,
             ),
         ]
     }
@@ -1397,7 +1745,7 @@ mod tests {
             let autolinks = process_parenthesized_autolinks(content);
             let embeds = process_internal_embeds(&autolinks);
             let links = process_wikilinks(&embeds);
-            protect_display_math_underscores(&links)
+            mask_math_spans(&links).text
         };
         for input in LINE_CONTRACT_CORPUS {
             assert_transform_preserves_line_numbers("the preprocessing pipeline", pipeline, input);
@@ -1430,8 +1778,14 @@ mod tests {
         // Calls in `convert_markdown` that are not preprocessing steps.
         // `annotate_task_checkboxes` runs on the rendered HTML, after
         // sourcepos numbers exist; it is the fail-safe for this contract
-        // rather than a participant in it.
-        let not_a_transform = ["markdown_to_html", "annotate_task_checkboxes"];
+        // rather than a participant in it. `restore_math_spans` also runs on
+        // the rendered HTML — it is the second half of `mask_math_spans`,
+        // which *is* registered, and it never sees the source buffer.
+        let not_a_transform = [
+            "markdown_to_html",
+            "annotate_task_checkboxes",
+            "restore_math_spans",
+        ];
 
         let mut found: Vec<String> = call
             .captures_iter(body)
@@ -2031,21 +2385,441 @@ fn process_parenthesized_autolinks(content: &str) -> Cow<'_, str> {
     }
 }
 
-const DISPLAY_MATH_UNDERSCORE_SENTINEL: &str = "\u{E000}";
+// ---------------------------------------------------------------------------
+// Math spans
+//
+// comrak keeps applying CommonMark inline rules *inside* math delimiters, so
+// the formula KaTeX finally sees has already been rewritten. Three reported
+// bugs are the same bug:
+//
+//   #174  `$\bar{b}_{1} + \bar{b}_{2}$` — the two `_` pair into `<em>`, which
+//         is why only the first subscript ever worked and why putting a space
+//         in front of it "fixed" it (a space makes the `_` non-left-flanking).
+//   #197  `$$ … \\ … $$` — `\\` is a CommonMark escape for a literal `\`, so
+//         every row separator of an `aligned` block is eaten and the whole
+//         block collapses onto one over-wide line.
+//   #177  `\%` loses its backslash, and a bare `%` starts a TeX comment that
+//         swallows the rest of the formula ("Unexpected end of input").
+//
+// Patching one character class at a time (the previous
+// `protect_display_math_underscores` only rewrote `_`, and only between `$$`)
+// cannot win: Markdown has no business parsing TeX at all. So the whole span
+// is replaced by an opaque token before comrak runs and put back afterwards.
+//
+// Deliberately NOT handled here: `\(…\)` and `\[…\]`, which the frontend also
+// renders. They have the same root cause and are not an oversight — CommonMark
+// eats the backslash (`\(` → `(`) before the frontend ever sees a delimiter, so
+// they have never worked in Markpad at all. Fixing them is a separate change
+// with its own regression surface; masking them here would silently start
+// claiming text that no released version ever treated as math.
+//
+// The token is deliberately plain ASCII rather than a private-use character:
+// comrak percent-encodes anything non-ASCII that ends up in a link
+// destination (`http://x/$a$` would come back as `http://x/%EE%80%80…`),
+// while `[A-Z0-9]` survives text nodes, attribute values and hrefs verbatim
+// and carries no CommonMark meaning. Uniqueness is established by
+// construction instead of by luck: the prefix grows until it does not occur
+// in the document.
+// ---------------------------------------------------------------------------
 
-fn protect_display_math_underscores(content: &str) -> String {
-    content
-        .split("$$")
-        .enumerate()
-        .map(|(index, segment)| {
-            if index % 2 == 1 {
-                segment.replace('_', DISPLAY_MATH_UNDERSCORE_SENTINEL)
-            } else {
-                segment.to_owned()
+const MATH_MASK_PREFIX: &str = "MPMATHMASK";
+const MATH_MASK_SUFFIX: char = 'E';
+
+struct MaskedMath {
+    /// The source with every math span replaced by a token.
+    text: String,
+    /// The token prefix actually used — see `mask_math_spans`.
+    prefix: String,
+    /// The masked source, one entry per line of each span, indexed by token.
+    spans: Vec<String>,
+}
+
+/// Byte ranges of `content` that may hold math: one entry per line, with the
+/// code regions cut out.
+///
+/// The split mirrors what the frontend can see. `convert_markdown` renders
+/// with `hardbreaks`, so every source line becomes its own DOM text node, and
+/// `processInlineMath` skips `code`/`pre` subtrees entirely — a `$` on the far
+/// side of a line break or of an inline code span is in a different text node
+/// and can never pair. Scanning the raw buffer the same way is what keeps the
+/// two ends agreeing, and it is also what stops a single `$$` inside a fenced
+/// block from flipping the delimiter parity of the whole document.
+fn math_scan_segments(content: &str, regions: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let len = content.len();
+    let mut segments = Vec::new();
+    let mut line_start = 0usize;
+    // `regions` is sorted and both loops only move forward, so each region is
+    // visited once across the whole document rather than once per line.
+    let mut first_region = 0usize;
+    loop {
+        let newline = content[line_start..]
+            .find('\n')
+            .map(|offset| line_start + offset)
+            .unwrap_or(len);
+        let mut line_end = newline;
+        if line_end > line_start && content.as_bytes()[line_end - 1] == b'\r' {
+            line_end -= 1;
+        }
+
+        while first_region < regions.len() && regions[first_region].1 <= line_start {
+            first_region += 1;
+        }
+        let mut cursor = line_start;
+        for &(region_start, region_end) in &regions[first_region..] {
+            if region_end <= cursor {
+                continue;
             }
-        })
-        .collect::<Vec<_>>()
-        .join("$$")
+            if region_start >= line_end {
+                break;
+            }
+            if region_start > cursor {
+                segments.push((cursor, region_start.min(line_end)));
+            }
+            cursor = cursor.max(region_end);
+            if cursor >= line_end {
+                break;
+            }
+        }
+        if cursor < line_end {
+            segments.push((cursor, line_end));
+        }
+
+        if newline >= len {
+            break;
+        }
+        line_start = newline + 1;
+    }
+    segments
+}
+
+fn char_before(content: &str, low: usize, at: usize) -> Option<char> {
+    if at <= low {
+        return None;
+    }
+    content[low..at].chars().next_back()
+}
+
+fn char_after(content: &str, high: usize, dollar: usize) -> Option<char> {
+    let next = dollar + 1;
+    if next >= high {
+        return None;
+    }
+    content[next..high].chars().next()
+}
+
+/// The closing `$` of an inline span opened at `open`, or `None`.
+///
+/// A faithful port of `findInlineMathEnd` in `src/lib/utils/markdown.ts`, and
+/// the reason `$100 and $200` is not math: the first candidate closer decides,
+/// and a candidate preceded by whitespace or followed by a digit does not
+/// merely get skipped — it abandons the span. Anything looser turns ordinary
+/// prices into formulas, which is a far worse failure than the bug being
+/// fixed here.
+fn find_inline_close(content: &str, low: usize, high: usize, from: usize) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut index = from;
+    while index < high {
+        if bytes[index] != b'$' {
+            index += 1;
+            continue;
+        }
+        let before = char_before(content, low, index);
+        if before == Some('\\') {
+            index += 1;
+            continue;
+        }
+        if before.is_some_and(char::is_whitespace) {
+            return None;
+        }
+        if char_after(content, high, index).is_some_and(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        return Some(index);
+    }
+    None
+}
+
+/// The end offset (exclusive) of a `$$…$$` span opened at `open`.
+///
+/// Within one line this is `findDisplayMathEnd`. Across lines it is the block
+/// form `processDisplayMathBlocks` renders, so both delimiters must sit alone
+/// on their line; that is what stops two unrelated `$$` in prose from pairing
+/// across a hard break. The search stops at a blank line (which ends the
+/// CommonMark block) and at any code region.
+fn find_display_close(
+    content: &str,
+    regions: &[(usize, usize)],
+    open: usize,
+    segment_end: usize,
+) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let len = content.len();
+
+    let mut index = open + 2;
+    while index + 1 < segment_end {
+        if bytes[index] == b'$' && bytes[index + 1] == b'$' && bytes[index - 1] != b'\\' {
+            return Some(index + 2);
+        }
+        index += 1;
+    }
+
+    let (opener_line_end, mut next_line_start) = line_bounds(content, open);
+    if !content[open + 2..opener_line_end].trim().is_empty() {
+        return None;
+    }
+    while next_line_start < len {
+        let (line_end, following) = line_bounds(content, next_line_start);
+        let line = &content[next_line_start..line_end];
+        if line.trim().is_empty() {
+            return None;
+        }
+        if regions
+            .iter()
+            .any(|&(start, end)| start < line_end && end > next_line_start)
+        {
+            return None;
+        }
+        if let Some(offset) = line.find("$$") {
+            let close = next_line_start + offset;
+            if content[next_line_start..close].trim().is_empty()
+                && content[close + 2..line_end].trim().is_empty()
+            {
+                return Some(close + 2);
+            }
+        }
+        next_line_start = following;
+    }
+    None
+}
+
+/// `(end of the line holding `at`, start of the next line)`, with `\r`
+/// excluded from the first and `len` used when there is no next line.
+fn line_bounds(content: &str, at: usize) -> (usize, usize) {
+    let len = content.len();
+    let newline = content[at..]
+        .find('\n')
+        .map(|offset| at + offset)
+        .unwrap_or(len);
+    let mut line_end = newline;
+    if line_end > 0 && content.as_bytes()[line_end - 1] == b'\r' {
+        line_end -= 1;
+    }
+    (line_end, (newline + 1).min(len))
+}
+
+/// The math spans of `content`, as sorted, non-overlapping byte ranges.
+///
+/// A port of `convertInlineMathDelimiters` in `src/lib/utils/markdown.ts`,
+/// which is the only thing that decides what the user actually sees rendered.
+/// Recognising a span here that the frontend will not render would strip the
+/// Markdown out of ordinary prose; recognising less would leave the formula
+/// mangled — so the rules have to be the same rules.
+fn find_math_spans(content: &str, regions: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let bytes = content.as_bytes();
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut barrier = 0usize;
+
+    for (segment_start, segment_end) in math_scan_segments(content, regions) {
+        if segment_end <= barrier {
+            continue;
+        }
+        // A multi-line span already consumed the head of this line.
+        let low = segment_start.max(barrier);
+        let mut index = low;
+        // Lets `$a$$b$` open a second span while keeping `$$` itself out of it.
+        let mut previous_dollar_allows_open = false;
+
+        while index < segment_end {
+            if bytes[index] != b'$' {
+                previous_dollar_allows_open = false;
+                index += content[index..].chars().next().map_or(1, char::len_utf8);
+                continue;
+            }
+            let before = char_before(content, low, index);
+            let after = char_after(content, segment_end, index);
+
+            if before != Some('\\') && after == Some('$') {
+                match find_display_close(content, regions, index, segment_end) {
+                    Some(end) => {
+                        spans.push((index, end));
+                        if end > segment_end {
+                            barrier = end;
+                            break;
+                        }
+                        previous_dollar_allows_open = true;
+                        index = end;
+                    }
+                    None => {
+                        previous_dollar_allows_open = false;
+                        index += 2;
+                    }
+                }
+                continue;
+            }
+
+            if before == Some('\\')
+                || (before == Some('$') && !previous_dollar_allows_open)
+                || after.is_some_and(char::is_whitespace)
+            {
+                previous_dollar_allows_open = false;
+                index += 1;
+                continue;
+            }
+
+            match find_inline_close(content, low, segment_end, index + 1) {
+                Some(close) => {
+                    spans.push((index, close + 1));
+                    previous_dollar_allows_open = true;
+                    index = close + 1;
+                }
+                None => {
+                    previous_dollar_allows_open = false;
+                    index += 1;
+                }
+            }
+        }
+    }
+    spans
+}
+
+/// Replaces every math span with a token comrak cannot rewrite.
+///
+/// One token per line of a span, so a six-line `$$…$$` block still occupies
+/// six lines: the line-number contract in `mod tests` is not negotiable, and a
+/// span collapsed into a single token would move every task checkbox below it.
+/// Leading indentation stays outside the token so that a formula inside a list
+/// item keeps belonging to that item.
+fn mask_math_spans(content: &str) -> MaskedMath {
+    // Case-insensitively, because comrak lowercases the token again when it
+    // derives a heading id from it — see `restore_math_spans`.
+    let haystack = content.to_ascii_lowercase();
+    let mut prefix = String::from(MATH_MASK_PREFIX);
+    while haystack.contains(&prefix.to_ascii_lowercase()) {
+        prefix.push('X');
+    }
+
+    let regions = code_region_ranges(content);
+    let found = find_math_spans(content, &regions);
+    if found.is_empty() {
+        return MaskedMath {
+            text: content.to_owned(),
+            prefix,
+            spans: Vec::new(),
+        };
+    }
+
+    let mut text = String::with_capacity(content.len());
+    let mut spans: Vec<String> = Vec::new();
+    let mut copied_to = 0usize;
+    for (start, end) in found {
+        text.push_str(&content[copied_to..start]);
+        for piece in content[start..end].split_inclusive('\n') {
+            let mut body = piece;
+            let mut line_ending = "";
+            if let Some(stripped) = body.strip_suffix('\n') {
+                body = stripped;
+                line_ending = "\n";
+                if let Some(stripped) = body.strip_suffix('\r') {
+                    body = stripped;
+                    line_ending = "\r\n";
+                }
+            }
+            let indent = body.len() - body.trim_start().len();
+            text.push_str(&body[..indent]);
+            let core = &body[indent..];
+            if !core.is_empty() {
+                text.push_str(&format!("{prefix}{}{MATH_MASK_SUFFIX}", spans.len()));
+                spans.push(core.to_owned());
+            }
+            text.push_str(line_ending);
+        }
+        copied_to = end;
+    }
+    text.push_str(&content[copied_to..]);
+
+    MaskedMath {
+        text,
+        prefix,
+        spans,
+    }
+}
+
+/// Puts the masked source back into the rendered HTML.
+///
+/// The span is re-escaped the way comrak escapes a text node, not inserted
+/// raw: the token can legitimately land in a text node, an `alt` value or an
+/// `href`, and `&<>"` are the four characters that would otherwise change the
+/// meaning of the markup in any of the three. The frontend reads the span back
+/// out with `textContent`, which undoes the escaping before KaTeX sees it.
+///
+/// A heading is the one place the token appears twice in two different
+/// spellings: comrak anchorizes the heading's rendered text into `id=` and
+/// `href="#…"`, which lowercases it. There the *anchorized* source goes back
+/// instead, so that `[[#A heading with $x_1$]]` still resolves — the wikilink
+/// side computes the same id from the raw buffer with `heading_anchor_id`.
+fn restore_math_spans(html: &str, masked: &MaskedMath) -> String {
+    if masked.spans.is_empty() {
+        return html.to_owned();
+    }
+    let anchor_prefix = masked.prefix.to_ascii_lowercase();
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some((at, anchored)) = [
+        (rest.find(masked.prefix.as_str()), false),
+        (rest.find(anchor_prefix.as_str()), true),
+    ]
+    .into_iter()
+    .filter_map(|(at, anchored)| at.map(|at| (at, anchored)))
+    .min()
+    {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + masked.prefix.len()..];
+        let digits = after
+            .as_bytes()
+            .iter()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count();
+        let suffix = if anchored {
+            MATH_MASK_SUFFIX.to_ascii_lowercase()
+        } else {
+            MATH_MASK_SUFFIX
+        };
+        let index = if digits > 0 && after[digits..].starts_with(suffix) {
+            after[..digits].parse::<usize>().ok()
+        } else {
+            None
+        };
+        match index.and_then(|index| masked.spans.get(index)) {
+            Some(original) if anchored => {
+                out.push_str(&Anchorizer::new().anchorize(original.clone()));
+                rest = &after[digits + suffix.len_utf8()..];
+            }
+            Some(original) => {
+                out.push_str(&escape_html_text(original));
+                rest = &after[digits + suffix.len_utf8()..];
+            }
+            None => {
+                out.push_str(&rest[at..at + masked.prefix.len()]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn escape_html_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// ⚠️ Every preprocessing step below is bound by a line-number contract:
@@ -2059,7 +2833,7 @@ fn convert_markdown(content: &str) -> String {
     let processed_autolinks = process_parenthesized_autolinks(content);
     let processed_embeds = process_internal_embeds(&processed_autolinks);
     let processed_links = process_wikilinks(&processed_embeds);
-    let protected_math = protect_display_math_underscores(&processed_links);
+    let masked_math = mask_math_spans(&processed_links);
 
     let mut options = ComrakOptions {
         extension: ComrakExtensionOptions {
@@ -2079,9 +2853,8 @@ fn convert_markdown(content: &str) -> String {
     options.render.hardbreaks = true;
     options.render.sourcepos = true;
 
-    let html = markdown_to_html(&protected_math, &options)
-        .replace(DISPLAY_MATH_UNDERSCORE_SENTINEL, "_");
-    annotate_task_checkboxes(html, content)
+    let html = markdown_to_html(&masked_math.text, &options);
+    annotate_task_checkboxes(restore_math_spans(&html, &masked_math), content)
 }
 
 /// Marks the rendered task checkboxes the frontend is allowed to toggle.
