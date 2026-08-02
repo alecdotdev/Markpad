@@ -8,6 +8,7 @@ import {
 	resolveExportImagePath,
 	rewriteMarkdownHrefForExport,
 } from './exportHtml.js';
+import { sanitizeMarkdownHtml } from './sanitize.js';
 
 interface ExportContext {
 	rawContent: string;
@@ -26,10 +27,55 @@ export interface PdfExportContext {
 	osType: 'macos' | 'windows' | 'linux' | 'unknown';
 }
 
+// An exported file leaves the app: it is opened in the user's default browser
+// straight from the export prompt, mailed on, dropped in a shared folder. None
+// of the app's own protections travel with it, so it carries its own policy as
+// a second, independent line of defence behind the sanitizer — a bug in the
+// filter should not be enough to get script into someone else's browser.
+//
+// Everything an export needs is inline or embedded, so the document needs no
+// network privileges beyond images and media. Verified against a real export
+// shape in Chrome (both over http: and as a `file://` document, where the meta
+// tag is enforced the same way):
+//   - `style-src 'unsafe-inline'` keeps the copied stylesheet and the inline
+//     `style` attributes (`max-width:100%` on media) working; without it the
+//     page loses all layout.
+//   - `img-src`/`media-src data:` keeps embedded images and the `mask-image`
+//     data URIs in the copied CSS working; `https:`/`http:` keeps images the
+//     export deliberately leaves remote working.
+//   - the only things the policy blocks are things that were already dead in an
+//     exported file: `asset:` URLs left behind by an image that failed to embed,
+//     and KaTeX's relative `@font-face` URLs, which 404 without the policy too.
+//   - link navigation, `<details>` toggling and text selection are unaffected.
+const EXPORT_CSP = [
+	"default-src 'none'",
+	'img-src data: https: http:',
+	'media-src data: https: http:',
+	"style-src 'unsafe-inline'",
+	'font-src data:',
+	"base-uri 'none'",
+	"form-action 'none'",
+].join('; ');
+
 async function buildExportArticle(ctx: ExportContext): Promise<{ html: string; embeddedImages: number; missingImages: number }> {
 	const body = getMarkdownBodyWithoutFrontMatter(ctx.rawContent);
 	const rendered = (await invoke('render_markdown', { content: body })) as string;
-	const processed = processMarkdownHtml(rendered, ctx.tabPath, new Set());
+	// The export used to write `rendered` to disk untouched. comrak runs with
+	// `unsafe_ = true`, so a script the preview had filtered out was still live
+	// in the exported file — and the exported file has no CSP of the app's, gets
+	// opened in the user's default browser straight from the export prompt, and
+	// gets forwarded to other people. Sanitize here, at the seam where the
+	// untrusted document enters the pipeline, rather than after
+	// `processMarkdownHtml`: everything that function emits (fold wrappers,
+	// chevron SVGs, callout containers, `<video>`/`<audio>` replacements) plus
+	// the front-matter panel below is markup Markpad builds itself, and running
+	// the filter over our own output only creates a way for a future tightening
+	// of the policy to silently delete parts of the export. Nothing downstream
+	// can reintroduce untrusted markup: `processMarkdownHtml` parses with
+	// DOMParser (inert — no script execution, no resource loads) and only ever
+	// assigns `innerHTML` from its own constant SVG strings.
+	const safeHtml = sanitizeMarkdownHtml(rendered);
+	const processed = processMarkdownHtml(safeHtml, ctx.tabPath, new Set());
 	const wrapper = document.createElement('div');
 	wrapper.innerHTML = renderStaticFrontMatterPanel(parseFrontMatter(ctx.rawContent)) + processed;
 
@@ -94,6 +140,7 @@ export async function exportAsHtml(ctx: ExportContext): Promise<ExportHtmlResult
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtmlText(ctx.tabTitle || 'Export')}</title>
 <style>
