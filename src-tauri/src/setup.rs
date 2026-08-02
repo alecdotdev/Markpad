@@ -212,6 +212,57 @@ fn nearest_existing_ancestor(path: &Path, exists: impl Fn(&Path) -> bool) -> Opt
     path.ancestors().find(|candidate| exists(candidate))
 }
 
+/// The levels that have to be created for `dir` to exist, shallowest first.
+///
+/// Returned as a list rather than deferring to `create_dir_all` so each level
+/// becomes its own rollback step: creating `...\Start Menu\Programs` on a
+/// profile that has neither folder must not leave an orphaned `Start Menu`
+/// behind when a later install step fails.
+#[cfg(any(target_os = "windows", test))]
+fn missing_directories(dir: &Path, exists: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
+    let mut missing: Vec<PathBuf> = dir
+        .ancestors()
+        .take_while(|candidate| !exists(candidate))
+        .map(Path::to_path_buf)
+        .collect();
+    // `ancestors()` runs deepest first; creation has to go the other way.
+    missing.reverse();
+    missing
+}
+
+/// Creates every missing level of `dir` and records the ones we created.
+///
+/// The filesystem is reached through `exists`/`create` so this, and not a
+/// Windows-only branch, holds the whole decision: which levels to create,
+/// which to hand to the rollback, and what to do when one of them turns up
+/// underneath us. `mod tests` drives it against a real temporary directory on
+/// whatever OS runs `cargo test`.
+///
+/// A failure is returned, never swallowed. The caller asked for this shortcut
+/// explicitly (it is a checkbox in the installer UI), and #364 gave the
+/// install exactly two outcomes: complete, or rolled back. Skipping a
+/// shortcut and reporting success would add a third one in which the user is
+/// told the install worked and then finds no icon -- the same symptom as
+/// #122, minus the error message that says what to do about it.
+#[cfg(any(target_os = "windows", test))]
+fn ensure_directory(
+    dir: &Path,
+    exists: impl Fn(&Path) -> bool,
+    create: impl Fn(&Path) -> std::io::Result<()>,
+    steps: &mut Vec<InstallStep>,
+) -> std::io::Result<()> {
+    for missing in missing_directories(dir, exists) {
+        match create(&missing) {
+            Ok(()) => steps.push(InstallStep::CreatedDir(missing)),
+            // Something else got there first. It is now not ours to remove,
+            // so it must not become a rollback step.
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
 /// A per-user install and an all-users install keep their own hive. Only wipe
 /// the *other* hive's file associations when no installation is registered
 /// there; otherwise an all-users uninstall would break a coexisting per-user
@@ -539,6 +590,30 @@ fn create_shortcut(
             )
         }
     };
+    // mslnk writes the .lnk with a plain file create and will not build the
+    // path leading to it. A trimmed or freshly provisioned profile can be
+    // missing the per-user `...\Start Menu\Programs` folder, and a redirected
+    // %PUBLIC% or %USERPROFILE% can leave `\Desktop` absent, so the install
+    // failed for a directory we are perfectly able to create (#122).
+    //
+    // Classified through `io_error_message` rather than `describe`: this is a
+    // real io::Error, so ERROR_ACCESS_DENIED can be read off its kind instead
+    // of being guessed at with another write probe.
+    ensure_directory(
+        &dir,
+        |candidate| candidate.exists(),
+        // A closure, not `fs::create_dir` itself: the generic function item
+        // binds one concrete lifetime and does not satisfy the higher-ranked
+        // `Fn(&Path)` bound.
+        |candidate| fs::create_dir(candidate),
+        steps,
+    )
+    .map_err(|e| {
+        io_error_message(
+            &format!("Failed to create the shortcut directory {}", dir.display()),
+            &e,
+        )
+    })?;
     let sl = ShellLink::new(target_exe).map_err(|e| describe(e.to_string()))?;
     sl.create_lnk(&lnk).map_err(|e| describe(e.to_string()))?;
     steps.push(InstallStep::CreatedShortcut {
@@ -1369,6 +1444,229 @@ mod tests {
         assert!(script.contains("if %waits% geq 30 goto delete"));
         let wait_block = &script[..script.find(":delete").unwrap()];
         assert!(!wait_block.contains("del /f /q"));
+    }
+
+    // -- shortcut target directory (#122) ------------------------------------
+    //
+    // `create_shortcut` cannot run here: it is `cfg(target_os = "windows")`
+    // and builds a real `.lnk` through `mslnk`. The section is therefore split
+    // in two, and neither half was run on Windows for this change.
+    //
+    //  * `missing_directories` / `ensure_directory` carry every decision the
+    //    fix makes -- which levels to create, which of them the rollback owns,
+    //    what happens when one appears underneath us, and whether a failure
+    //    stops the install. They take the filesystem as closures, so the tests
+    //    below drive them against a real temporary directory on the machine
+    //    running `cargo test`. On macOS/Linux CI that is a genuine
+    //    create-and-record run against the OS, not a mock.
+    //
+    //  * what cannot be reached from here is whether `create_shortcut` calls
+    //    them at all. That single fact is asserted against the source text of
+    //    this file. It proves the call exists and precedes `create_lnk`; it
+    //    proves nothing about how Windows behaves when %USERPROFILE%\Desktop
+    //    or `...\Start Menu\Programs` is missing, and nothing about mslnk.
+
+    /// A temporary directory that does not exist yet, so a test can watch it
+    /// being created. Uses `random_suffix` for the same reason the uninstaller
+    /// does: no fixed name in a shared temp directory.
+    struct TempRoot(PathBuf);
+
+    impl TempRoot {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("markpad-setup-test-{}", random_suffix()));
+            std::fs::create_dir(&path).expect("temp root");
+            Self(path)
+        }
+
+        fn join(&self, tail: &str) -> PathBuf {
+            self.0.join(tail)
+        }
+    }
+
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn create_dir_on_disk(path: &Path) -> std::io::Result<()> {
+        std::fs::create_dir(path)
+    }
+
+    fn on_disk(path: &Path) -> bool {
+        path.exists()
+    }
+
+    #[test]
+    fn missing_directories_lists_the_levels_to_create_shallowest_first() {
+        let existing = ["/users/me"];
+        let exists = |path: &Path| existing.contains(&path.to_string_lossy().as_ref());
+        assert_eq!(
+            missing_directories(Path::new("/users/me/start menu/programs"), exists),
+            vec![
+                PathBuf::from("/users/me/start menu"),
+                PathBuf::from("/users/me/start menu/programs"),
+            ],
+        );
+    }
+
+    #[test]
+    fn missing_directories_creates_nothing_for_a_directory_that_is_there() {
+        let exists = |path: &Path| path == Path::new("/users/me/desktop");
+        assert!(missing_directories(Path::new("/users/me/desktop"), exists).is_empty());
+    }
+
+    // The #122 case, on a real filesystem: the shortcut directory is absent
+    // and nothing but this code is going to create it.
+    #[test]
+    fn ensure_directory_creates_a_missing_shortcut_directory() {
+        let root = TempRoot::new();
+        let programs = root.join("Start Menu").join("Programs");
+        assert!(!programs.exists(), "precondition: nothing there yet");
+
+        let mut steps = Vec::new();
+        ensure_directory(&programs, on_disk, create_dir_on_disk, &mut steps)
+            .expect("the installer can create this directory");
+
+        assert!(programs.is_dir(), "the .lnk needs a directory to go into");
+    }
+
+    #[test]
+    fn ensure_directory_hands_every_level_it_created_to_the_rollback() {
+        let root = TempRoot::new();
+        let programs = root.join("Start Menu").join("Programs");
+        let mut steps = Vec::new();
+        ensure_directory(&programs, on_disk, create_dir_on_disk, &mut steps).unwrap();
+
+        assert_eq!(
+            steps,
+            vec![
+                InstallStep::CreatedDir(root.join("Start Menu")),
+                InstallStep::CreatedDir(programs.clone()),
+            ],
+        );
+        // #364's rollback walks the steps backwards, so the deepest level goes
+        // first and `remove_dir` finds each one empty.
+        assert_eq!(
+            rollback_actions(&steps),
+            vec![
+                RollbackAction::RemoveDir(programs),
+                RollbackAction::RemoveDir(root.join("Start Menu")),
+            ],
+        );
+    }
+
+    #[test]
+    fn ensure_directory_never_offers_an_existing_directory_to_the_rollback() {
+        let root = TempRoot::new();
+        let desktop = root.join("Desktop");
+        std::fs::create_dir(&desktop).unwrap();
+
+        let mut steps = Vec::new();
+        ensure_directory(&desktop, on_disk, create_dir_on_disk, &mut steps).unwrap();
+
+        assert!(
+            steps.is_empty(),
+            "a rolled back install must not delete the user's own Desktop"
+        );
+        assert!(desktop.is_dir());
+    }
+
+    #[test]
+    fn ensure_directory_does_not_claim_a_directory_that_appeared_underneath_it() {
+        let root = TempRoot::new();
+        let desktop = root.join("Desktop");
+        // Only the leaf is reported missing, which is what
+        // `candidate.exists()` reports in `create_shortcut`. A blanket
+        // `|_| false` instead walks the ancestors all the way to the
+        // filesystem root and asks us to create *that* -- and creating a root
+        // that is already there is `AlreadyExists` on Unix but
+        // ERROR_ACCESS_DENIED on Windows, so the run died on a level this test
+        // never meant to exercise.
+        let only_the_leaf_is_missing = |candidate: &Path| candidate != desktop;
+        // Reports missing, then exists by the time we create it.
+        let mut steps = Vec::new();
+        ensure_directory(
+            &desktop,
+            only_the_leaf_is_missing,
+            |path| {
+                std::fs::create_dir(path)?;
+                std::fs::create_dir(path)
+            },
+            &mut steps,
+        )
+        .expect("losing the race is not an install failure");
+
+        assert!(desktop.is_dir());
+        assert!(
+            steps.is_empty(),
+            "we did not create it, so we must not remove it"
+        );
+    }
+
+    // The judgement call: a directory we cannot create fails the install (and
+    // #364 unwinds it) instead of quietly dropping a shortcut the user ticked.
+    #[test]
+    fn ensure_directory_fails_the_install_rather_than_skipping_the_shortcut() {
+        let mut steps = Vec::new();
+        let error = ensure_directory(
+            Path::new("/users/me/Desktop"),
+            |_| false,
+            |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "Access is denied",
+                ))
+            },
+            &mut steps,
+        )
+        .expect_err("must not report success without the shortcut");
+
+        assert!(steps.is_empty(), "a failed create is not a rollback step");
+        // The installer routes this through io_error_message, so the frontend
+        // still gets the locale-independent elevation marker.
+        assert!(io_error_message("Failed to create the shortcut directory", &error)
+            .starts_with("ELEVATION_REQUIRED: "));
+    }
+
+    /// The body of `create_shortcut`, so the source assertion below cannot be
+    /// satisfied by its own text further down this file.
+    fn create_shortcut_source() -> String {
+        const SOURCE: &str = include_str!("setup.rs");
+        // The repo has no `.gitattributes`, so the Windows runner checks this
+        // file out through `core.autocrlf=true` and `include_str!` hands back
+        // CRLF. Every `\n`-anchored search below would then miss. Normalise
+        // once, up front, rather than teaching each search about `\r`.
+        let source = SOURCE.replace("\r\n", "\n");
+        let start = source
+            .find("fn create_shortcut(")
+            .expect("create_shortcut must exist");
+        let body = &source[start..];
+        let end = body
+            .find("\n}\n")
+            .expect("create_shortcut must be brace-terminated")
+            + 2;
+        body[..end].to_string()
+    }
+
+    #[test]
+    fn create_shortcut_creates_the_target_directory_before_writing_the_lnk() {
+        let body = create_shortcut_source();
+        let ensured = body.find("ensure_directory").unwrap_or_else(|| {
+            panic!(
+                "create_shortcut must create its target directory first: on a \
+                 trimmed image the per-user Start Menu \\Programs folder and \
+                 even %USERPROFILE%\\Desktop can be absent, and mslnk will not \
+                 create them (#122)"
+            )
+        });
+        let written = body
+            .find("create_lnk")
+            .expect("create_shortcut must write a .lnk");
+        assert!(
+            ensured < written,
+            "the directory has to exist before the .lnk is written into it"
+        );
     }
 
     #[test]
