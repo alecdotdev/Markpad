@@ -56,11 +56,12 @@ const RULES: Rule[] = [
 		name: 'YouTube links never become embedded frames',
 		why: 'The app dropped frame-src from its CSP and renders YouTube as a thumbnail anchor that opens the browser; an iframe path is the pre-fix version and cannot load.',
 		marker: /createElement\((['"])iframe\1\)/g,
-		// KNOWN STALE COPY — replaceWithYoutubeEmbed in MarkdownViewer.svelte is
-		// an uncalled pre-fix leftover. Delete it and this allowlist entry
-		// together; the entry exists only so this rule can guard the rest of the
-		// tree today.
-		allowed: ['src/lib/MarkdownViewer.svelte'],
+		// Allowed nowhere. The entry that used to sit here covered
+		// `replaceWithYoutubeEmbed` in MarkdownViewer.svelte, an uncalled
+		// pre-fix leftover, and said to delete the two together — #388 deleted
+		// the copy, so the entry goes with it and the rule now guards the
+		// whole tree.
+		allowed: [],
 	},
 	{
 		name: 'DOMPurify is configured in one place',
