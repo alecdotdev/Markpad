@@ -1,0 +1,223 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+
+// Runes and the Tauri bridge, shimmed the way truncatedBufferGuard.test.ts
+// shims them: the stores are runes modules, and Node's test runner gives every
+// file its own process, so this cannot leak into another suite.
+const g = globalThis as any;
+const runeEffect = (fn: () => void) => {
+	void fn;
+};
+runeEffect.root = (fn: () => unknown) => fn();
+g.$state = (value: unknown) => value;
+g.$state.raw = (value: unknown) => value;
+g.$state.snapshot = (value: unknown) => value;
+g.$derived = (value: unknown) => value;
+g.$derived.by = (fn: () => unknown) => fn();
+g.$effect = runeEffect;
+g.window = g.window ?? {};
+Object.defineProperty(g, 'navigator', { value: { language: 'en-US' }, configurable: true });
+Object.defineProperty(g, 'localStorage', {
+	value: { getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {} },
+	configurable: true,
+});
+
+/*
+ * #379 made every read that fills a WRITABLE buffer report whether the decode
+ * was lossy, so the tab can refuse to write U+FFFD back over a file that was
+ * merely in another encoding. Three reads kept the bare command:
+ * `ensureFullContent`, and the two in MarkdownViewer that fill the editor and
+ * the split pane. They were safe — but only because each re-read a file whose
+ * tab `loadMarkdown` had already flagged. That is an invariant held by call
+ * sites agreeing with each other, and the failure mode when one stops agreeing
+ * is a destroyed document. It is now held by the code: every one of them reads
+ * the fidelity itself.
+ *
+ * `ensureFullContent` is exercised for real below. The two MarkdownViewer sites
+ * are in a Svelte component and are asserted against its source: those tests
+ * establish that the checked command is called and its verdict stored, not that
+ * the store then behaves — `lossyDecodeSaveGuard.test.ts` covers that.
+ *
+ * The second half of this file is the toast the guard's refusal used to
+ * trigger every 1.5 seconds.
+ */
+
+const PARTIAL = 'first half';
+const FULL = 'first half and the rest';
+
+/** Set per test. `get_os_type` is the settings store booting on import. */
+let handleInvoke: (cmd: string, args: Record<string, unknown>) => unknown = (cmd) => {
+	if (cmd === 'get_os_type') return 'macos';
+	throw new Error(`unexpected invoke: ${cmd}`);
+};
+const errors: string[] = [];
+
+g.window.__TAURI_INTERNALS__ = {
+	invoke: (command: string, args: Record<string, unknown>) =>
+		Promise.resolve(handleInvoke(command.replace(/^plugin:[^|]*\|/, ''), args ?? {})),
+	transformCallback: (fn: unknown) => fn,
+};
+
+const { tabManager } = await import('../src/lib/stores/tabs.svelte.js');
+const { createDocumentSession } = await import('../src/lib/sessions/documentSession.svelte.js');
+
+function makeSession() {
+	return createDocumentSession({
+		setShowHome: () => {},
+		currentFile: () => tabManager.activeTab?.path ?? '',
+		resetScrollHistory: () => {},
+		renderMarkdown: async () => '<p>x</p>',
+		afterLoad: async () => {},
+		saveRecentFile: () => {},
+		deleteRecentFile: () => {},
+		setLoadingTabs: () => {},
+		measureInitialViewport: () => {},
+		isScrolling: () => false,
+		renderRichContent: () => {},
+		onError: (message) => errors.push(message),
+		selfWriteGraceMs: 400,
+		cancelPendingAutoSave: () => {},
+		askClose: async () => 'discard' as const,
+		onCloseSaveNewerEdits: () => {},
+		onCloseAutoSaveFailed: () => {},
+	});
+}
+
+/** Open a >50KB file and leave the background full read pending forever. */
+async function openPartial() {
+	tabManager.closeAll();
+	errors.length = 0;
+	handleInvoke = (cmd) => {
+		if (cmd === 'open_markdown_preview') return ['<p>preview</p>', PARTIAL, false, false];
+		if (cmd === 'read_file_content_checked') return new Promise(() => {});
+		throw new Error(`unexpected invoke: ${cmd}`);
+	};
+	const session = makeSession();
+	await session.loadMarkdown('/docs/big.md');
+	const tab = tabManager.activeTab!;
+	assert.equal(tab.isTruncated, true, 'precondition: the buffer is partial');
+	assert.equal(tab.hasReplacementChars, false, 'precondition: the preview decoded cleanly');
+	return { session, tab };
+}
+
+test('completing a partial buffer carries the tail\'s own verdict', async () => {
+	// The case the old comment called safe: the preview covered the first 50KB
+	// and decoded cleanly, but a file can be valid UTF-8 up to there and not
+	// after. With the bare command the tab kept the preview's verdict and the
+	// next auto-save wrote U+FFFD over the file.
+	const { session, tab } = await openPartial();
+
+	handleInvoke = (cmd) => {
+		if (cmd === 'read_file_content_checked') return [FULL, true];
+		throw new Error(`unexpected invoke: ${cmd}`);
+	};
+
+	assert.equal(await session.ensureFullContent(tab.id), true);
+	assert.equal(tab.rawContent, FULL);
+	assert.equal(tab.hasReplacementChars, true, 'the completed buffer must carry its own fidelity');
+});
+
+test('completing a clean tail also clears a stale flag', async () => {
+	// The same mechanism in the other direction: a verdict that is decided on
+	// every read cannot go stale.
+	const { session, tab } = await openPartial();
+	tabManager.setTabDecodedLossy(tab.id, true);
+
+	handleInvoke = (cmd) => {
+		if (cmd === 'read_file_content_checked') return [FULL, false];
+		throw new Error(`unexpected invoke: ${cmd}`);
+	};
+
+	assert.equal(await session.ensureFullContent(tab.id), true);
+	assert.equal(tab.hasReplacementChars, false);
+});
+
+test('the completed buffer is refused or accepted according to that verdict', async () => {
+	// End to end: the flag is not decoration, it decides the write.
+	const { session, tab } = await openPartial();
+	handleInvoke = (cmd) => {
+		if (cmd === 'read_file_content_checked') return [FULL, true];
+		if (cmd === 'save_file_content') return null;
+		throw new Error(`unexpected invoke: ${cmd}`);
+	};
+	await session.ensureFullContent(tab.id);
+
+	assert.equal(await session.saveContent(tab.id), false, 'a lossy buffer must not overwrite its file');
+	assert.equal(session.isLossySaveRefused(tab.id), true);
+	assert.ok(errors.length > 0, 'and the user is told once');
+});
+
+// --- the two component call sites -------------------------------------------
+
+const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+
+test('no writable buffer in the app is filled by the unchecked command', () => {
+	for (const [name, source] of [
+		['MarkdownViewer.svelte', viewer],
+		['documentSession.svelte.ts', readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8')],
+		['windowSession.svelte.ts', readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8')],
+	] as const) {
+		assert.doesNotMatch(source, /invoke\('read_file_content'/, `${name} still uses the unchecked command`);
+	}
+});
+
+test('entering the editor reads the fidelity and stores it', () => {
+	const toggle = viewer.slice(viewer.indexOf('async function toggleEdit'), viewer.indexOf('async function saveContent'));
+	assert.match(toggle, /\[content, lossy\] = \(await invoke\('read_file_content_checked', \{ path: tab\.path \}\)\)/);
+	const read = toggle.indexOf('read_file_content_checked');
+	const flag = toggle.indexOf('setTabDecodedLossy(tab.id, lossy)');
+	const store = toggle.indexOf('setTabRawContent(tab.id, content)');
+	assert.notEqual(flag, -1, 'the verdict must reach the tab');
+	assert.ok(read < flag && flag < store, 'flag the tab before the buffer is published');
+});
+
+test('entering split view reads the fidelity and stores it', () => {
+	const split = viewer.slice(viewer.indexOf('async function toggleSplitView'));
+	const enter = split.slice(0, split.indexOf('} else {'));
+	assert.match(enter, /\[content, lossy\] = \(await invoke\('read_file_content_checked', \{ path: tab\.path \}\)\)/);
+	const flag = enter.indexOf('setTabDecodedLossy(tab.id, lossy)');
+	const store = enter.indexOf('setTabRawContent(tab.id, content)');
+	assert.notEqual(flag, -1, 'the verdict must reach the tab');
+	assert.ok(flag < store, 'flag the tab before the buffer is published');
+});
+
+// --- the repeating toast ------------------------------------------------------
+
+test('the session can tell a refusal from a failure', () => {
+	// `saveContent` returns false for both, which is why the auto-save timer
+	// could not tell them apart.
+	assert.match(
+		readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8'),
+		/function isLossySaveRefused\(tabId: string\): boolean \{\s*return lossySaveWarnedTabs\.has\(tabId\);/,
+	);
+});
+
+test('a refused save does not add a generic toast to its own explanation', () => {
+	const effect = viewer.slice(viewer.indexOf('Auto-save effect.'));
+	const body = effect.slice(0, effect.indexOf('for (const id of ['));
+	const check = body.indexOf('if (documentSession.isLossySaveRefused(s.id)) return;');
+	const toast = body.indexOf("t('toast.autoSaveFailed'");
+	assert.notEqual(check, -1, 'the refusal must be recognised');
+	assert.notEqual(toast, -1);
+	assert.ok(check < toast, 'and recognised before the generic toast is raised');
+});
+
+test('a tab that can only be refused stops re-arming the timer', () => {
+	// Auto-save re-arms on every keystroke. Without this the guard was reached
+	// again every 1.5s for as long as the user kept typing — each time
+	// producing the console warning, the wasted round trip, and (before the
+	// test above) the toast.
+	const effect = viewer.slice(viewer.indexOf('Auto-save effect.'));
+	const body = effect.slice(0, effect.indexOf('for (const id of ['));
+	assert.match(body, /decodedLossily: tab\.hasReplacementChars/);
+	assert.match(body, /const eligible = [^;]*!\(s\.decodedLossily && documentSession\.isLossySaveRefused\(s\.id\)\)/);
+	// The FIRST attempt must still happen: it is what produces the explanation.
+	// `isLossySaveRefused` is false until the guard has spoken, so eligibility
+	// only drops afterwards — and "Save As" to a new file clears
+	// `hasReplacementChars`, which restores it.
+	assert.match(
+		readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8'),
+		/lossySaveWarnedTabs\.delete\(tab\.id\)/,
+	);
+});

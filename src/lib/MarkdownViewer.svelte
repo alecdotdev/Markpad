@@ -1748,7 +1748,14 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 					tab.isEditing = true;
 				} else {
 					try {
-						const content = (await invoke('read_file_content', { path: tab.path })) as string;
+						// This buffer is about to be handed to the editor, and
+						// the editor arms auto-save. The checked command is what
+						// says whether the decode was lossy, so the tab carries
+						// its own verdict instead of relying on the one
+						// `loadMarkdown` left behind — a file can be converted
+						// to UTF-8 (or away from it) between the two reads.
+						const [content, lossy] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean];
+						tabManager.setTabDecodedLossy(tab.id, lossy);
 						// Goes through the store so a tab that held only the
 						// large-file preview slice stops being flagged partial.
 						tabManager.setTabRawContent(tab.id, content);
@@ -1862,6 +1869,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			// Reactive too: clearing a conflict re-arms the timer on the next
 			// keystroke, so answering the bar resumes normal auto-save.
 			hasPendingConflict: externalChangeConflicts[tab.id] === true,
+			// Reactive as well, and that is the point: "Save As" to a new file
+			// clears the flag, so the tab becomes eligible again on the next
+			// pass without anything having to remember to re-arm it.
+			decodedLossily: tab.hasReplacementChars,
 		}));
 
 		untrack(() => {
@@ -1878,7 +1889,13 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				// through: pressing Save IS the answer "keep mine", and the
 				// `saveContent` wrapper clears the conflict so the bar comes
 				// down instead of re-asking.
-				const eligible = s.isDirty && s.path !== '' && s.editable && !s.hasPendingConflict;
+				// A tab whose buffer was decoded lossily is dropped once the
+				// guard has refused it and said why. The first attempt is what
+				// produces that explanation, so it is deliberately allowed
+				// through; re-arming after it would only reach the same refusal
+				// every 1.5s for as long as the user keeps typing.
+				const eligible = s.isDirty && s.path !== '' && s.editable && !s.hasPendingConflict
+					&& !(s.decodedLossily && documentSession.isLossySaveRefused(s.id));
 				const prevRef = lastContentRefByTab.get(s.id);
 				const refChanged = prevRef !== s.contentRef;
 
@@ -1915,6 +1932,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 						(ok) => {
 							if (!ok) {
 								console.error('Auto-save failed for tab', s.id);
+								// A refusal already explained itself, naming the
+								// file and the way out. "Auto-save failed" on top
+								// of that says nothing new.
+								if (documentSession.isLossySaveRefused(s.id)) return;
 								addToast(
 									t('toast.autoSaveFailed', settings.language),
 									'error',
@@ -2368,7 +2389,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			// why the same bug never reached the full editor.
 			if (tab.path && !tab.isEditing && !tab.rawContent) {
 				try {
-					const content = (await invoke('read_file_content', { path: tab.path })) as string;
+					// Checked, like every other read that fills an editable
+					// buffer: split view is an editor, so this tab must carry
+					// the fidelity of its own decode rather than inherit one.
+					const [content, lossy] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean];
+					tabManager.setTabDecodedLossy(tab.id, lossy);
 					tabManager.setTabRawContent(tab.id, content);
 				} catch (e) {
 					console.error('Failed to load raw content for split view', e);

@@ -116,12 +116,15 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		if (!tab.path) return true;
 		if (tab.isDirty) return false;
 		try {
-			// Safe on the bare command: this only re-reads a file whose tab was
-			// already flagged by `loadMarkdown`, and `setTabRawContent` does not
-			// clear that flag. Migrating it to `read_file_content_checked` is
-			// still worth doing — see the note on the two MarkdownViewer call
-			// sites — but nothing depends on it today.
-			const full = (await invoke('read_file_content', { path: tab.path })) as string;
+			// Checked, like every other read that ends in a writable buffer.
+			// The bare command was safe here only because this re-reads a file
+			// whose tab `loadMarkdown` had already flagged — an invariant held
+			// by two call sites agreeing, not by anything in the code. Reading
+			// the fidelity again costs nothing and makes the flag a property of
+			// the buffer instead of a memory of how it was obtained; it also
+			// CLEARS the flag for a file converted to UTF-8 since the load.
+			const [full, lossy] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean];
+			tabManager.setTabDecodedLossy(tabId, lossy);
 			tabManager.setTabRawContent(tabId, full);
 			return true;
 		} catch (error) {
@@ -166,6 +169,22 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			options.onError(t('toast.lossySaveBlocked', settings.language), tab.path);
 		}
 		return true;
+	}
+
+	/**
+	 * True once this tab has been told, in words, that its buffer cannot be
+	 * written back over its own file.
+	 *
+	 * The explanation is deduplicated per tab above, but the callers' own
+	 * failure reporting was not: `saveContent` returns `false` for a refusal
+	 * exactly as it does for a failed write, so the auto-save timer added its
+	 * generic "auto-save failed" on top — and, because auto-save re-arms on
+	 * every keystroke, repeated it every 1.5s for as long as the user kept
+	 * typing. A refusal is not a failure to report again; it is a standing
+	 * condition the user has already been told about and given an exit from.
+	 */
+	function isLossySaveRefused(tabId: string): boolean {
+		return lossySaveWarnedTabs.has(tabId);
 	}
 
 	function updateLoading(tabId: string, loading: boolean) {
@@ -418,5 +437,5 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		return true;
 	}
 
-	return { loadMarkdown, saveContent, saveContentAs, toggleTaskCheckbox, shouldReloadExternalChange, resolveExternalChange, ensureFullContent, canCloseTab };
+	return { loadMarkdown, saveContent, saveContentAs, toggleTaskCheckbox, shouldReloadExternalChange, resolveExternalChange, ensureFullContent, canCloseTab, isLossySaveRefused };
 }

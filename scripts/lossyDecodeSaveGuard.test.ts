@@ -93,13 +93,20 @@ test('the editable-pane shortcut reports fidelity too', () => {
 		body,
 		/if \(initialIsEditing \|\| initialIsSplit\) \{\s*\[content, lossy\] = \(await invoke\('read_file_content_checked'/,
 	);
-	// `ensureFullContent` is the one place the bare command survives, and only
-	// because it re-reads a file whose tab loadMarkdown already flagged.
+	// `ensureFullContent` was the one place the bare command survived, and only
+	// because it re-read a file whose tab loadMarkdown had already flagged —
+	// an invariant enforced by two call sites agreeing rather than by the code.
+	// It now reads the fidelity itself, so no writable buffer in this file is
+	// filled by a command that cannot report one.
 	const bare = session.match(/invoke\('read_file_content'/g)?.length ?? 0;
-	assert.equal(bare, 1, 'only ensureFullContent may use the unchecked command');
+	assert.equal(bare, 0, 'no writable buffer may be filled by the unchecked command');
 	assert.match(
 		slice(session, 'async function ensureFullContent', 'const lossySaveWarnedTabs'),
-		/invoke\('read_file_content'/,
+		/invoke\('read_file_content_checked'/,
+	);
+	assert.match(
+		slice(session, 'async function ensureFullContent', 'const lossySaveWarnedTabs'),
+		/setTabDecodedLossy\(tabId, lossy\)/,
 	);
 });
 

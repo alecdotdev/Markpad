@@ -134,7 +134,7 @@ test('completing a partial buffer replaces it with the whole file and unblocks s
 	const { session, tab } = await openPartial();
 
 	handleInvoke = (cmd) => {
-		if (cmd === 'read_file_content') return FULL;
+		if (cmd === 'read_file_content_checked') return [FULL, false];
 		if (cmd === 'save_file_content') return null;
 		throw new Error(`unexpected invoke: ${cmd}`);
 	};
@@ -171,7 +171,7 @@ test('a partial buffer that already carries edits is never silently discarded', 
 	tabManager.updateTabRawContent(tab.id, `${PARTIAL}edited`);
 
 	handleInvoke = (cmd) => {
-		if (cmd === 'read_file_content') return FULL;
+		if (cmd === 'read_file_content_checked') return [FULL, false];
 		throw new Error(`unexpected invoke: ${cmd}`);
 	};
 
@@ -220,7 +220,7 @@ test('toggling a task checkbox completes the buffer before writing it', async ()
 	assert.equal(tab.rawContent, partial);
 
 	handleInvoke = (cmd) => {
-		if (cmd === 'read_file_content') return doc;
+		if (cmd === 'read_file_content_checked') return [doc, false];
 		if (cmd === 'save_file_content') return null;
 		throw new Error(`unexpected invoke: ${cmd}`);
 	};
