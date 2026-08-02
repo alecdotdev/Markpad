@@ -1508,6 +1508,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				await openRelativeMarkdownTarget(relativeMarkdownTarget);
 				return;
 			}
+
+			return;
 		}
 
         // media zoom handling
