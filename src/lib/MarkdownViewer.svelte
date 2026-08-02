@@ -50,6 +50,7 @@ import {
 	resolveMarkdownTargetPath,
 	type MarkdownLinkTarget as RelativeMarkdownTarget,
 } from './utils/markdownLinks.js';
+import { resolveLocalFileLinkPath } from './utils/localFileLinks.js';
 import { normalizeAssetPath } from './utils/exportHtml.js';
 import {
 	dropRecentFile,
@@ -2364,9 +2365,33 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				return;
 			}
 
+			// A link to a local non-markdown file (`[data](./data.csv)`) is a
+			// path, and `anchor.href` is not: the DOM resolved it against the
+			// webview origin. Hand the OS the resolved disk path instead.
+			const localFilePath = resolveLocalFileLinkPath(rawHref, currentFile);
+			if (localFilePath) {
+				event.preventDefault();
+				try {
+					await openPath(localFilePath);
+				} catch (error) {
+					console.error('Failed to open local file link', localFilePath, error);
+					addToast(`Failed to open ${localFilePath}`, 'error');
+				}
+				return;
+			}
+
 			if (anchor.href) {
 				event.preventDefault();
-				await openUrl(anchor.href);
+				// `openUrl` rejects anything outside the opener plugin's scope
+				// (`mailto:`, `tel:`, `http://*`, `https://*`). Without this the
+				// rejection was unhandled: the click did nothing, said nothing,
+				// and left an uncaught promise rejection behind.
+				try {
+					await openUrl(anchor.href);
+				} catch (error) {
+					console.error('Failed to open link', anchor.href, error);
+					addToast(`Failed to open ${rawHref}`, 'error');
+				}
 			}
 		}
 	}
