@@ -526,10 +526,16 @@ fn pick_delivery_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 /// embeds the transfer token ("window-<token>"), so the new frontend can
 /// derive which pending transfer to claim from its own label — no URL
 /// query involved (the asset protocol 404s on "index.html?x=y" paths).
-/// Deliberately NOT async: sync commands run on the main thread, which
-/// window creation requires on macOS.
+/// Deliberately async. `WebviewWindowBuilder::build()` deadlocks on Windows
+/// when it runs inside a synchronous command: WebView2 needs the main thread
+/// to pump messages while the webview is created, but a sync command IS the
+/// main thread, blocked waiting for build() to return. The whole app then
+/// freezes — no new window, no menus, an unresponsive close button
+/// (tauri-apps/tauri#12521). An async command runs off the event loop, and
+/// Tauri dispatches the actual window creation to the main thread itself, so
+/// macOS's main-thread requirement is still satisfied.
 #[tauri::command]
-fn create_transfer_window(app: AppHandle, token: String) -> Result<(), String> {
+async fn create_transfer_window(app: AppHandle, token: String) -> Result<(), String> {
     window_runtime::create_transfer_window(app, token)
 }
 
