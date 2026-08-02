@@ -557,7 +557,7 @@
 						<button class:selected={tagDraftColor === color} style:--tag-color={color} onclick={() => (tagDraftColor = color)} aria-label={color}></button>
 					{/each}
 				</div>
-				<button onclick={applyTag}>{t('common.save', currentLanguage)}</button>
+				<button onclick={applyTag}>{t('settings.save', currentLanguage)}</button>
 				{#if tabManager.windowTag}<button onclick={togglePinnedTag}>{t(tabManager.windowTag.pinned ? 'menu.unpinWindowTag' : 'menu.pinWindowTag', currentLanguage)}</button>{/if}
 				{#if tabManager.windowTag}<button onclick={clearTag}>{t('menu.windowTagClear', currentLanguage)}</button>{/if}
 			</div>

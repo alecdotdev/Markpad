@@ -189,6 +189,7 @@ export const translations: Record<LanguageCode, Translation> = {
             exit: 'Exit',
             zenMode: 'Zen Mode',
             tabs: '{{action}} Tabs',
+            openTabs: 'Open Tabs',
             back: 'Back',
             forward: 'Forward',
             openLocation: 'Open Location',
@@ -1465,17 +1466,6 @@ export const translations: Record<LanguageCode, Translation> = {
             resetToolbar: '툴바 초기화',
             moveUp: '위로 이동',
             moveDown: '아래로 이동',
-            colors: {
-                default: '기본',
-                yellow: '노란색',
-                orange: '주황색',
-                red: '빨간색',
-                pink: '분홍색',
-                purple: '볼라색',
-                blue: '파란색',
-                cyan: '청록색',
-                green: '초록색'
-            },
             files: '파일',
             fileSettings: '파일 설정',
             autoSave: '편집 내용 자동 저장',
@@ -1810,18 +1800,18 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefault: 'По умолчанию',
             themeDefaultLight: 'Светлая по умолчанию',
             themeDefaultDark: 'Тёмная по умолчанию',
-            themeFollowSystem: 'Системная',
-            colors: {
-                default: 'По умолчанию',
-                yellow: 'Жёлтый',
-                orange: 'Оранжевый',
-                red: 'Красный',
-                pink: 'Розовый',
-                purple: 'Фиолетовый',
-                blue: 'Синий',
-                cyan: 'Голубой',
-                green: 'Зелёный'
-            }
+            themeFollowSystem: 'Системная'
+        },
+        colors: {
+            default: 'По умолчанию',
+            yellow: 'Жёлтый',
+            orange: 'Оранжевый',
+            red: 'Красный',
+            pink: 'Розовый',
+            purple: 'Фиолетовый',
+            blue: 'Синий',
+            cyan: 'Голубой',
+            green: 'Зелёный'
         },
         menu: {
             file: 'Файл',
@@ -2035,21 +2025,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Claro predeterminado',
             themeDefaultDark: 'Oscuro predeterminado',
             themeFollowSystem: 'Seguir sistema',
-            colors: {
-                default: 'Predeterminado',
-                yellow: 'Amarillo',
-                orange: 'Naranja',
-                red: 'Rojo',
-                pink: 'Rosa',
-                purple: 'Morado',
-                blue: 'Azul',
-                cyan: 'Cian',
-                green: 'Verde'
-            },
             files: 'Archivos',
             fileSettings: 'Configuración de archivos',
             autoSave: 'Guardar cambios automáticamente',
             confirmBeforeSave: 'Pedir confirmación antes de guardar'
+        },
+        colors: {
+            default: 'Predeterminado',
+            yellow: 'Amarillo',
+            orange: 'Naranja',
+            red: 'Rojo',
+            pink: 'Rosa',
+            purple: 'Morado',
+            blue: 'Azul',
+            cyan: 'Cian',
+            green: 'Verde'
         },
         menu: {
             file: 'Archivo',
@@ -2262,21 +2252,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Clair par défaut',
             themeDefaultDark: 'Sombre par défaut',
             themeFollowSystem: 'Suivre le système',
-            colors: {
-                default: 'Par défaut',
-                yellow: 'Jaune',
-                orange: 'Orange',
-                red: 'Rouge',
-                pink: 'Rose',
-                purple: 'Violet',
-                blue: 'Bleu',
-                cyan: 'Cyan',
-                green: 'Vert'
-            },
             files: 'Fichiers',
             fileSettings: 'Paramètres des fichiers',
             autoSave: 'Enregistrement automatique des modifications',
             confirmBeforeSave: 'Demander confirmation avant d\'enregistrer'
+        },
+        colors: {
+            default: 'Par défaut',
+            yellow: 'Jaune',
+            orange: 'Orange',
+            red: 'Rouge',
+            pink: 'Rose',
+            purple: 'Violet',
+            blue: 'Bleu',
+            cyan: 'Cyan',
+            green: 'Vert'
         },
         menu: {
             file: 'Fichier',
@@ -2489,21 +2479,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Hell Standard',
             themeDefaultDark: 'Dunkel Standard',
             themeFollowSystem: 'System folgen',
-            colors: {
-                default: 'Standard',
-                yellow: 'Gelb',
-                orange: 'Orange',
-                red: 'Rot',
-                pink: 'Rosa',
-                purple: 'Lila',
-                blue: 'Blau',
-                cyan: 'Cyan',
-                green: 'Grün'
-            },
             files: 'Dateien',
             fileSettings: 'Datei-Einstellungen',
             autoSave: 'Änderungen automatisch speichern',
             confirmBeforeSave: 'Vor dem Speichern bestätigen'
+        },
+        colors: {
+            default: 'Standard',
+            yellow: 'Gelb',
+            orange: 'Orange',
+            red: 'Rot',
+            pink: 'Rosa',
+            purple: 'Lila',
+            blue: 'Blau',
+            cyan: 'Cyan',
+            green: 'Grün'
         },
         menu: {
             file: 'Datei',
@@ -2716,21 +2706,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Claro padrão',
             themeDefaultDark: 'Escuro padrão',
             themeFollowSystem: 'Seguir sistema',
-            colors: {
-                default: 'Padrão',
-                yellow: 'Amarelo',
-                orange: 'Laranja',
-                red: 'Vermelho',
-                pink: 'Rosa',
-                purple: 'Roxo',
-                blue: 'Azul',
-                cyan: 'Ciano',
-                green: 'Verde'
-            },
             files: 'Arquivos',
             fileSettings: 'Configurações de arquivos',
             autoSave: 'Salvar edições automaticamente',
             confirmBeforeSave: 'Pedir confirmação antes de salvar'
+        },
+        colors: {
+            default: 'Padrão',
+            yellow: 'Amarelo',
+            orange: 'Laranja',
+            red: 'Vermelho',
+            pink: 'Rosa',
+            purple: 'Roxo',
+            blue: 'Azul',
+            cyan: 'Ciano',
+            green: 'Verde'
         },
         menu: {
             file: 'Arquivo',
@@ -2943,21 +2933,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Chiaro predefinito',
             themeDefaultDark: 'Scuro predefinito',
             themeFollowSystem: 'Segui sistema',
-            colors: {
-                default: 'Predefinito',
-                yellow: 'Giallo',
-                orange: 'Arancione',
-                red: 'Rosso',
-                pink: 'Rosa',
-                purple: 'Viola',
-                blue: 'Blu',
-                cyan: 'Ciano',
-                green: 'Verde'
-            },
             files: 'File',
             fileSettings: 'Impostazioni file',
             autoSave: 'Salvataggio automatico delle modifiche',
             confirmBeforeSave: 'Chiedi conferma prima di salvare'
+        },
+        colors: {
+            default: 'Predefinito',
+            yellow: 'Giallo',
+            orange: 'Arancione',
+            red: 'Rosso',
+            pink: 'Rosa',
+            purple: 'Viola',
+            blue: 'Blu',
+            cyan: 'Ciano',
+            green: 'Verde'
         },
         menu: {
             file: 'File',
@@ -3182,21 +3172,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Jasny domyślny',
             themeDefaultDark: 'Ciemny domyślny',
             themeFollowSystem: 'Zgodny z systemem',
-            colors: {
-                default: 'Domyślny',
-                yellow: 'Żółty',
-                orange: 'Pomarańczowy',
-                red: 'Czerwony',
-                pink: 'Różowy',
-                purple: 'Fioletowy',
-                blue: 'Niebieski',
-                cyan: 'Cyjan',
-                green: 'Zielony'
-            },
             files: 'Pliki',
             fileSettings: 'Ustawienia plików',
             autoSave: 'Autozapis zmian',
             confirmBeforeSave: 'Pytaj o potwierdzenie przed zapisem'
+        },
+        colors: {
+            default: 'Domyślny',
+            yellow: 'Żółty',
+            orange: 'Pomarańczowy',
+            red: 'Czerwony',
+            pink: 'Różowy',
+            purple: 'Fioletowy',
+            blue: 'Niebieski',
+            cyan: 'Cyjan',
+            green: 'Zielony'
         },
         menu: {
             file: 'Plik',
@@ -3419,21 +3409,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Licht standaard',
             themeDefaultDark: 'Donker standaard',
             themeFollowSystem: 'Volg systeem',
-            colors: {
-                default: 'Standaard',
-                yellow: 'Geel',
-                orange: 'Oranje',
-                red: 'Rood',
-                pink: 'Roze',
-                purple: 'Paars',
-                blue: 'Blauw',
-                cyan: 'Cyaan',
-                green: 'Groen'
-            },
             files: 'Bestanden',
             fileSettings: 'Bestandsinstellingen',
             autoSave: 'Wijzigingen automatisch opslaan',
             confirmBeforeSave: 'Bevestiging vragen voor opslaan'
+        },
+        colors: {
+            default: 'Standaard',
+            yellow: 'Geel',
+            orange: 'Oranje',
+            red: 'Rood',
+            pink: 'Roze',
+            purple: 'Paars',
+            blue: 'Blauw',
+            cyan: 'Cyaan',
+            green: 'Groen'
         },
         menu: {
             file: 'Bestand',
@@ -3646,21 +3636,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Ljust standard',
             themeDefaultDark: 'Mörkt standard',
             themeFollowSystem: 'Följ systemet',
-            colors: {
-                default: 'Standard',
-                yellow: 'Gul',
-                orange: 'Orange',
-                red: 'Röd',
-                pink: 'Rosa',
-                purple: 'Lila',
-                blue: 'Blå',
-                cyan: 'Cyan',
-                green: 'Grön'
-            },
             files: 'Filer',
             fileSettings: 'Filinställningar',
             autoSave: 'Spara ändringar automatiskt',
             confirmBeforeSave: 'Fråga om bekräftelse innan sparande'
+        },
+        colors: {
+            default: 'Standard',
+            yellow: 'Gul',
+            orange: 'Orange',
+            red: 'Röd',
+            pink: 'Rosa',
+            purple: 'Lila',
+            blue: 'Blå',
+            cyan: 'Cyan',
+            green: 'Grön'
         },
         menu: {
             file: 'Arkiv',
@@ -3873,21 +3863,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Sáng mặc định',
             themeDefaultDark: 'Tối mặc định',
             themeFollowSystem: 'Theo hệ thống',
-            colors: {
-                default: 'Mặc định',
-                yellow: 'Vàng',
-                orange: 'Cam',
-                red: 'Đỏ',
-                pink: 'Hồng',
-                purple: 'Tím',
-                blue: 'Xanh dương',
-                cyan: 'Xanh lam',
-                green: 'Xanh lá'
-            },
             files: 'Tệp',
             fileSettings: 'Cài đặt tệp',
             autoSave: 'Tự động lưu chỉnh sửa',
             confirmBeforeSave: 'Hỏi xác nhận trước khi lưu'
+        },
+        colors: {
+            default: 'Mặc định',
+            yellow: 'Vàng',
+            orange: 'Cam',
+            red: 'Đỏ',
+            pink: 'Hồng',
+            purple: 'Tím',
+            blue: 'Xanh dương',
+            cyan: 'Xanh lam',
+            green: 'Xanh lá'
         },
         menu: {
             file: 'Tệp',
@@ -4100,21 +4090,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Claro predefinido',
             themeDefaultDark: 'Escuro predefinido',
             themeFollowSystem: 'Seguir sistema',
-            colors: {
-                default: 'Predefinição',
-                yellow: 'Amarelo',
-                orange: 'Laranja',
-                red: 'Vermelho',
-                pink: 'Rosa',
-                purple: 'Roxo',
-                blue: 'Azul',
-                cyan: 'Ciano',
-                green: 'Verde'
-            },
             files: 'Ficheiros',
             fileSettings: 'Definições de ficheiros',
             autoSave: 'Guardar edições automaticamente',
             confirmBeforeSave: 'Pedir confirmação antes de guardar'
+        },
+        colors: {
+            default: 'Predefinição',
+            yellow: 'Amarelo',
+            orange: 'Laranja',
+            red: 'Vermelho',
+            pink: 'Rosa',
+            purple: 'Roxo',
+            blue: 'Azul',
+            cyan: 'Ciano',
+            green: 'Verde'
         },
         menu: {
             file: 'Ficheiro',
@@ -4327,21 +4317,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Luminos implicit',
             themeDefaultDark: 'Întunecat implicit',
             themeFollowSystem: 'Urmează sistemul',
-            colors: {
-                default: 'Implicit',
-                yellow: 'Galben',
-                orange: 'Portocaliu',
-                red: 'Roșu',
-                pink: 'Roz',
-                purple: 'Mov',
-                blue: 'Albastru',
-                cyan: 'Cyan',
-                green: 'Verde'
-            },
             files: 'Fișiere',
             fileSettings: 'Setări fișiere',
             autoSave: 'Salvare automată a modificărilor',
             confirmBeforeSave: 'Solicită confirmare înainte de salvare'
+        },
+        colors: {
+            default: 'Implicit',
+            yellow: 'Galben',
+            orange: 'Portocaliu',
+            red: 'Roșu',
+            pink: 'Roz',
+            purple: 'Mov',
+            blue: 'Albastru',
+            cyan: 'Cyan',
+            green: 'Verde'
         },
         menu: {
             file: 'Fișier',
@@ -4554,21 +4544,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Alapértelmezett világos',
             themeDefaultDark: 'Alapértelmezett sötét',
             themeFollowSystem: 'Rendszer követése',
-            colors: {
-                default: 'Alapértelmezett',
-                yellow: 'Sárga',
-                orange: 'Narancssárga',
-                red: 'Piros',
-                pink: 'Rózsaszín',
-                purple: 'Lila',
-                blue: 'Kék',
-                cyan: 'Cián',
-                green: 'Zöld'
-            },
             files: 'Fájlok',
             fileSettings: 'Fájlbeállítások',
             autoSave: 'Módosítások automatikus mentése',
             confirmBeforeSave: 'Mentés előtt kérjen megerősítést'
+        },
+        colors: {
+            default: 'Alapértelmezett',
+            yellow: 'Sárga',
+            orange: 'Narancssárga',
+            red: 'Piros',
+            pink: 'Rózsaszín',
+            purple: 'Lila',
+            blue: 'Kék',
+            cyan: 'Cián',
+            green: 'Zöld'
         },
         menu: {
             file: 'Fájl',
@@ -4781,21 +4771,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Výchozí světlý',
             themeDefaultDark: 'Výchozí tmavý',
             themeFollowSystem: 'Podle systému',
-            colors: {
-                default: 'Výchozí',
-                yellow: 'Žlutá',
-                orange: 'Oranžová',
-                red: 'Červená',
-                pink: 'Růžová',
-                purple: 'Fialová',
-                blue: 'Modrá',
-                cyan: 'Azurová',
-                green: 'Zelená'
-            },
             files: 'Soubory',
             fileSettings: 'Nastavení souborů',
             autoSave: 'Automaticky ukládat úpravy',
             confirmBeforeSave: 'Před uložením se zeptat na potvrzení'
+        },
+        colors: {
+            default: 'Výchozí',
+            yellow: 'Žlutá',
+            orange: 'Oranžová',
+            red: 'Červená',
+            pink: 'Růžová',
+            purple: 'Fialová',
+            blue: 'Modrá',
+            cyan: 'Azurová',
+            green: 'Zelená'
         },
         menu: {
             file: 'Soubor',
@@ -5014,21 +5004,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Predvolené svetlé',
             themeDefaultDark: 'Predvolené tmavé',
             themeFollowSystem: 'Podľa systému',
-            colors: {
-                default: 'Predvolené',
-                yellow: 'Žltá',
-                orange: 'Oranžová',
-                red: 'Červená',
-                pink: 'Ružová',
-                purple: 'Fialová',
-                blue: 'Modrá',
-                cyan: 'Azúrová',
-                green: 'Zelená'
-            },
             files: 'Súbory',
             fileSettings: 'Nastavenia súborov',
             autoSave: 'Automaticky ukladať úpravy',
             confirmBeforeSave: 'Pred uložením sa opýtať na potvrdenie'
+        },
+        colors: {
+            default: 'Predvolené',
+            yellow: 'Žltá',
+            orange: 'Oranžová',
+            red: 'Červená',
+            pink: 'Ružová',
+            purple: 'Fialová',
+            blue: 'Modrá',
+            cyan: 'Azúrová',
+            green: 'Zelená'
         },
         menu: {
             file: 'Súbor',
@@ -5241,21 +5231,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Προεπιλεγμένο φωτεινό',
             themeDefaultDark: 'Προεπιλεγμένο σκοτεινό',
             themeFollowSystem: 'Ακολούθηση συστήματος',
-            colors: {
-                default: 'Προεπιλογή',
-                yellow: 'Κίτρινο',
-                orange: 'Πορτοκαλί',
-                red: 'Κόκκινο',
-                pink: 'Ροζ',
-                purple: 'Μωβ',
-                blue: 'Μπλε',
-                cyan: 'Κυανό',
-                green: 'Πράσινο'
-            },
             files: 'Αρχεία',
             fileSettings: 'Ρυθμίσεις αρχείων',
             autoSave: 'Αυτόματη αποθήκευση αλλαγών',
             confirmBeforeSave: 'Ζήτηση επιβεβαίωσης πριν την αποθήκευση'
+        },
+        colors: {
+            default: 'Προεπιλογή',
+            yellow: 'Κίτρινο',
+            orange: 'Πορτοκαλί',
+            red: 'Κόκκινο',
+            pink: 'Ροζ',
+            purple: 'Μωβ',
+            blue: 'Μπλε',
+            cyan: 'Κυανό',
+            green: 'Πράσινο'
         },
         menu: {
             file: 'Αρχείο',
@@ -5468,21 +5458,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Oletus vaalea',
             themeDefaultDark: 'Oletus tumma',
             themeFollowSystem: 'Seuraa järjestelmää',
-            colors: {
-                default: 'Oletus',
-                yellow: 'Keltainen',
-                orange: 'Oranssi',
-                red: 'Punainen',
-                pink: 'Vaaleanpunainen',
-                purple: 'Violetti',
-                blue: 'Sininen',
-                cyan: 'Syaani',
-                green: 'Vihreä'
-            },
             files: 'Tiedostot',
             fileSettings: 'Tiedostoasetukset',
             autoSave: 'Tallenna muutokset automaattisesti',
             confirmBeforeSave: 'Pyydä vahvistus ennen tallennusta'
+        },
+        colors: {
+            default: 'Oletus',
+            yellow: 'Keltainen',
+            orange: 'Oranssi',
+            red: 'Punainen',
+            pink: 'Vaaleanpunainen',
+            purple: 'Violetti',
+            blue: 'Sininen',
+            cyan: 'Syaani',
+            green: 'Vihreä'
         },
         menu: {
             file: 'Tiedosto',
@@ -5695,21 +5685,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Standard lys',
             themeDefaultDark: 'Standard mørk',
             themeFollowSystem: 'Følg system',
-            colors: {
-                default: 'Standard',
-                yellow: 'Gul',
-                orange: 'Orange',
-                red: 'Rød',
-                pink: 'Lyserød',
-                purple: 'Lilla',
-                blue: 'Blå',
-                cyan: 'Cyan',
-                green: 'Grøn'
-            },
             files: 'Filer',
             fileSettings: 'Filindstillinger',
             autoSave: 'Gem ændringer automatisk',
             confirmBeforeSave: 'Bed om bekræftelse før der gemmes'
+        },
+        colors: {
+            default: 'Standard',
+            yellow: 'Gul',
+            orange: 'Orange',
+            red: 'Rød',
+            pink: 'Lyserød',
+            purple: 'Lilla',
+            blue: 'Blå',
+            cyan: 'Cyan',
+            green: 'Grøn'
         },
         menu: {
             file: 'Fil',
@@ -5922,21 +5912,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Standard lys',
             themeDefaultDark: 'Standard mørk',
             themeFollowSystem: 'Følg system',
-            colors: {
-                default: 'Standard',
-                yellow: 'Gul',
-                orange: 'Oransje',
-                red: 'Rød',
-                pink: 'Rosa',
-                purple: 'Lilla',
-                blue: 'Blå',
-                cyan: 'Cyan',
-                green: 'Grønn'
-            },
             files: 'Filer',
             fileSettings: 'Filinnstillinger',
             autoSave: 'Lagre endringer automatisk',
             confirmBeforeSave: 'Be om bekreftelse før lagring'
+        },
+        colors: {
+            default: 'Standard',
+            yellow: 'Gul',
+            orange: 'Oransje',
+            red: 'Rød',
+            pink: 'Rosa',
+            purple: 'Lilla',
+            blue: 'Blå',
+            cyan: 'Cyan',
+            green: 'Grønn'
         },
         menu: {
             file: 'Fil',
@@ -6149,21 +6139,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Default Terang',
             themeDefaultDark: 'Default Gelap',
             themeFollowSystem: 'Ikuti Sistem',
-            colors: {
-                default: 'Default',
-                yellow: 'Kuning',
-                orange: 'Oranye',
-                red: 'Merah',
-                pink: 'Merah Muda',
-                purple: 'Ungu',
-                blue: 'Biru',
-                cyan: 'Sian',
-                green: 'Hijau'
-            },
             files: 'Berkas',
             fileSettings: 'Pengaturan berkas',
             autoSave: 'Simpan otomatis perubahan',
             confirmBeforeSave: 'Minta konfirmasi sebelum menyimpan'
+        },
+        colors: {
+            default: 'Default',
+            yellow: 'Kuning',
+            orange: 'Oranye',
+            red: 'Merah',
+            pink: 'Merah Muda',
+            purple: 'Ungu',
+            blue: 'Biru',
+            cyan: 'Sian',
+            green: 'Hijau'
         },
         menu: {
             file: 'Berkas',
@@ -6376,21 +6366,21 @@ export const translations: Record<LanguageCode, Translation> = {
             themeDefaultLight: 'Varsayılan Açık',
             themeDefaultDark: 'Varsayılan Koyu',
             themeFollowSystem: 'Sistemi Takip Et',
-            colors: {
-                default: 'Varsayılan',
-                yellow: 'Sarı',
-                orange: 'Turuncu',
-                red: 'Kırmızı',
-                pink: 'Pembe',
-                purple: 'Mor',
-                blue: 'Mavi',
-                cyan: 'Camgöbeği',
-                green: 'Yeşil'
-            },
             files: 'Dosyalar',
             fileSettings: 'Dosya ayarları',
             autoSave: 'Düzenlemeleri otomatik kaydet',
             confirmBeforeSave: 'Kaydetmeden önce onay iste'
+        },
+        colors: {
+            default: 'Varsayılan',
+            yellow: 'Sarı',
+            orange: 'Turuncu',
+            red: 'Kırmızı',
+            pink: 'Pembe',
+            purple: 'Mor',
+            blue: 'Mavi',
+            cyan: 'Camgöbeği',
+            green: 'Yeşil'
         },
         menu: {
             file: 'Dosya',
