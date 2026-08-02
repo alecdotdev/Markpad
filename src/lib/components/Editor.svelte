@@ -76,6 +76,34 @@
 		uiLanguage = settings.language;
 	});
 
+	// `settings.osType` is resolved asynchronously from the Rust side, so it can
+	// still be 'unknown' while the editor registers its keybindings. Fall back to
+	// the synchronous browser hint in that window.
+	//
+	// The fallback reads a deprecated API on purpose, and the deprecation is
+	// precisely what makes it reliable here: we are asking "is this macOS?", not
+	// "which architecture is this?". `navigator.platform` still reports
+	// "MacIntel" on Apple silicon — measured on an M5 (arm64), where the user
+	// agent likewise still claims "Intel Mac OS X 10_15_7". Both values are
+	// frozen deliberately by WebKit and Chromium: years of sites compare
+	// `navigator.platform === 'MacIntel'` exactly, so changing it during the 2020
+	// ARM transition would have made every Mac look like an unknown platform
+	// overnight, and the capped Catalina version exists to limit fingerprinting.
+	// So the string lies about the CPU while staying permanently correct about
+	// the vendor — the only axis this function queries. The fallback therefore
+	// cannot reach a different macOS verdict than `settings.osType` does, and the
+	// keybindings never need re-registering once `osType` resolves.
+	//
+	// `navigator.userAgentData` is not used instead: only its coarse `platform`
+	// field is synchronous, and architecture and platform version sit behind the
+	// asynchronous high-entropy request. Waiting on that would reintroduce the
+	// very delay `settings.osType` already has, which defeats the point of
+	// having a synchronous fallback at all.
+	function isMacPlatform(): boolean {
+		if (settings.osType !== 'unknown') return settings.osType === 'macos';
+		return /^(Mac|iPhone|iPad|iPod)/i.test(navigator.platform || '');
+	}
+
 	self.MonacoEnvironment = {
 		getWorker: function (_moduleId: any, label: string) {
 			if (label === "json") {
@@ -176,7 +204,7 @@
 				| "off"
 				| "relative"
 				| "interval",
-			renderLineHighlight: settings.renderLineHighlight ? "line" : "none",
+			renderLineHighlight: settings.renderLineHighlight as "line" | "none",
 			occurrencesHighlight: settings.occurrencesHighlight
 				? "singleFile"
 				: "off",
@@ -184,7 +212,7 @@
 			fontFamily: settings.editorFont,
 			wordBasedSuggestions: "off",
 			quickSuggestions: false,
-			renderWhitespace: settings.showWhitespace ? "trailing" : "none",
+			renderWhitespace: settings.showWhitespace ? "all" : "none",
 			padding: { top: 20 },
 			scrollbar: {
 				vertical: "visible",
@@ -315,22 +343,6 @@
 			},
 		});
 
-		$effect(() => {
-			if (editor) {
-				editor.updateOptions({
-					minimap: { enabled: settings.minimap },
-					wordWrap: settings.wordWrap as any,
-					wordWrapColumn: settings.editorMaxWidth,
-					lineNumbers: settings.lineNumbers as any,
-					renderLineHighlight: settings.renderLineHighlight as any,
-					occurrencesHighlight: settings.occurrencesHighlight ? "singleFile" : "off",
-					fontSize: settings.editorFontSize,
-					fontFamily: settings.editorFont,
-					renderWhitespace: settings.showWhitespace ? "trailing" : "none",
-				});
-			}
-		});
-
 		const updateTheme = () => {
 			monaco.editor.setTheme(getTheme());
 		};
@@ -384,10 +396,6 @@
 			const text = editor.getModel()?.getValue() || "";
 			wordCount = (text.match(/\S+/g) || []).filter((w) => /\w/.test(w)).length;
 		}
-
-		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-			if (onsave) onsave();
-		});
 
 		const insertTextAtCursor = (text: string) => {
 			const selection = editor.getSelection();
@@ -707,10 +715,17 @@
 			run: () => ontoggleSplit?.(),
 		});
 
+		// macOS reserves Cmd+Tab for the system application switcher, so a
+		// CtrlCmd-based binding never reaches the editor there. VS Code binds the
+		// real Ctrl key (KeyMod.WinCtrl) on macOS for its own Tab cycling.
+		const tabCycleModifier = isMacPlatform()
+			? monaco.KeyMod.WinCtrl
+			: monaco.KeyMod.CtrlCmd;
+
 		editor.addAction({
 			id: "tab-next",
 			label: t('menu.nextTab', uiLanguage),
-			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Tab],
+			keybindings: [tabCycleModifier | monaco.KeyCode.Tab],
 			run: () => onnextTab?.(),
 		});
 
@@ -718,7 +733,7 @@
 			id: "tab-prev",
 			label: t('menu.previousTab', uiLanguage),
 			keybindings: [
-				monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Tab,
+				tabCycleModifier | monaco.KeyMod.Shift | monaco.KeyCode.Tab,
 			],
 			run: () => onprevTab?.(),
 		});
@@ -847,10 +862,16 @@
 			keybindingContext: "editorTextFocus",
 			run: async (ed) => {
 				const selection = ed.getSelection();
-				if (!selection || selection.isEmpty()) return;
+				if (!selection) return;
 				const model = ed.getModel();
 				if (!model) return;
-				const text = model.getValueInRange(selection);
+				// This action replaces Monaco's native copy, so it has to carry
+				// Monaco's own `emptySelectionClipboard` default (also VS Code's and
+				// Sublime Text's): with nothing selected, copy the whole current
+				// line including its line ending.
+				const text = selection.isEmpty()
+					? model.getLineContent(selection.startLineNumber) + model.getEOL()
+					: model.getValueInRange(selection);
 				if (text) {
 					await invoke("clipboard_write_text", { text }).catch(console.error);
 				}
@@ -1203,6 +1224,7 @@
 					| "off"
 					| "wordWrapColumn"
 					| "bounded",
+				wordWrapColumn: settings.editorMaxWidth,
 				lineNumbers: settings.lineNumbers as
 					| "on"
 					| "off"
@@ -1214,7 +1236,7 @@
 					: "off",
 				fontSize: settings.editorFontSize * (zoomLevel / 100),
 				fontFamily: settings.editorFont,
-				renderWhitespace: settings.showWhitespace ? "trailing" : "none",
+				renderWhitespace: settings.showWhitespace ? "all" : "none",
 			});
 		}
 	});
