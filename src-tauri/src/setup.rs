@@ -3,8 +3,10 @@ use serde::Serialize;
 use std::env;
 #[cfg(target_os = "windows")]
 use std::fs;
+#[cfg(any(target_os = "windows", test))]
+use std::path::Path;
 #[cfg(target_os = "windows")]
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tauri::AppHandle;
 
 #[cfg(target_os = "windows")]
@@ -16,7 +18,7 @@ use winreg::RegKey;
 
 #[cfg(target_os = "windows")]
 const APP_NAME: &str = "Markpad";
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 const EXE_NAME: &str = "Markpad.exe";
 
 #[derive(Serialize)]
@@ -78,6 +80,43 @@ mod association_restore_tests {
             AssociationRestore::Clear,
         );
     }
+
+    #[test]
+    fn uninstall_script_waits_for_its_own_process_instead_of_killing_all_markpad_processes() {
+        let script = build_uninstall_batch(Path::new(r"C:\\Users\\me\\AppData\\Local\\Markpad"), 4567);
+
+        assert!(script.contains(r#"tasklist /FI "PID eq 4567""#));
+        assert!(!script.contains("taskkill /F /IM Markpad.exe"));
+        assert!(script.contains(r#"rmdir /s /q "C:\\Users\\me\\AppData\\Local\\Markpad""#));
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn build_uninstall_batch(install_dir: &Path, process_id: u32) -> String {
+    let target_exe = install_dir.join(EXE_NAME);
+    format!(
+        "@echo off\r\n\
+        set /a retries=0\r\n\
+        :loop\r\n\
+        tasklist /FI \"PID eq {process_id}\" | find \"{process_id}\" > nul\r\n\
+        if not errorlevel 1 (\r\n\
+            timeout /t 1 /nobreak > nul\r\n\
+            goto loop\r\n\
+        )\r\n\
+        del /f /q \"{}\" > nul 2>&1\r\n\
+        if exist \"{}\" (\r\n\
+            set /a retries+=1\r\n\
+            if %retries% geq 20 goto cleanup\r\n\
+            timeout /t 1 /nobreak > nul\r\n\
+            goto loop\r\n\
+        )\r\n\
+        rmdir /s /q \"{}\" > nul 2>&1\r\n\
+        :cleanup\r\n\
+        del \"%~f0\" > nul 2>&1",
+        target_exe.display(),
+        target_exe.display(),
+        install_dir.display(),
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -437,26 +476,7 @@ pub async fn uninstall_app(
 
     // 3. Self-destruction
     // We create a batch file to delete the app, but run it via VBScript to keep it invisible
-    let batch_content = format!(
-        "@echo off\r\n\
-        set /a retries=0\r\n\
-        :loop\r\n\
-        taskkill /F /IM {} > nul 2>&1\r\n\
-        timeout /t 1 /nobreak > nul\r\n\
-        del /f /q \"{}\" > nul 2>&1\r\n\
-        if exist \"{}\" (\r\n\
-            set /a retries+=1\r\n\
-            if %retries% geq 20 goto cleanup\r\n\
-            goto loop\r\n\
-        )\r\n\
-        rmdir /s /q \"{}\" > nul 2>&1\r\n\
-        :cleanup\r\n\
-        del \"%~f0\" > nul 2>&1",
-        EXE_NAME,
-        install_dir.join(EXE_NAME).display(),
-        install_dir.join(EXE_NAME).display(),
-        install_dir.display()
-    );
+    let batch_content = build_uninstall_batch(&install_dir, std::process::id());
 
     let temp_dir = env::temp_dir();
     let batch_path = temp_dir.join("uninstall_markdown_viewer.bat");
