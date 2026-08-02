@@ -27,6 +27,17 @@ pub struct AppState {
     window_counter: AtomicU64,
 }
 
+/// Locks `mutex`, recovering the guarded value if a previous holder panicked.
+///
+/// These mutexes guard plain bookkeeping — the window registry, pending
+/// startup paths, the watcher map — none of which is left in a torn state by
+/// a panic elsewhere. Propagating poisoning instead would turn one panic into
+/// a permanently unusable registry: every later `set_window_meta`,
+/// `list_viewer_windows` and window-destroyed handler would panic in turn.
+pub(crate) fn lock_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|error| error.into_inner())
+}
+
 impl AppState {
     pub fn new() -> Self {
         Self {
@@ -96,14 +107,16 @@ pub fn save_pinned_tag(
         tags.push(PinnedTag { name, color, files });
     }
     let json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
-    fs::write(pinned_tags_path(&app)?, json).map_err(|error| error.to_string())
+    crate::atomic_write(&pinned_tags_path(&app)?, json.as_bytes())
+        .map_err(|error| error.to_string())
 }
 
 pub fn remove_pinned_tag(app: AppHandle, name: String) -> Result<(), String> {
     let mut tags = read_pinned_tags(&app);
     tags.retain(|tag| tag.name != name);
     let json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
-    fs::write(pinned_tags_path(&app)?, json).map_err(|error| error.to_string())
+    crate::atomic_write(&pinned_tags_path(&app)?, json.as_bytes())
+        .map_err(|error| error.to_string())
 }
 
 pub fn set_window_meta(
@@ -118,7 +131,7 @@ pub fn set_window_meta(
     if label != "main" && !label.starts_with("window-") {
         return;
     }
-    let mut registry = state.window_registry.lock().unwrap();
+    let mut registry = lock_recover(&state.window_registry);
     let entry = registry.entry(label).or_insert_with(|| WindowMeta {
         number: state.window_counter.fetch_add(1, Ordering::SeqCst) + 1,
         tag_name: None,
@@ -133,7 +146,7 @@ pub fn set_window_meta(
 }
 
 pub fn list_viewer_windows(state: State<'_, AppState>) -> Vec<WindowListEntry> {
-    let registry = state.window_registry.lock().unwrap();
+    let registry = lock_recover(&state.window_registry);
     let mut list: Vec<WindowListEntry> = registry
         .iter()
         .map(|(label, meta)| WindowListEntry {
@@ -177,8 +190,17 @@ fn window_state_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(dir.join("window-state-v2.json"))
 }
 
+/// Persists the session snapshot atomically.
+///
+/// This runs while the last window is closing — the moment the WebKit storage
+/// process is already tearing down — so a partial write is a realistic
+/// outcome, not a theoretical one. `fs::write` truncates first and then
+/// streams, so a crash mid-write leaves behind half a JSON document, and the
+/// next launch restores no tabs at all. `atomic_write` publishes the new
+/// snapshot with a rename: the file on disk is either entirely the old
+/// session or entirely the new one.
 pub fn save_window_state(app: AppHandle, json: String) -> Result<(), String> {
-    fs::write(window_state_path(&app)?, json).map_err(|e| e.to_string())
+    crate::atomic_write(&window_state_path(&app)?, json.as_bytes()).map_err(|e| e.to_string())
 }
 
 pub fn load_window_state(app: AppHandle) -> Option<String> {
@@ -214,12 +236,8 @@ pub fn pick_delivery_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
         return Some(focused.clone());
     }
 
-    let last = app
-        .state::<AppState>()
-        .last_focused_viewer
-        .lock()
-        .unwrap()
-        .clone();
+    let state = app.state::<AppState>();
+    let last = lock_recover(&state.last_focused_viewer).clone();
     if let Some(label) = last {
         if let Some(window) = viewers.iter().find(|window| window.label() == label) {
             return Some(window.clone());
@@ -285,10 +303,15 @@ pub fn watch_file(
     path: String,
 ) -> Result<(), String> {
     let label = window.label().to_string();
-    let mut watchers = state.watchers.lock().unwrap();
-    watchers.remove(&label);
     let event_label = label.clone();
     let watched_path = path.clone();
+
+    // Build and arm the replacement *before* touching the watcher already
+    // registered for this window. Dropping the old one first meant a failure
+    // in either step below left the window with no watcher at all: the
+    // frontend only logs the error, so external edits would silently stop
+    // being reported for the rest of the session. Inserting last swaps them
+    // in one step — the map drops the previous watcher, which unregisters it.
     let mut watcher = RecommendedWatcher::new(
         move |result: Result<notify::Event, notify::Error>| {
             if result.is_ok() {
@@ -301,12 +324,13 @@ pub fn watch_file(
     watcher
         .watch(Path::new(&path), RecursiveMode::NonRecursive)
         .map_err(|e| e.to_string())?;
-    watchers.insert(label, watcher);
+
+    lock_recover(&state.watchers).insert(label, watcher);
     Ok(())
 }
 
 pub fn unwatch_file(window: tauri::Window, state: State<'_, WatcherState>) -> Result<(), String> {
-    state.watchers.lock().unwrap().remove(window.label());
+    lock_recover(&state.watchers).remove(window.label());
     Ok(())
 }
 
@@ -315,7 +339,7 @@ pub fn send_markdown_path(state: State<'_, AppState>) -> Vec<String> {
         .skip(1)
         .filter(|arg| !arg.starts_with('-'))
         .collect();
-    let startup_files: Vec<String> = state.startup_files.lock().unwrap().drain(..).collect();
+    let startup_files: Vec<String> = lock_recover(&state.startup_files).drain(..).collect();
     for path in startup_files.into_iter().rev() {
         if !files.contains(&path) {
             files.insert(0, path);
@@ -330,18 +354,14 @@ pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
             let label = window.label();
             if label == "main" || label.starts_with("window-") {
                 let state = window.state::<AppState>();
-                *state.last_focused_viewer.lock().unwrap() = Some(label.to_string());
+                *lock_recover(&state.last_focused_viewer) = Some(label.to_string());
             }
         }
         tauri::WindowEvent::Destroyed => {
             let state = window.state::<WatcherState>();
-            state.watchers.lock().unwrap().remove(window.label());
+            lock_recover(&state.watchers).remove(window.label());
             let app_state = window.state::<AppState>();
-            app_state
-                .window_registry
-                .lock()
-                .unwrap()
-                .remove(window.label());
+            lock_recover(&app_state.window_registry).remove(window.label());
         }
         _ => {}
     }

@@ -1,4 +1,4 @@
-use comrak::{markdown_to_html, ComrakExtensionOptions, ComrakOptions};
+use comrak::{markdown_to_html, Anchorizer, ComrakExtensionOptions, ComrakOptions};
 use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::fs;
@@ -36,10 +36,16 @@ static TASK_SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// - **Permissions:** on overwrite, restore the destination's original mode
 ///   bits after the rename; the temp file otherwise inherits the process
 ///   umask.
+/// - **Read-only targets:** refuse up front. Replacing an inode only needs
+///   write permission on the *directory*, so without this check a read-only
+///   file (Unix `chmod 444`) would be silently rewritten and then have its
+///   read-only bit restored, while Windows' `MoveFileExW` refuses a read-only
+///   destination outright — the same document would be writable on one
+///   platform and not on another.
 /// - **POSIX durability:** on Unix, fsync the parent directory after the
 ///   rename so the directory entry update survives a crash. Windows NTFS
 ///   journals this on its own, so no extra step is needed there.
-fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     // Resolve symlinks so we update the real file. `symlink_metadata` does NOT
     // follow links (unlike `metadata`); if target is a symlink, canonicalize
     // returns the real path it points to. For a non-existent target or a
@@ -64,6 +70,17 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     // bits / ACLs that the destination had. `None` means "target didn't
     // exist", in which case there's nothing to restore.
     let existing_perms = fs::metadata(target).ok().map(|m| m.permissions());
+
+    // Refuse a read-only destination before creating anything. The rename
+    // below swaps the inode, which the target's own mode bits do not guard —
+    // only the parent directory's do — so a `chmod 444` file would otherwise
+    // be rewritten on Unix while the identical operation fails on Windows.
+    if existing_perms.as_ref().is_some_and(|perms| perms.readonly()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("{} is read-only", target.display()),
+        ));
+    }
 
     let file_name = target
         .file_name()
@@ -127,6 +144,90 @@ fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Decode `bytes` as UTF-8, substituting U+FFFD for invalid sequences rather
+/// than rejecting the whole file. `read_to_string` refuses a document on its
+/// first invalid byte, which made a legacy-encoded (GBK/Big5/Shift-JIS) file
+/// openable or not purely by size: the truncated-preview path has always
+/// decoded leniently, so the same file failed at 50 KB and succeeded at
+/// 51 KB. Every read path now uses one decoder.
+fn decode_utf8_lossy(bytes: Vec<u8>) -> String {
+    match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
+    }
+}
+
+fn read_to_string_lossy(path: &str) -> std::io::Result<String> {
+    Ok(decode_utf8_lossy(fs::read(path)?))
+}
+
+/// Length of `bytes` with an incomplete trailing UTF-8 sequence removed.
+/// Truncating a file at a raw byte offset can split a multi-byte character;
+/// dropping the partial tail keeps the preview from ending in a replacement
+/// character. Only the tail is inspected — a file that is not UTF-8 at all
+/// must still produce a full-length (lossy) preview, so earlier bytes are
+/// left alone.
+fn utf8_truncation_boundary(bytes: &[u8]) -> usize {
+    let len = bytes.len();
+    // A UTF-8 sequence is at most four bytes, so at most three trailing bytes
+    // can belong to an unfinished one.
+    for back in 1..=3.min(len) {
+        let index = len - back;
+        let byte = bytes[index];
+        if byte & 0b1100_0000 == 0b1000_0000 {
+            // Continuation byte; keep walking left for its lead byte.
+            continue;
+        }
+        let needed = if byte & 0b1000_0000 == 0 {
+            1
+        } else if byte & 0b1110_0000 == 0b1100_0000 {
+            2
+        } else if byte & 0b1111_0000 == 0b1110_0000 {
+            3
+        } else if byte & 0b1111_1000 == 0b1111_0000 {
+            4
+        } else {
+            // Not a valid lead byte, so this is not a split character.
+            return len;
+        };
+        return if back < needed { index } else { len };
+    }
+    len
+}
+
+/// HTML-escapes `value` for use inside a double-quoted attribute. Embed
+/// rewriting builds `<img …>` by string concatenation, so an unescaped quote
+/// in a wikilink target (`![[a" onerror="…]]`) would break out of the
+/// attribute. The in-app viewer sanitizes with DOMPurify, but the HTML export
+/// path writes this markup straight to disk.
+fn escape_html_attribute(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+/// The anchor id comrak assigns to a heading with this text. We call comrak's
+/// own `Anchorizer` rather than re-implementing its rules (lowercase, strip
+/// everything outside letters/marks/numbers/underscore/space/hyphen, spaces
+/// to hyphens), so a comrak upgrade cannot silently desynchronize wikilink
+/// targets from the ids actually rendered into the document.
+///
+/// A fresh anchorizer is used per lookup on purpose: its duplicate handling
+/// appends `-1`, `-2`, … per *document*, and a link target can only ever
+/// address the first heading with a given text.
+fn heading_anchor_id(target: &str) -> String {
+    Anchorizer::new().anchorize(target.to_string())
+}
+
 fn safe_path_component<'a>(value: &'a str, label: &str) -> Result<&'a str, String> {
     if value.is_empty()
         || value == "."
@@ -173,6 +274,28 @@ const MAX_VSIX_DOWNLOAD_BYTES: usize = 20 * 1024 * 1024;
 const MAX_VSIX_ENTRIES: usize = 10_000;
 const MAX_VSIX_UNCOMPRESSED_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_THEME_JSON_BYTES: u64 = 2 * 1024 * 1024;
+const VSIX_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const VSIX_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Reads a VSIX entry as text under a hard byte ceiling.
+///
+/// The `size()` checks elsewhere use the size the archive *declares* in its
+/// central directory, which a hostile file is free to understate — the zip
+/// reader only bounds the *compressed* stream, so a small entry claiming to
+/// be 1 KB can still inflate without limit. Reading through `take` makes the
+/// ceiling apply to the bytes actually produced.
+fn read_zip_entry_to_string<R: std::io::Read>(entry: R, limit: u64) -> Result<String, String> {
+    use std::io::Read;
+    let mut text = String::new();
+    entry
+        .take(limit + 1)
+        .read_to_string(&mut text)
+        .map_err(|e| e.to_string())?;
+    if text.len() as u64 > limit {
+        return Err("VSIX entry exceeds the allowed size".to_string());
+    }
+    Ok(text)
+}
 
 fn validate_vsix_archive_limits<R: std::io::Read + std::io::Seek>(
     archive: &mut zip::ZipArchive<R>,
@@ -197,6 +320,124 @@ fn validate_vsix_archive_limits<R: std::io::Read + std::io::Seek>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_path(tag: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("markpad-{tag}-{nonce}"))
+    }
+
+    #[test]
+    fn atomic_write_refuses_a_read_only_target() {
+        // Replacing an inode by rename only needs write permission on the
+        // parent directory, so without an explicit check a `chmod 444` file
+        // would be rewritten on Unix and its read-only bit put back, while
+        // Windows' MoveFileExW refuses the same operation.
+        let path = temp_path("readonly");
+        fs::write(&path, b"original").unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&path, perms).unwrap();
+
+        let error = atomic_write(&path, b"replacement")
+            .expect_err("a read-only target must be refused, not silently replaced");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+
+        // Deleting needs write permission on the directory rather than the
+        // file, so Unix needs no permission restore here; Windows refuses to
+        // delete a file that still carries the read-only attribute.
+        #[cfg(windows)]
+        {
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+            fs::set_permissions(&path, perms).unwrap();
+        }
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn atomic_write_replaces_the_target_and_leaves_no_temp_file() {
+        let dir = temp_path("atomic-dir");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.json");
+        fs::write(&path, b"{\"old\":true}").unwrap();
+
+        atomic_write(&path, b"{\"new\":true}").unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"{\"new\":true}");
+        let leftovers: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("markpad-tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn every_read_path_decodes_legacy_encodings_leniently() {
+        // "中文" in GBK. `read_to_string` rejects the whole document on the
+        // first invalid byte, so the same file used to open or fail purely by
+        // size: the truncated-preview branch has always decoded leniently.
+        let gbk = [0xD6u8, 0xD0, 0xCE, 0xC4];
+        assert!(String::from_utf8(gbk.to_vec()).is_err());
+
+        let path = temp_path("gbk.txt");
+        fs::write(&path, gbk).unwrap();
+        assert!(
+            fs::read_to_string(&path).is_err(),
+            "strict decoding is expected to reject these bytes",
+        );
+
+        let decoded = read_to_string_lossy(path.to_str().unwrap())
+            .expect("lenient decoding must open the file instead of failing");
+        assert!(decoded.contains('\u{FFFD}'), "got: {decoded:?}");
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn truncation_boundary_drops_only_a_split_trailing_character() {
+        assert_eq!(utf8_truncation_boundary(&[]), 0);
+        assert_eq!(utf8_truncation_boundary(b"ab"), 2);
+
+        let three_byte = "中".as_bytes();
+        assert_eq!(utf8_truncation_boundary(three_byte), 3);
+        assert_eq!(utf8_truncation_boundary(&three_byte[..2]), 0);
+        assert_eq!(utf8_truncation_boundary(&three_byte[..1]), 0);
+
+        let four_byte = "🙂".as_bytes();
+        assert_eq!(utf8_truncation_boundary(four_byte), 4);
+        assert_eq!(utf8_truncation_boundary(&four_byte[..3]), 0);
+
+        // Only the tail is affected; earlier bytes are kept.
+        let mixed = "ab中".as_bytes();
+        assert_eq!(utf8_truncation_boundary(&mixed[..4]), 2);
+
+        // A buffer that is not UTF-8 at all must still yield a full-length
+        // preview; at most the last three bytes can ever be dropped.
+        let gbk = [0xD6u8, 0xD0, 0xCE, 0xC4];
+        assert!(utf8_truncation_boundary(&gbk) >= gbk.len() - 3);
+    }
+
+    #[test]
+    fn zip_entry_reads_stop_at_the_limit_even_when_the_header_understates_size() {
+        let payload = vec![b'a'; 64];
+        assert_eq!(
+            read_zip_entry_to_string(payload.as_slice(), 64).unwrap().len(),
+            64,
+        );
+        assert!(
+            read_zip_entry_to_string(payload.as_slice(), 32).is_err(),
+            "an entry larger than the ceiling must be rejected, not buffered",
+        );
+    }
 
     #[test]
     fn export_data_url_uses_mime_from_extension_case_insensitively() {
@@ -415,6 +656,114 @@ mod tests {
             format!("outside_a $$x\\{DISPLAY_MATH_UNDERSCORE_SENTINEL}y{DISPLAY_MATH_UNDERSCORE_SENTINEL}z$$ outside_b"),
         );
     }
+
+    #[test]
+    fn a_stray_backtick_does_not_swallow_later_paragraphs() {
+        // CommonMark parses inline elements per block and a blank line ends a
+        // block, so the loose backtick in the first paragraph cannot pair with
+        // the opening backtick of `run()` two paragraphs down.
+        let input =
+            "Use the ` character to start code.\n\n![[photo.png]]\n\nThen `run()` finishes.\n";
+
+        let out = process_internal_embeds(input);
+        assert!(out.contains("<img src=\"photo.png\""), "got: {out}");
+        assert!(out.contains("`run()`"), "got: {out}");
+    }
+
+    #[test]
+    fn a_stray_backtick_does_not_swallow_later_highlights_or_wikilinks() {
+        let input = "Use the ` character.\n\n==important== and [[#Some Heading|jump]]\n\nThen `run()` finishes.\n";
+
+        let out = process_wikilinks(input);
+        assert!(out.contains("<mark>important</mark>"), "got: {out}");
+        assert!(out.contains("(#some-heading)"), "got: {out}");
+    }
+
+    #[test]
+    fn inline_code_spans_still_pair_across_lines_inside_one_paragraph() {
+        // A code span may legitimately span several lines of the same block;
+        // the blank-line reset must not break that.
+        let input = "start `code\n![[inside.png]]` end\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("![[inside.png]]"), "got: {out}");
+        assert!(!out.contains("<img"), "got: {out}");
+    }
+
+    #[test]
+    fn embed_attributes_are_html_escaped() {
+        // The viewer sanitizes with DOMPurify, but the HTML export path writes
+        // this markup straight to disk, so the quote has to die here.
+        let out = process_internal_embeds("![[a\" onerror=\"alert(1)]]\n");
+        assert!(!out.contains("onerror=\""), "attribute injection: {out}");
+        assert!(out.contains("&quot;"), "got: {out}");
+
+        let sized = process_internal_embeds("![[p.png|300\" onload=\"x]]\n");
+        assert!(!sized.contains("onload=\""), "attribute injection: {sized}");
+
+        let single = process_internal_embeds("![[p.png|64\" onload=\"y]]\n");
+        assert!(!single.contains("onload=\""), "attribute injection: {single}");
+    }
+
+    #[test]
+    fn embed_attribute_escaping_keeps_ordinary_paths_readable() {
+        let out = process_internal_embeds("![[my photo.png]]\n");
+        assert!(out.contains("src=\"my%20photo.png\""), "got: {out}");
+        assert!(out.contains("alt=\"my photo.png\""), "got: {out}");
+    }
+
+    #[test]
+    fn wikilink_anchors_match_the_ids_comrak_actually_renders() {
+        // Asserted against comrak's real output rather than a copy of its
+        // rules: if a comrak upgrade changes anchorization, this fails instead
+        // of silently producing wikilinks that jump nowhere.
+        for heading in [
+            "1. 概述",
+            "Ticks aren't in",
+            "Hello, World!",
+            "Setup & Teardown",
+            "under_score here",
+        ] {
+            let html = convert_markdown(&format!("## {heading}\n"));
+            let rendered_id = html
+                .split("id=\"")
+                .nth(1)
+                .and_then(|rest| rest.split('"').next())
+                .unwrap_or_else(|| panic!("no heading id rendered: {html}"));
+            assert_eq!(
+                heading_anchor_id(heading),
+                rendered_id,
+                "anchor for {heading:?} drifted from comrak: {html}",
+            );
+        }
+    }
+
+    #[test]
+    fn wikilink_targets_survive_punctuation_in_the_heading() {
+        // "1. 概述" used to become "1.-概述" while comrak rendered "1-概述",
+        // so the link resolved to nothing.
+        assert_eq!(heading_anchor_id("1. 概述"), "1-概述");
+
+        let out = process_wikilinks("[[#1. 概述|Overview]]\n");
+        assert!(out.contains("[Overview](#1-概述)"), "got: {out}");
+    }
+
+    #[test]
+    fn multiline_wikilinks_are_left_literal() {
+        // A heading id can never contain a newline, so such a target cannot
+        // resolve; rewriting it would also collapse two source lines into one
+        // and shift every task checkbox below it.
+        let out = process_wikilinks("[[#first\nsecond|alias]]\n");
+        assert!(out.contains("[[#first\nsecond|alias]]"), "got: {out}");
+    }
+
+    #[test]
+    fn attribute_escaping_covers_the_html_metacharacters() {
+        assert_eq!(
+            escape_html_attribute("a\"b'c&d<e>f"),
+            "a&quot;b&#39;c&amp;d&lt;e&gt;f",
+        );
+        assert_eq!(escape_html_attribute("plain.png"), "plain.png");
+    }
 }
 
 mod setup;
@@ -554,38 +903,63 @@ fn code_region_ranges(content: &str) -> Vec<(usize, usize)> {
         }
     }
 
-    // Inline code spans in the text between fences: a run of N backticks
-    // pairs with the next run of exactly N; runs that never pair are literal.
+    // Inline code spans in the text between fences. CommonMark parses inline
+    // elements one block at a time and a blank line ends a block, so pairing
+    // is confined to each blank-line-delimited chunk: a stray backtick in
+    // prose must not open a span that runs on until the opening backtick of a
+    // real code span paragraphs later, suppressing every embed, wikilink and
+    // highlight in between.
     for (seg_s, seg_e) in plain_segments {
-        let seg = content[seg_s..seg_e].as_bytes();
-        let mut runs: Vec<(usize, usize)> = Vec::new(); // (offset in seg, len)
-        let mut i = 0usize;
-        while i < seg.len() {
-            if seg[i] == b'`' {
-                let start = i;
-                while i < seg.len() && seg[i] == b'`' {
-                    i += 1;
-                }
-                runs.push((start, i - start));
-            } else {
-                i += 1;
+        let mut chunk_start = seg_s;
+        let mut line_start = seg_s;
+        while line_start < seg_e {
+            let line_end = content[line_start..seg_e]
+                .find('\n')
+                .map(|i| line_start + i + 1)
+                .unwrap_or(seg_e);
+            if content[line_start..line_end].trim().is_empty() {
+                pair_inline_code_runs(content, chunk_start, line_start, &mut regions);
+                chunk_start = line_end;
             }
+            line_start = line_end;
         }
-        let mut r = 0usize;
-        while r < runs.len() {
-            let (open_start, open_len) = runs[r];
-            if let Some(close) = (r + 1..runs.len()).find(|&j| runs[j].1 == open_len) {
-                let (close_start, close_len) = runs[close];
-                regions.push((seg_s + open_start, seg_s + close_start + close_len));
-                r = close + 1;
-            } else {
-                r += 1;
-            }
-        }
+        pair_inline_code_runs(content, chunk_start, seg_e, &mut regions);
     }
 
     regions.sort_unstable();
     regions
+}
+
+/// Records the inline code spans inside `content[start..end]`, which must be
+/// a single block's worth of text. A run of N backticks pairs with the next
+/// run of exactly N; runs that never pair are literal text.
+fn pair_inline_code_runs(content: &str, start: usize, end: usize, regions: &mut Vec<(usize, usize)>) {
+    let chunk = &content.as_bytes()[start..end];
+    let mut runs: Vec<(usize, usize)> = Vec::new(); // (offset in chunk, len)
+    let mut i = 0usize;
+    while i < chunk.len() {
+        if chunk[i] == b'`' {
+            let run_start = i;
+            while i < chunk.len() && chunk[i] == b'`' {
+                i += 1;
+            }
+            runs.push((run_start, i - run_start));
+        } else {
+            i += 1;
+        }
+    }
+
+    let mut r = 0usize;
+    while r < runs.len() {
+        let (open_start, open_len) = runs[r];
+        if let Some(close) = (r + 1..runs.len()).find(|&j| runs[j].1 == open_len) {
+            let (close_start, close_len) = runs[close];
+            regions.push((start + open_start, start + close_start + close_len));
+            r = close + 1;
+        } else {
+            r += 1;
+        }
+    }
 }
 
 fn in_code_region(regions: &[(usize, usize)], pos: usize) -> bool {
@@ -644,25 +1018,31 @@ fn process_internal_embeds(content: &str) -> Cow<'_, str> {
         let path = parts.next().unwrap_or("");
         let size = parts.next();
 
-        let path_escaped = path.replace(" ", "%20");
+        // Every interpolated value is HTML-escaped: the target comes straight
+        // from the document, so a quote in it would otherwise close the
+        // attribute and let the rest be read as markup.
+        let src = escape_html_attribute(&path.replace(" ", "%20"));
+        let alt = escape_html_attribute(path);
 
         if let Some(size_str) = size {
             if size_str.contains('x') {
                 let mut dims = size_str.split('x');
-                let width = dims.next().unwrap_or("");
-                let height = dims.next().unwrap_or("");
+                let width = escape_html_attribute(dims.next().unwrap_or(""));
+                let height = escape_html_attribute(dims.next().unwrap_or(""));
                 format!(
                     "<img src=\"{}\" width=\"{}\" height=\"{}\" alt=\"{}\" />",
-                    path_escaped, width, height, path
+                    src, width, height, alt
                 )
             } else {
                 format!(
                     "<img src=\"{}\" width=\"{}\" alt=\"{}\" />",
-                    path_escaped, size_str, path
+                    src,
+                    escape_html_attribute(size_str),
+                    alt
                 )
             }
         } else {
-            format!("<img src=\"{}\" alt=\"{}\" />", path_escaped, path)
+            format!("<img src=\"{}\" alt=\"{}\" />", src, alt)
         }
     })
 }
@@ -678,10 +1058,18 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
             if in_code_region(&regions, full.start()) {
                 return full.as_str().to_string();
             }
+            // The pattern is line-agnostic, but a heading id never contains a
+            // newline, so a target spanning lines can never resolve. Leaving
+            // it literal also keeps the line count stable — rewriting it to a
+            // single-line id would shift the source positions of every task
+            // checkbox below it (see
+            // `multiline_wikilinks_do_not_shift_task_source_positions`).
+            if full.as_str().contains('\n') {
+                return full.as_str().to_string();
+            }
             let target = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             let alias = caps.get(2).map(|m| m.as_str()).unwrap_or(target);
-            let target_id = target.to_lowercase().replace(' ', "-");
-            format!("[{}](#{})", alias, target_id)
+            format!("[{}](#{})", alias, heading_anchor_id(target))
         });
         processed = Cow::Owned(replaced.into_owned());
     }
@@ -905,16 +1293,26 @@ async fn open_markdown_preview(path: String, max_bytes: usize) -> Result<(String
         
         let metadata = f.metadata().map_err(|e| e.to_string())?;
         if metadata.len() <= max_bytes as u64 {
-            let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            let content = read_to_string_lossy(&path).map_err(|e| e.to_string())?;
             let html = convert_markdown(&content);
             return Ok((html, content, true));
         }
 
-        let mut vec_buf = vec![0; max_bytes];
-        let n = f.read(&mut vec_buf).map_err(|e| e.to_string())?;
-        vec_buf.truncate(n);
+        // `Read::read` only guarantees *at most* `buf.len()` bytes and may
+        // return a short read for reasons that have nothing to do with EOF,
+        // truncating the preview well below the requested budget.
+        // `take(..).read_to_end(..)` keeps reading to the limit or EOF.
+        let mut vec_buf = Vec::new();
+        Read::by_ref(&mut f)
+            .take(max_bytes as u64)
+            .read_to_end(&mut vec_buf)
+            .map_err(|e| e.to_string())?;
+        // The cut lands on a raw byte offset, which can slice a multi-byte
+        // character in half; drop the partial tail instead of rendering it as
+        // a replacement character.
+        vec_buf.truncate(utf8_truncation_boundary(&vec_buf));
 
-        let preview_content = String::from_utf8_lossy(&vec_buf).into_owned();
+        let preview_content = decode_utf8_lossy(vec_buf);
 
         let html = convert_markdown(&preview_content);
         Ok((html, preview_content, false))
@@ -932,9 +1330,19 @@ async fn render_markdown(content: String) -> Result<String, String> {
     .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Deliberately async, like every other file-touching command here. A
+/// synchronous `#[tauri::command]` runs on the main thread, so a read from a
+/// slow volume (SMB, iCloud, a failing USB stick) freezes the whole
+/// application — every window, its menus and its scrolling — until the I/O
+/// returns. `spawn_blocking` moves the wait onto the blocking pool, which is
+/// what `tauri::async_runtime` provides it for.
 #[tauri::command]
-fn read_file_content(path: String) -> Result<String, String> {
-    fs::read_to_string(path).map_err(|e| e.to_string())
+async fn read_file_content(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        read_to_string_lossy(&path).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 fn mime_type_for_export_path(path: &Path) -> &'static str {
@@ -966,15 +1374,26 @@ fn file_bytes_to_data_url(mime_type: &str, bytes: &[u8]) -> String {
 }
 
 #[tauri::command]
-fn read_file_as_data_url(path: String) -> Result<String, String> {
-    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-    let mime_type = mime_type_for_export_path(Path::new(&path));
-    Ok(file_bytes_to_data_url(mime_type, &bytes))
+async fn read_file_as_data_url(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+        let mime_type = mime_type_for_export_path(Path::new(&path));
+        Ok(file_bytes_to_data_url(mime_type, &bytes))
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Async because `atomic_write` fsyncs twice (the file, then its directory).
+/// On a network or removable volume that is seconds of blocking I/O, and on
+/// the main thread it would stall every window until the save completes.
 #[tauri::command]
-fn save_file_content(path: String, content: String) -> Result<(), String> {
-    atomic_write(Path::new(&path), content.as_bytes()).map_err(|e| e.to_string())
+async fn save_file_content(path: String, content: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        atomic_write(Path::new(&path), content.as_bytes()).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -1063,8 +1482,12 @@ async fn export_pdf_windows(window: tauri::WebviewWindow, path: String) -> Resul
 }
 
 #[tauri::command]
-fn save_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
-    atomic_write(Path::new(&path), &data).map_err(|e| e.to_string())
+async fn save_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        atomic_write(Path::new(&path), &data).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -1144,7 +1567,7 @@ fn theme_slug(value: &str) -> String {
 
 #[tauri::command]
 async fn fetch_vscode_theme(app: AppHandle, url: String) -> Result<String, String> {
-    use std::io::{Cursor, Read};
+    use std::io::Cursor;
     // Parse URL: e.g. https://vscodethemes.com/e/teabyii.ayu/ayu-dark-bordered
     let parts: Vec<&str> = url.split('/').collect();
     if parts.len() < 5 || parts[3] != "e" {
@@ -1167,7 +1590,15 @@ async fn fetch_vscode_theme(app: AppHandle, url: String) -> Result<String, Strin
 
     let vsix_url = format!("https://{publisher}.gallery.vsassets.io/_apis/public/gallery/publisher/{publisher}/extension/{extension}/latest/assetbyname/Microsoft.VisualStudio.Services.VSIXPackage");
 
-    let mut response = reqwest::get(&vsix_url).await.map_err(|e| e.to_string())?;
+    // Bound the request explicitly. `reqwest::get` has no timeout at all, so
+    // a marketplace host that accepts the connection and then stalls leaves
+    // the theme import pending for the rest of the session.
+    let client = reqwest::Client::builder()
+        .connect_timeout(VSIX_CONNECT_TIMEOUT)
+        .timeout(VSIX_REQUEST_TIMEOUT)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut response = client.get(&vsix_url).send().await.map_err(|e| e.to_string())?;
     if !response.status().is_success() {
         return Err(format!("VSIX download failed with HTTP {}", response.status()));
     }
@@ -1186,16 +1617,14 @@ async fn fetch_vscode_theme(app: AppHandle, url: String) -> Result<String, Strin
     let mut archive = zip::ZipArchive::new(reader).map_err(|e| e.to_string())?;
     validate_vsix_archive_limits(&mut archive)?;
 
-    let mut package_json_data = String::new();
-    if let Ok(mut file) = archive.by_name("extension/package.json") {
+    let package_json_data = if let Ok(file) = archive.by_name("extension/package.json") {
         if file.size() > MAX_THEME_JSON_BYTES {
             return Err("VSIX package manifest exceeds the allowed size".to_string());
         }
-        file.read_to_string(&mut package_json_data)
-            .map_err(|e| e.to_string())?;
+        read_zip_entry_to_string(file, MAX_THEME_JSON_BYTES)?
     } else {
         return Err("No package.json found in VSIX".to_string());
-    }
+    };
 
     let package_json: serde_json::Value =
         serde_json::from_str(&package_json_data).map_err(|e| e.to_string())?;
@@ -1236,14 +1665,11 @@ async fn fetch_vscode_theme(app: AppHandle, url: String) -> Result<String, Strin
             path = path[2..].to_string();
         }
         let full_path = format!("extension/{}", path).replace("\\", "/");
-        let mut theme_file = archive.by_name(&full_path).map_err(|e| e.to_string())?;
+        let theme_file = archive.by_name(&full_path).map_err(|e| e.to_string())?;
         if theme_file.size() > MAX_THEME_JSON_BYTES {
             return Err("VSIX theme file exceeds the allowed size".to_string());
         }
-        let mut theme_json = String::new();
-        theme_file
-            .read_to_string(&mut theme_json)
-            .map_err(|e| e.to_string())?;
+        let theme_json = read_zip_entry_to_string(theme_file, MAX_THEME_JSON_BYTES)?;
 
         let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
         let themes_dir = config_dir.join("themes");
@@ -1320,14 +1746,22 @@ fn is_win11() -> bool {
     false
 }
 
+/// Async because enumerating every installed font family is a slow,
+/// filesystem-heavy call (fontconfig on Linux, DirectWrite on Windows,
+/// CoreText on macOS) and the settings dialog invokes it on open. On the main
+/// thread it stalls every window for the duration.
 #[tauri::command]
-fn get_system_fonts() -> Vec<String> {
-    use font_kit::source::SystemSource;
-    let source = SystemSource::new();
-    let mut families = source.all_families().unwrap_or_default();
-    families.sort();
-    families.dedup();
-    families
+async fn get_system_fonts() -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        use font_kit::source::SystemSource;
+        let source = SystemSource::new();
+        let mut families = source.all_families().unwrap_or_default();
+        families.sort();
+        families.dedup();
+        families
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1450,9 +1884,27 @@ fn clipboard_read_image(macos_image_scaling: bool) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn save_image(parent_dir: String, filename: String, base64_data: String, image_directory: String) -> Result<String, String> {
-    let filename = safe_path_component(&filename, "image filename")?;
-    let (root, img_dir) = resolve_image_directory(&parent_dir, &image_directory)?;
+async fn save_image(
+    parent_dir: String,
+    filename: String,
+    base64_data: String,
+    image_directory: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        save_image_blocking(&parent_dir, &filename, &base64_data, &image_directory)
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
+}
+
+fn save_image_blocking(
+    parent_dir: &str,
+    filename: &str,
+    base64_data: &str,
+    image_directory: &str,
+) -> Result<String, String> {
+    let filename = safe_path_component(filename, "image filename")?;
+    let (root, img_dir) = resolve_image_directory(parent_dir, image_directory)?;
     let file_path = img_dir.join(filename);
     ensure_path_within_root(&root, &file_path)?;
 
@@ -1460,7 +1912,7 @@ fn save_image(parent_dir: String, filename: String, base64_data: String, image_d
     let b64 = if let Some(pos) = base64_data.find("base64,") {
         &base64_data[pos + 7..]
     } else {
-        &base64_data
+        base64_data
     };
 
     use base64::{engine::general_purpose, Engine as _};
@@ -1480,10 +1932,26 @@ fn save_image(parent_dir: String, filename: String, base64_data: String, image_d
 }
 
 #[tauri::command]
-fn copy_file_to_img(src_path: String, parent_dir: String, image_directory: String) -> Result<String, String> {
-    let (root, img_dir) = resolve_image_directory(&parent_dir, &image_directory)?;
+async fn copy_file_to_img(
+    src_path: String,
+    parent_dir: String,
+    image_directory: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        copy_file_to_img_blocking(&src_path, &parent_dir, &image_directory)
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
+}
 
-    let src = Path::new(&src_path);
+fn copy_file_to_img_blocking(
+    src_path: &str,
+    parent_dir: &str,
+    image_directory: &str,
+) -> Result<String, String> {
+    let (root, img_dir) = resolve_image_directory(parent_dir, image_directory)?;
+
+    let src = Path::new(src_path);
     if !src.exists() {
         return Err("Source file does not exist".to_string());
     }
@@ -1545,24 +2013,28 @@ fn cleanup_empty_img_dir(parent_dir: String, image_directory: String) -> Result<
 }
 
 #[tauri::command]
-fn list_directory_contents(path: String) -> Result<Vec<String>, String> {
-    let dir = Path::new(&path);
-    if !dir.exists() || !dir.is_dir() {
-        return Err("Not a directory".to_string());
-    }
-
-    let mut entries = Vec::new();
-    for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        if is_dir {
-            entries.push(format!("{}/", name));
-        } else {
-            entries.push(name);
+async fn list_directory_contents(path: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = Path::new(&path);
+        if !dir.exists() || !dir.is_dir() {
+            return Err("Not a directory".to_string());
         }
-    }
-    Ok(entries)
+
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                entries.push(format!("{}/", name));
+            } else {
+                entries.push(name);
+            }
+        }
+        Ok(entries)
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1831,7 +2303,8 @@ pub fn run() {
                         let path_str = path_buf.to_string_lossy().to_string();
 
                         let state = _app_handle.state::<AppState>();
-                        state.startup_files.lock().unwrap().push(path_str.clone());
+                        window_runtime::lock_recover(&state.startup_files)
+                            .push(path_str.clone());
 
                         if let Some(window) = pick_delivery_window(_app_handle) {
                             let _ = _app_handle.emit_to(window.label(), "file-path", path_str);
