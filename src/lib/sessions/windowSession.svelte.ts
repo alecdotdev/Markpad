@@ -99,21 +99,47 @@ export function createWindowSession(options: WindowSessionOptions) {
 		localStorage.removeItem(options.legacyStateKey);
 	}
 
+	/**
+	 * Hand the claim back so the source can recover its tab. A claimed
+	 * transfer is deliberately immune to the source's timeout — otherwise a
+	 * slow render would race it — which means the destination is the only
+	 * party that can end a claim it cannot finish. Skipping this is what
+	 * left the tab present in both windows.
+	 */
+	async function releaseClaim(token: string) {
+		try {
+			await invoke('cancel_detached_tab', { token });
+		} catch (error) {
+			options.onError('Failed to release tab transfer claim', error);
+		}
+	}
+
 	async function acceptOfferedTransfer(token: string): Promise<boolean> {
+		let claimed = false;
 		try {
 			const payload = (await invoke('claim_detached_tab', { token })) as string | null;
-			const tab = payload ? validateTransferPayload(payload) : null;
-			if (!tab) {
-				options.onWarning('Tab transfer claim failed or payload invalid; opening empty window');
+			// Distinguish "no such token" from a claim that succeeded: only the
+			// latter leaves something to release.
+			if (payload === null) {
+				options.onWarning('Tab transfer claim failed; opening empty window');
 				return false;
 			}
-			if (await options.acceptTransferredTab(tab)) {
-				await invoke('complete_detached_tab', { token });
-				return true;
+			claimed = true;
+			const tab = validateTransferPayload(payload);
+			if (!tab) {
+				options.onWarning('Tab transfer payload invalid; opening empty window');
+				await releaseClaim(token);
+				return false;
 			}
-			return false;
+			if (!(await options.acceptTransferredTab(tab))) {
+				await releaseClaim(token);
+				return false;
+			}
+			await invoke('complete_detached_tab', { token });
+			return true;
 		} catch (error) {
 			options.onError('Tab transfer claim error', error);
+			if (claimed) await releaseClaim(token);
 			return false;
 		}
 	}
@@ -126,8 +152,26 @@ export function createWindowSession(options: WindowSessionOptions) {
 		await acceptOfferedTransfer(claimToken);
 	}
 
+	// A transfer stays open until the destination claims it or the timeout
+	// gives up, so the menu entry that started it is clickable again long
+	// before it resolves. Starting a second transfer for the same tab stages a
+	// second payload: two windows each claim one, both build the tab, and the
+	// source only removes it once -- leaving the same document open twice,
+	// each copy with its own auto-save timer.
+	const transfersInFlight = new Set<string>();
+
 	async function transfer(tabId: string, deliver: (token: string) => Promise<void>): Promise<boolean> {
 		if (!options.canTransfer(tabId)) return false;
+		if (transfersInFlight.has(tabId)) return false;
+		transfersInFlight.add(tabId);
+		try {
+			return await stageTransfer(tabId, deliver);
+		} finally {
+			transfersInFlight.delete(tabId);
+		}
+	}
+
+	async function stageTransfer(tabId: string, deliver: (token: string) => Promise<void>): Promise<boolean> {
 		const token = (await invoke('stage_detached_tab', {
 			payload: options.transferPayload(tabId),
 		})) as string;
@@ -142,19 +186,32 @@ export function createWindowSession(options: WindowSessionOptions) {
 		});
 		return new Promise<boolean>((resolve) => {
 			resolveTransfer = resolve;
-			const cancel = () => {
+			// The timeout is a guess about the destination, so it asks rather
+			// than assumes. `claimed` means the payload is already gone into
+			// the other window and only slow to render: giving up here would
+			// leave the same document open in both, and whichever auto-saves
+			// last wins. Keep waiting for `tab-transfer-claimed`; the
+			// destination releases the claim itself if it cannot finish.
+			const cancel = async () => {
+				if (settled) return;
+				try {
+					const outcome = (await invoke('cancel_detached_tab', { token })) as {
+						cancelled: boolean;
+						claimed: boolean;
+					};
+					if (!outcome.cancelled && outcome.claimed) return;
+				} catch (error) {
+					options.onError('Failed to cancel tab transfer', error);
+				}
 				if (settled) return;
 				settled = true;
 				unlisten();
-				invoke('cancel_detached_tab', { token }).catch((error) => {
-					options.onError('Failed to cancel tab transfer', error);
-				});
 				resolve(false);
 			};
 			setTimeout(cancel, 15_000);
 			deliver(token).catch((error) => {
 				options.onError('Failed to deliver tab transfer', error);
-				cancel();
+				void cancel();
 			});
 		});
 	}

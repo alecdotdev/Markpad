@@ -464,11 +464,25 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		},
 		onTransferClaimed: (tabId) => tabManager.closeTab(tabId),
 		acceptTransferredTab: async (snapshot) => {
+			// The tab has to exist before it can be rendered, which leaves a
+			// window where this side owns a document the source still shows.
+			// Anything that goes wrong from here must undo the insert, or the
+			// same file stays open in both windows with two auto-save timers
+			// writing over each other.
 			const id = tabManager.insertTransferredTab(snapshot);
-			const transferred = tabManager.tabs.find((tab) => tab.id === id);
-			if (!transferred) return false;
-			await renderTabPreviewFromRaw(transferred);
-			return !isDisposed;
+			try {
+				const transferred = tabManager.tabs.find((tab) => tab.id === id);
+				if (!transferred) return false;
+				await renderTabPreviewFromRaw(transferred);
+				if (isDisposed) {
+					tabManager.closeTab(id);
+					return false;
+				}
+				return true;
+			} catch (error) {
+				tabManager.closeTab(id);
+				throw error;
+			}
 		},
 		onError: (message, error) => {
 			console.error(message, error);
