@@ -3512,14 +3512,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	}
 
-	@media print {
-		.markdown-body {
-			height: auto !important;
-			overflow: visible !important;
-			padding: 0 !important;
-		}
-	}
-
 	.markdown-container :global(.markdown-body pre),
 	.markdown-container :global(.markdown-body pre code),
 	.markdown-container :global(.markdown-body pre tt),

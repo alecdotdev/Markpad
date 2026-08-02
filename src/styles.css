@@ -1382,7 +1382,7 @@ body {
 /* print styles for pdf export */
 @media print {
 	@page {
-		margin: 0.75in;
+		margin: 0;
 		size: auto;
 	}
 
@@ -1445,14 +1445,19 @@ body {
 	}
 
 	.markdown-body {
-		padding: 0 !important;
+		padding: 0.75in !important;
 		margin: 0 !important;
+		box-sizing: border-box !important;
+		box-decoration-break: clone !important;
+		-webkit-box-decoration-break: clone !important;
 		overflow: visible !important;
 		height: auto !important;
 		min-height: auto !important;
 		max-width: 100% !important;
 		color: #000 !important;
 		background: white !important;
+		print-color-adjust: exact !important;
+		-webkit-print-color-adjust: exact !important;
 		position: static !important;
 	}
 
@@ -1493,12 +1498,30 @@ body {
 
 	.markdown-body pre,
 	.markdown-body blockquote,
+	.markdown-body .markdown-alert,
 	.markdown-body table,
 	.markdown-body figure,
 	.markdown-body img,
 	.markdown-body .mermaid-diagram,
 	.markdown-body .katex-display {
 		break-inside: avoid;
+	}
+
+	.markdown-body .markdown-alert {
+		page-break-inside: avoid !important;
+		break-inside: avoid !important;
+		box-decoration-break: clone !important;
+		-webkit-box-decoration-break: clone !important;
+	}
+
+	.markdown-body details.markdown-alert {
+		page-break-inside: avoid !important;
+		break-inside: avoid !important;
+	}
+
+	.markdown-body tr {
+		break-inside: avoid;
+		page-break-inside: avoid;
 	}
 
 	/* Keep screen chrome out of the export while giving the document its own
