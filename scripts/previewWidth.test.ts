@@ -51,9 +51,14 @@ test('the dedicated full-width preference takes priority over its legacy key', (
 
 test('settings load, persist, and reset the preview width through one normalizer', () => {
 	assert.match(settingsSource, /previewMaxWidth = \$state\(DEFAULT_PREVIEW_MAX_WIDTH\)/);
-	assert.match(settingsSource, /localStorage\.getItem\('preview\.maxWidth'\)/);
+	// Persistence moved from one all-fields effect to one entry per localStorage
+	// key (so that a change in one window stops rewriting every other key from a
+	// stale snapshot). The preview width still round-trips under the same key and
+	// through the same normalizer; only the plumbing that reads and writes it is
+	// now shared. See scripts/settingsPersistence.test.ts.
+	assert.match(settingsSource, /key: 'preview\.maxWidth'/);
+	assert.match(settingsSource, /read: \(s\) => String\(s\.previewMaxWidth\)/);
 	assert.match(settingsSource, /normalizePreviewMaxWidth\(savedPreviewMaxWidth\)/);
-	assert.match(settingsSource, /localStorage\.setItem\('preview\.maxWidth', String\(this\.previewMaxWidth\)\)/);
 	assert.match(settingsSource, /resetPreviewMaxWidth\(\)[\s\S]*this\.previewMaxWidth = DEFAULT_PREVIEW_MAX_WIDTH/);
 });
 

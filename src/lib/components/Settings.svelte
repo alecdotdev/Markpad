@@ -2,7 +2,20 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { getVersion } from '@tauri-apps/api/app';
 	import { openUrl } from '@tauri-apps/plugin-opener';
-	import { settings, DEFAULT_FONTS, type OSType } from '../stores/settings.svelte.js';
+	import {
+		settings,
+		clampToRange,
+		isWithinRange,
+		parseStoredNumber,
+		stepWithinRange,
+		CODE_FONT_SIZE_RANGE,
+		DEFAULT_FONTS,
+		EDITOR_FONT_SIZE_RANGE,
+		EDITOR_MAX_WIDTH_RANGE,
+		PREVIEW_FONT_SIZE_RANGE,
+		type NumericSettingRange,
+		type OSType,
+	} from '../stores/settings.svelte.js';
 	import { updateStore } from '../stores/update.svelte.js';
 	import { fade, scale, fly } from 'svelte/transition';
 	import { t, getSupportedLanguages } from '../utils/i18n.js';
@@ -29,6 +42,58 @@
 	function updatePreviewMaxWidth(value: unknown) {
 		settings.previewMaxWidth = normalizePreviewMaxWidth(value);
 	}
+
+	/**
+	 * Keystroke handler for a numeric setting input.
+	 *
+	 * `min`/`max` on `<input type="number">` only drive validation styling and
+	 * the spin buttons; they do not stop typing, and Svelte's `bind:value`
+	 * assigns `null` for an empty field — which used to reach the store and
+	 * render as `font-size: nullpx` before being persisted as the string
+	 * "null". So the binding is one-way and every commit goes through the
+	 * shared range.
+	 *
+	 * While typing we accept only values that already fall inside the range and
+	 * ignore everything else, rather than clamping eagerly: clamping on each
+	 * keystroke would turn the intermediate "1" of "18" into "10" and leave the
+	 * caret stranded. Out-of-range or empty input is settled on commit instead.
+	 */
+	function handleNumberInput(event: Event, range: NumericSettingRange, assign: (value: number) => void) {
+		const input = event.currentTarget as HTMLInputElement;
+		if (input.value.trim() === '') return;
+		const parsed = Number(input.value);
+		if (!isWithinRange(parsed, range)) return;
+		assign(Math.round(parsed));
+	}
+
+	/**
+	 * Commit handler (blur / Enter). Clamps, falls back to the range default for
+	 * an empty or unparseable field, and writes the result back to the DOM —
+	 * the element needs that explicitly, because when the clamped value equals
+	 * the value already in the store there is no state change for Svelte to
+	 * re-render from and the input would keep showing the rejected text.
+	 */
+	function commitNumberInput(event: Event, range: NumericSettingRange, assign: (value: number) => void) {
+		const input = event.currentTarget as HTMLInputElement;
+		const next = parseStoredNumber(input.value, range);
+		assign(next);
+		input.value = String(next);
+	}
+
+	function handleNumberKeydown(event: KeyboardEvent, range: NumericSettingRange, assign: (value: number) => void) {
+		if (event.key !== 'Enter') return;
+		commitNumberInput(event, range, assign);
+	}
+
+	/** Spin buttons share the clamping rules with typing and with persistence. */
+	function stepSetting(current: number, delta: number, range: NumericSettingRange, assign: (value: number) => void) {
+		assign(stepWithinRange(current, delta, range));
+	}
+
+	const setEditorFontSize = (value: number) => { settings.editorFontSize = clampToRange(value, EDITOR_FONT_SIZE_RANGE); };
+	const setEditorMaxWidth = (value: number) => { settings.editorMaxWidth = clampToRange(value, EDITOR_MAX_WIDTH_RANGE); };
+	const setPreviewFontSize = (value: number) => { settings.previewFontSize = clampToRange(value, PREVIEW_FONT_SIZE_RANGE); };
+	const setCodeFontSize = (value: number) => { settings.codeFontSize = clampToRange(value, CODE_FONT_SIZE_RANGE); };
 	const highlightColors = [
 		{ value: 'default', color: 'var(--color-accent-fg)' },
 		{ value: 'yellow', color: '#ffd000' },
@@ -84,9 +149,14 @@
 	];
 
 	let systemFonts = $state<string[]>([]);
-	let loaded = $state(false);
+	// Plain variables on purpose: neither is rendered, and both are read *and*
+	// written by the open-effect below. As `$state` they made that effect
+	// re-enter itself — `loadFonts()` reads `loaded` synchronously and sets it
+	// after its await, which re-ran the effect and clobbered the saved
+	// `previousActiveElement` with a control inside the dialog.
+	let loaded = false;
+	let previousActiveElement: HTMLElement | null = null;
 	let settingsModal = $state<HTMLDivElement>();
-	let previousActiveElement = $state<HTMLElement | null>(null);
 	let appVersion = $state<string>('');
 	let osType = $state<OSType>('unknown');
 	let defaultFonts = $derived(DEFAULT_FONTS[osType] || DEFAULT_FONTS.unknown);
@@ -498,14 +568,25 @@
 		}
 	}
 
+	// Guarded by a plain (non-reactive) flag rather than by `if (!appVersion)`.
+	// The old form made the open-effect below *read* `appVersion` and the
+	// resolved promise *write* it, so the whole effect re-ran once the version
+	// arrived — and the re-run re-captured `previousActiveElement`, which by then
+	// was a button inside the dialog. Closing settings then returned focus into
+	// the dialog instead of to the control that opened it.
+	let versionRequested = false;
+	function ensureAppVersion() {
+		if (versionRequested) return;
+		versionRequested = true;
+		getVersion()
+			.then((v) => (appVersion = v))
+			.catch(console.error);
+	}
+
 	$effect(() => {
 		if (show) {
 			loadFonts();
-			if (!appVersion) {
-				getVersion()
-					.then((v) => (appVersion = v))
-					.catch(console.error);
-			}
+			ensureAppVersion();
 			loadVscodeThemes();
 			previousActiveElement = document.activeElement as HTMLElement;
 			setTimeout(() => {
@@ -742,7 +823,7 @@
 								<h2>{t('settings.editorSettings', settings.language)}</h2>
 								<button
 									class="reset-text-btn"
-									class:disabled={settings.editorFont === defaultFonts.editorFont && settings.editorFontSize === 14 && settings.editorMaxWidth === 80}
+									class:disabled={settings.editorFont === defaultFonts.editorFont && settings.editorFontSize === EDITOR_FONT_SIZE_RANGE.default && settings.editorMaxWidth === EDITOR_MAX_WIDTH_RANGE.default}
 									onclick={() => { settings.resetEditorFont(); settings.resetEditorMaxWidth(); }}>
 									{t('settings.resetEditorSettings', settings.language)}
 								</button>
@@ -773,12 +854,24 @@
 								<label for="editor-font-size">{t('settings.fontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
-										<button class="spin-btn minus" onclick={() => (settings.editorFontSize = Math.max(10, settings.editorFontSize - 1))} aria-label={t('common.decrease', settings.language)}>
+										<button class="spin-btn minus" onclick={() => stepSetting(settings.editorFontSize, -EDITOR_FONT_SIZE_RANGE.step, EDITOR_FONT_SIZE_RANGE, setEditorFontSize)} aria-label={t('common.decrease', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
-										<input type="number" id="editor-font-size" min="10" max="48" bind:value={settings.editorFontSize} class="number-input" />
-										<button class="spin-btn plus" onclick={() => (settings.editorFontSize = Math.min(48, settings.editorFontSize + 1))} aria-label={t('common.increase', settings.language)}>
+										<input
+											type="number"
+											id="editor-font-size"
+											min={EDITOR_FONT_SIZE_RANGE.min}
+											max={EDITOR_FONT_SIZE_RANGE.max}
+											step={EDITOR_FONT_SIZE_RANGE.step}
+											value={settings.editorFontSize}
+											oninput={(e) => handleNumberInput(e, EDITOR_FONT_SIZE_RANGE, setEditorFontSize)}
+											onchange={(e) => commitNumberInput(e, EDITOR_FONT_SIZE_RANGE, setEditorFontSize)}
+											onblur={(e) => commitNumberInput(e, EDITOR_FONT_SIZE_RANGE, setEditorFontSize)}
+											onkeydown={(e) => handleNumberKeydown(e, EDITOR_FONT_SIZE_RANGE, setEditorFontSize)}
+											class="number-input"
+										/>
+										<button class="spin-btn plus" onclick={() => stepSetting(settings.editorFontSize, EDITOR_FONT_SIZE_RANGE.step, EDITOR_FONT_SIZE_RANGE, setEditorFontSize)} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
@@ -791,12 +884,25 @@
 								<label for="editor-max-width">{t('settings.wrapColumn', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
-										<button class="spin-btn minus" onclick={() => (settings.editorMaxWidth = Math.max(20, settings.editorMaxWidth - 10))} aria-label={t('common.decrease', settings.language)}>
+										<button class="spin-btn minus" onclick={() => stepSetting(settings.editorMaxWidth, -EDITOR_MAX_WIDTH_RANGE.step, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)} aria-label={t('common.decrease', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
-										<input type="number" id="editor-max-width" min="20" max="500" step="10" bind:value={settings.editorMaxWidth} class="number-input" style="width: 50px" />
-										<button class="spin-btn plus" onclick={() => (settings.editorMaxWidth = Math.min(500, settings.editorMaxWidth + 10))} aria-label={t('common.increase', settings.language)}>
+										<input
+											type="number"
+											id="editor-max-width"
+											min={EDITOR_MAX_WIDTH_RANGE.min}
+											max={EDITOR_MAX_WIDTH_RANGE.max}
+											step={EDITOR_MAX_WIDTH_RANGE.step}
+											value={settings.editorMaxWidth}
+											oninput={(e) => handleNumberInput(e, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)}
+											onchange={(e) => commitNumberInput(e, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)}
+											onblur={(e) => commitNumberInput(e, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)}
+											onkeydown={(e) => handleNumberKeydown(e, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)}
+											class="number-input"
+											style="width: 50px"
+										/>
+										<button class="spin-btn plus" onclick={() => stepSetting(settings.editorMaxWidth, EDITOR_MAX_WIDTH_RANGE.step, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
@@ -911,7 +1017,7 @@
 								<h2>{t('settings.previewSettings', settings.language)}</h2>
 								<button
 									class="reset-text-btn"
-									class:disabled={settings.previewFont === defaultFonts.previewFont && settings.previewFontSize === 16 && settings.codeFont === defaultFonts.codeFont && settings.codeFontSize === 14 && settings.previewMaxWidth === DEFAULT_PREVIEW_MAX_WIDTH}
+									class:disabled={settings.previewFont === defaultFonts.previewFont && settings.previewFontSize === PREVIEW_FONT_SIZE_RANGE.default && settings.codeFont === defaultFonts.codeFont && settings.codeFontSize === CODE_FONT_SIZE_RANGE.default && settings.previewMaxWidth === DEFAULT_PREVIEW_MAX_WIDTH}
 									onclick={() => {
 										settings.resetPreviewFont();
 										settings.resetPreviewMaxWidth();
@@ -973,12 +1079,24 @@
 								<label for="preview-font-size">{t('settings.fontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
-										<button class="spin-btn minus" onclick={() => (settings.previewFontSize = Math.max(12, settings.previewFontSize - 1))} aria-label={t('common.decrease', settings.language)}>
+										<button class="spin-btn minus" onclick={() => stepSetting(settings.previewFontSize, -PREVIEW_FONT_SIZE_RANGE.step, PREVIEW_FONT_SIZE_RANGE, setPreviewFontSize)} aria-label={t('common.decrease', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
-										<input type="number" id="preview-font-size" min="12" max="48" bind:value={settings.previewFontSize} class="number-input" />
-										<button class="spin-btn plus" onclick={() => (settings.previewFontSize = Math.min(48, settings.previewFontSize + 1))} aria-label={t('common.increase', settings.language)}>
+										<input
+											type="number"
+											id="preview-font-size"
+											min={PREVIEW_FONT_SIZE_RANGE.min}
+											max={PREVIEW_FONT_SIZE_RANGE.max}
+											step={PREVIEW_FONT_SIZE_RANGE.step}
+											value={settings.previewFontSize}
+											oninput={(e) => handleNumberInput(e, PREVIEW_FONT_SIZE_RANGE, setPreviewFontSize)}
+											onchange={(e) => commitNumberInput(e, PREVIEW_FONT_SIZE_RANGE, setPreviewFontSize)}
+											onblur={(e) => commitNumberInput(e, PREVIEW_FONT_SIZE_RANGE, setPreviewFontSize)}
+											onkeydown={(e) => handleNumberKeydown(e, PREVIEW_FONT_SIZE_RANGE, setPreviewFontSize)}
+											class="number-input"
+										/>
+										<button class="spin-btn plus" onclick={() => stepSetting(settings.previewFontSize, PREVIEW_FONT_SIZE_RANGE.step, PREVIEW_FONT_SIZE_RANGE, setPreviewFontSize)} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
@@ -1012,12 +1130,24 @@
 								<label for="code-font-size">{t('settings.fontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
-										<button class="spin-btn minus" onclick={() => (settings.codeFontSize = Math.max(10, settings.codeFontSize - 1))} aria-label={t('common.decrease', settings.language)}>
+										<button class="spin-btn minus" onclick={() => stepSetting(settings.codeFontSize, -CODE_FONT_SIZE_RANGE.step, CODE_FONT_SIZE_RANGE, setCodeFontSize)} aria-label={t('common.decrease', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
-										<input type="number" id="code-font-size" min="10" max="48" bind:value={settings.codeFontSize} class="number-input" />
-										<button class="spin-btn plus" onclick={() => (settings.codeFontSize = Math.min(48, settings.codeFontSize + 1))} aria-label={t('common.increase', settings.language)}>
+										<input
+											type="number"
+											id="code-font-size"
+											min={CODE_FONT_SIZE_RANGE.min}
+											max={CODE_FONT_SIZE_RANGE.max}
+											step={CODE_FONT_SIZE_RANGE.step}
+											value={settings.codeFontSize}
+											oninput={(e) => handleNumberInput(e, CODE_FONT_SIZE_RANGE, setCodeFontSize)}
+											onchange={(e) => commitNumberInput(e, CODE_FONT_SIZE_RANGE, setCodeFontSize)}
+											onblur={(e) => commitNumberInput(e, CODE_FONT_SIZE_RANGE, setCodeFontSize)}
+											onkeydown={(e) => handleNumberKeydown(e, CODE_FONT_SIZE_RANGE, setCodeFontSize)}
+											class="number-input"
+										/>
+										<button class="spin-btn plus" onclick={() => stepSetting(settings.codeFontSize, CODE_FONT_SIZE_RANGE.step, CODE_FONT_SIZE_RANGE, setCodeFontSize)} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
