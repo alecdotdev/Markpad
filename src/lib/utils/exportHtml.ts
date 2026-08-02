@@ -52,14 +52,27 @@ function normalizeUrlPathname(pathname: string): string {
 	return path;
 }
 
+// `convertFileSrc` does not produce the same shape everywhere: Windows (and
+// Android) get `http://asset.localhost/<encoded path>`, every other platform
+// gets `asset://localhost/<encoded path>`. The app's own CSP lists both. Missing
+// the `asset.localhost` form meant no local image was ever inlined on Windows.
+const assetHostPattern = /^https?:\/\/asset\.localhost(?:\/|$)/i;
+const assetSchemePattern = /^asset:/i;
+
+export function isAssetUrl(src: string): boolean {
+	return assetSchemePattern.test(src) || assetHostPattern.test(src);
+}
+
 export function normalizeAssetPath(src: string): string | null {
-	if (!src.startsWith('asset:')) return null;
+	if (!isAssetUrl(src)) return null;
 
 	try {
 		const url = new URL(src);
 		return normalizeUrlPathname(url.pathname);
 	} catch {
-		const path = src.replace(/^asset:\/\/localhost\/?/i, '');
+		const path = src
+			.replace(/^asset:\/\/localhost\/?/i, '')
+			.replace(/^https?:\/\/asset\.localhost\/?/i, '');
 		return normalizeUrlPathname('/' + path);
 	}
 }
@@ -67,10 +80,13 @@ export function normalizeAssetPath(src: string): string | null {
 export function resolveExportImagePath(src: string, tabPath: string): string | null {
 	const trimmed = src.trim();
 	if (!trimmed) return null;
-	if (/^(?:https?:|data:|blob:)/i.test(trimmed)) return null;
-
+	// Must run before the remote-scheme bail-out: the Windows asset URL *is* an
+	// `http:` URL, and bailing out early skipped both the inlining and the
+	// `missingImages` counter, so the export silently shipped dead links.
 	const assetPath = normalizeAssetPath(trimmed);
 	if (assetPath) return assetPath;
+
+	if (/^(?:https?:|data:|blob:)/i.test(trimmed)) return null;
 
 	if (/^file:/i.test(trimmed)) {
 		try {
