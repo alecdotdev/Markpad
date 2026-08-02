@@ -24,6 +24,11 @@
 	import { askToOpenExportedFile } from './utils/openExportedFile.js';
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
+import {
+	rememberDiagramSource,
+	renderDiagramsForPrint,
+	resolveMermaidTheme,
+} from './utils/mermaidPrint.js';
 import { observeFoldLayout } from './utils/foldLayout.js';
 import {
 	addFrontMatterListItems,
@@ -947,17 +952,29 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		return documentSession.loadMarkdown(filePath, options);
 	}
 
+	function currentMermaidTheme() {
+		return resolveMermaidTheme({
+			theme,
+			datasetThemeType: document.documentElement.dataset.themeType,
+			systemPrefersDark: window.matchMedia('(prefers-color-scheme: dark)').matches,
+		});
+	}
+
+	// Mermaid puts text inside foreignObject, so the diagram sanitizer is more
+	// permissive than the document one; keep the two in one place.
+	function sanitizeDiagramSvg(svg: string) {
+		return DOMPurify.sanitize(svg, {
+			ADD_TAGS: ['foreignObject'],
+			ADD_ATTR: ['dominant-baseline', 'text-anchor'],
+		});
+	}
+
 	async function renderRichContent() {
 		if (!markdownBody) return;
 
 		if (!hljs || !renderMathInElement || !mermaid) return;
 
-		// Initialize Mermaid with theme based on system preference or override
-		const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-		const datasetThemeType = document.documentElement.dataset.themeType;
-		const isDark = datasetThemeType === 'dark' || (theme === 'dark') || (theme === 'system' && isSystemDark);
-		const effectiveTheme = isDark ? 'dark' : 'neutral';
-		mermaid.initialize({ startOnLoad: false, theme: effectiveTheme });
+		mermaid.initialize({ startOnLoad: false, theme: currentMermaidTheme() });
 
 		// Process code blocks
 		const codeBlocks = Array.from(markdownBody.querySelectorAll('pre code'));
@@ -977,11 +994,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 					// Create container and replace the <pre> block
 					const container = document.createElement('div');
 					container.className = 'mermaid-diagram';
-					// Allow foreignObject for Mermaid text rendering
-					container.innerHTML = DOMPurify.sanitize(svg, {
-						ADD_TAGS: ['foreignObject'],
-						ADD_ATTR: ['dominant-baseline', 'text-anchor'],
-					});
+					// Kept so the export can rebuild the diagram with a light
+					// theme instead of recolouring Mermaid's output.
+					rememberDiagramSource(container, mermaidCode);
+					container.innerHTML = sanitizeDiagramSvg(svg);
 					preEl.replaceWith(container);
 				} catch (error) {
 					console.error('Failed to render Mermaid diagram:', error);
@@ -1844,6 +1860,16 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 	async function exportAsPdf() {
 		const tab = tabManager.activeTab;
+		// Mermaid bakes the screen theme into the SVG it emits, so a dark
+		// preview exports unreadable diagrams. Rebuild them light for the
+		// duration of the export rather than trying to recolour the output.
+		const restoreDiagrams = await renderDiagramsForPrint({
+			root: markdownBody,
+			mermaid,
+			sanitizeSvg: sanitizeDiagramSvg,
+			screenTheme: currentMermaidTheme(),
+			onError: (error) => console.error('Failed to re-render diagram for export', error),
+		});
 		try {
 			await _exportPdf({
 				tabPath: tab?.path || '',
@@ -1852,6 +1878,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		} catch (error) {
 			console.error('Failed to export PDF', error);
 			addToast('Failed to export PDF', 'error');
+		} finally {
+			restoreDiagrams();
 		}
 	}
 

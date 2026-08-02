@@ -1469,15 +1469,20 @@ body {
 		overflow: visible !important;
 	}
 
-	/* Paper has no horizontal scrollbar, so restore the fixed table-layout for
-	   export: wide tables wrap to fit the page width instead of being clipped
-	   by the on-screen `display: block; overflow-x: auto` scroll container. */
+	/* Paper has no horizontal scrollbar. Let the browser distribute columns from
+	   their content so wide tables wrap at words instead of one glyph at a time. */
 	.markdown-body table {
 		display: table !important;
-		table-layout: fixed !important;
+		table-layout: auto !important;
 		width: 100% !important;
 		max-width: 100% !important;
 		overflow: visible !important;
+	}
+
+	.markdown-body table th,
+	.markdown-body table td {
+		overflow-wrap: break-word !important;
+		word-break: normal !important;
 	}
 
 	.markdown-body p,
@@ -1522,6 +1527,29 @@ body {
 	.markdown-body tr {
 		break-inside: avoid;
 		page-break-inside: avoid;
+	}
+
+	/* Diagrams are re-rendered with Mermaid's light theme before an
+	   export (see utils/mermaidPrint.ts), so the printed SVG already
+	   carries paper colours and needs no overrides here. Recolouring
+	   Mermaid's output from CSS meant enumerating its internal class
+	   names, which differ per diagram type and change between
+	   releases. */
+
+	.markdown-body .frontmatter-panel,
+	.markdown-body .frontmatter-summary {
+		box-sizing: border-box !important;
+		max-width: 100% !important;
+	}
+
+	.markdown-body .frontmatter-title {
+		min-width: 0 !important;
+		overflow: hidden !important;
+		text-overflow: ellipsis !important;
+	}
+
+	.markdown-body .frontmatter-count {
+		flex-shrink: 0 !important;
 	}
 
 	/* Keep screen chrome out of the export while giving the document its own

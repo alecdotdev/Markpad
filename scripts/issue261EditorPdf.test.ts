@@ -79,3 +79,18 @@ test('print layout paints a theme-independent page and keeps Markdown alerts int
 	assert.match(printStyles, /\.markdown-body tr\s*\{[\s\S]*?break-inside:\s*avoid;/);
 	assert.doesNotMatch(viewerPrintStyles, /\.markdown-body\s*\{[\s\S]*?padding:\s*0\s*!important;/);
 });
+
+test('print layout keeps wide metadata tables readable', () => {
+	const printStyles = styles.slice(styles.indexOf('@media print {'));
+
+	// Diagram colours are no longer patched from CSS — the export re-renders
+	// them with Mermaid's light theme instead (see utils/mermaidPrint.ts).
+	// Recolouring by class name silently half-applied: sequence-diagram
+	// actors have no `.node` ancestor, so their fill rule missed while the
+	// label rule landed, leaving dark text on a near-black box.
+	assert.doesNotMatch(printStyles, /\.mermaid-diagram svg[^{]*\{[^}]*fill:/);
+	assert.match(printStyles, /\.markdown-body table\s*\{[\s\S]*?table-layout:\s*auto\s*!important;/);
+	assert.match(printStyles, /\.markdown-body table th,[\s\S]*?overflow-wrap:\s*break-word\s*!important;/);
+	assert.match(printStyles, /\.markdown-body \.frontmatter-summary\s*\{[\s\S]*?box-sizing:\s*border-box\s*!important;/);
+	assert.match(printStyles, /\.markdown-body \.frontmatter-title\s*\{[\s\S]*?min-width:\s*0\s*!important;/);
+});
