@@ -1,0 +1,89 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+
+import {
+	getMarkdownLinkTarget,
+	hasMarkdownLinkExtension,
+	resolveMarkdownTargetPath,
+} from '../src/lib/utils/markdownLinks.js';
+
+// `[[Notes#Setup]]` — the exact string the "Copy Reference" context-menu item
+// writes to the clipboard — used to render as literal text: the Rust
+// preprocessor only understood the same-document form `[[#Setup]]`. It now
+// emits a plain markdown link, and these tests pin the *shape* of the href it
+// emits against the frontend that has to claim it. The Rust side owns the
+// other half of this contract in src-tauri/src/lib.rs (`copy_reference_output_
+// becomes_a_real_link` and friends); if either half moves, the other fails.
+//
+// Scope: only the heading-bearing forms (`[[#h]]`, `[[file#h]]`, and their
+// `|alias` variants) are rewritten. Obsidian's bare note link `[[Notes]]` is
+// a separate feature, not this defect, and is left literal.
+//
+// Not covered here: whether the file exists, and the actual tab-opening (that
+// runs inside MarkdownViewer.svelte and needs a live webview). These tests
+// only prove the href is recognized as a local markdown target and decodes
+// back to the path and anchor the document asked for.
+
+const rustSource = readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+const viewerSource = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
+
+// href values as produced by process_wikilinks() in src-tauri/src/lib.rs.
+// Only the heading-bearing forms appear: a wikilink with no `#` is
+// deliberately left as literal text and never reaches the frontend at all.
+const cases: { wikilink: string; href: string; path: string; hash: string }[] = [
+	{ wikilink: '[[Notes#Setup]]', href: 'Notes.md#setup', path: 'Notes.md', hash: 'setup' },
+	{ wikilink: '[[docs/Guide#Setup]]', href: 'docs/Guide.md#setup', path: 'docs/Guide.md', hash: 'setup' },
+	{ wikilink: '[[docs/Guide#1. 概述|Overview]]', href: 'docs/Guide.md#1-概述', path: 'docs/Guide.md', hash: '1-概述' },
+	{ wikilink: '[[My Notes (v2)#Setup]]', href: 'My%20Notes%20%28v2%29.md#setup', path: 'My Notes (v2).md', hash: 'setup' },
+	{ wikilink: '[[Notes#^abc123]]', href: 'Notes.md#abc123', path: 'Notes.md', hash: 'abc123' },
+	{ wikilink: '[[log.txt#Errors]]', href: 'log.txt#errors', path: 'log.txt', hash: 'errors' },
+];
+
+test('every href the wikilink rewriter emits is claimed as a local markdown target', () => {
+	for (const { wikilink, href, path, hash } of cases) {
+		const target = getMarkdownLinkTarget(href);
+		assert.notEqual(target, null, `${wikilink} -> ${href} was not claimed as a markdown link`);
+		assert.equal(target?.path, path, `${wikilink} resolved to the wrong path`);
+		assert.equal(target?.hash, hash, `${wikilink} resolved to the wrong anchor`);
+	}
+});
+
+test('a bare note name without the appended extension would not be claimed', () => {
+	// This is why the rewriter appends ".md": Obsidian omits the extension,
+	// but getMarkdownLinkTarget() keys entirely off it, and an unclaimed href
+	// falls through to the external-URL opener instead of opening a tab.
+	assert.equal(hasMarkdownLinkExtension('Notes'), false);
+	assert.equal(getMarkdownLinkTarget('Notes#setup'), null);
+});
+
+test('wikilink targets resolve relative to the document that contains them', () => {
+	const target = getMarkdownLinkTarget('docs/Guide.md#1-概述');
+	assert.notEqual(target, null);
+	assert.equal(resolveMarkdownTargetPath('/vault/index.md', target!), '/vault/docs/Guide.md');
+});
+
+test('non-markdown wikilink targets are left literal rather than emitted as links', () => {
+	// The rewriter declines these (`wikilinks_to_files_the_viewer_cannot_open_
+	// stay_literal`); this asserts the reason — the frontend would not claim
+	// them either.
+	assert.equal(getMarkdownLinkTarget('report.pdf#Intro'), null);
+	assert.equal(getMarkdownLinkTarget('diagram.svg#part'), null);
+});
+
+test('the extension list the rewriter mirrors still matches markdownLinks.ts', () => {
+	const declared = rustSource.match(/const MARKDOWN_LINK_EXTENSIONS: \[&str; \d+\] = \[([^\]]*)\]/);
+	assert.notEqual(declared, null, 'MARKDOWN_LINK_EXTENSIONS disappeared from lib.rs');
+	const extensions = [...declared![1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+	assert.deepEqual(extensions, ['md', 'markdown', 'mdown', 'mkd', 'txt']);
+	for (const extension of extensions) {
+		assert.equal(hasMarkdownLinkExtension(`file.${extension}`), true, extension);
+	}
+});
+
+test('Copy Reference still emits the wikilink form the rewriter parses', () => {
+	// Both call sites (document context menu and the TOC context menu) build
+	// `[[<basename without extension>#<heading>]]`.
+	const emitted = [...viewerSource.matchAll(/`\[\[\$\{(?:fn|filename)\}#\$\{[^}]+\}\]\]`/g)];
+	assert.equal(emitted.length, 3, `Copy Reference reference format changed: ${emitted.length} call sites matched`);
+});

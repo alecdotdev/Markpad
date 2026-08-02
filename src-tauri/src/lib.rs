@@ -9,7 +9,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)!\[\[(.*?)\]\]").unwrap());
-static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)\[\[#([^\|\]]+)(?:\|([^\]]+))?\]\]").unwrap());
+/// `[[target]]` / `[[target|alias]]` where the target names a heading — either
+/// in this document (`#Setup`) or in another file (`Notes#Setup`). The `#` is
+/// required: a wikilink without one is a bare note link, which Markpad has
+/// never resolved and which this pattern deliberately does not claim (see the
+/// `wikilinks_without_a_heading_are_deliberately_left_literal` test). The `#`
+/// here is only a cheap prefilter — it can also fall in the alias half, so
+/// `process_wikilinks` re-checks that the target half really has one.
+/// The inner text stops at the first `]`, as the narrower `[[#…]]` pattern
+/// this replaced also did.
+static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]]*#[^\]]*)\]\]").unwrap());
 static BLOCK_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)\s+\^([a-zA-Z0-9_-]+)$").unwrap());
 static HIGHLIGHT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"==([^=\n]+)==").unwrap());
 static INLINE_FOOTNOTE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\^\[([^\]]+)\]").unwrap());
@@ -225,7 +234,74 @@ fn escape_html_attribute(value: &str) -> String {
 /// appends `-1`, `-2`, … per *document*, and a link target can only ever
 /// address the first heading with a given text.
 fn heading_anchor_id(target: &str) -> String {
-    Anchorizer::new().anchorize(target.to_string())
+    Anchorizer::new().anchorize(target.trim().to_string())
+}
+
+/// File extensions the viewer will open as a document. Mirrors
+/// `hasMarkdownLinkExtension` in src/lib/utils/markdownLinks.ts — a wikilink
+/// whose href does not end in one of these is not claimed by the frontend's
+/// local-navigation path at all, so emitting one would produce a link that
+/// escapes to the external-URL opener instead of opening a tab.
+const MARKDOWN_LINK_EXTENSIONS: [&str; 5] = ["md", "markdown", "mdown", "mkd", "txt"];
+
+/// The extension of the last path component, if the trailing `.segment` really
+/// reads as one. `v1.2 spec` has none (the tail is not alphanumeric) and
+/// neither does `.gitignore` (no stem before the dot).
+fn link_path_extension(path: &str) -> Option<&str> {
+    let name = path.rsplit(['/', '\\']).next()?;
+    let (stem, ext) = name.rsplit_once('.')?;
+    let plausible = !stem.is_empty()
+        && (1..=8).contains(&ext.len())
+        && ext.chars().all(|c| c.is_ascii_alphanumeric());
+    plausible.then_some(ext)
+}
+
+/// Percent-encodes the characters that would otherwise end or corrupt a
+/// markdown link destination (space, parentheses, angle brackets, quote) or
+/// that the frontend's own href parsing reads as structure (`?`, which
+/// `getMarkdownLinkTarget` strips as a query string). `%` is encoded first so
+/// that a literal percent in a filename survives the frontend's
+/// `decodeURIComponent`.
+fn encode_link_destination(path: &str) -> String {
+    let mut encoded = String::with_capacity(path.len());
+    for character in path.chars() {
+        match character {
+            '%' => encoded.push_str("%25"),
+            ' ' => encoded.push_str("%20"),
+            '(' => encoded.push_str("%28"),
+            ')' => encoded.push_str("%29"),
+            '<' => encoded.push_str("%3C"),
+            '>' => encoded.push_str("%3E"),
+            '"' => encoded.push_str("%22"),
+            '?' => encoded.push_str("%3F"),
+            _ => encoded.push(character),
+        }
+    }
+    encoded
+}
+
+/// The link destination for the file half of a wikilink, or `None` when the
+/// target is not something the viewer can open — in which case the wikilink is
+/// left as literal text rather than turned into a link that goes nowhere
+/// useful.
+///
+/// Obsidian writes note links without an extension (`[[Notes#Setup]]`) and
+/// resolves them against a vault index. Markpad has no index, so the target is
+/// treated as a path relative to the current document — the same resolution a
+/// plain `[text](../other.md)` link already gets — and `.md` is appended when
+/// the target carries no extension of its own.
+fn wikilink_file_destination(path: &str) -> Option<String> {
+    let path = path.trim();
+    if path.is_empty() || path.ends_with('/') || path.ends_with('\\') {
+        return None;
+    }
+    match link_path_extension(path) {
+        Some(extension) => MARKDOWN_LINK_EXTENSIONS
+            .iter()
+            .any(|known| extension.eq_ignore_ascii_case(known))
+            .then(|| encode_link_destination(path)),
+        None => Some(format!("{}.md", encode_link_destination(path))),
+    }
 }
 
 fn safe_path_component<'a>(value: &'a str, label: &str) -> Result<&'a str, String> {
@@ -756,6 +832,172 @@ mod tests {
         assert!(out.contains("[[#first\nsecond|alias]]"), "got: {out}");
     }
 
+    // ---- [[file#heading]] wikilinks -------------------------------------
+    //
+    // What these tests do NOT cover, and why:
+    //  * Bare note links, "[[Notes]]" with no heading. Deliberately out of
+    //    scope — see `wikilinks_without_a_heading_are_deliberately_left_literal`.
+    //  * Whether the target file exists. Resolution is the frontend's job
+    //    (`resolveMarkdownTargetPath` in src/lib/utils/markdownLinks.ts); the
+    //    Rust side never touches the filesystem here, so a link to a missing
+    //    note is emitted like any other and simply fails to open.
+    //  * Obsidian's nested-heading paths (`[[file#H1#H2]]`). Everything after
+    //    the first `#` is taken as one heading name, so such a target
+    //    anchorizes to the two names run together and will not resolve. That
+    //    matches the existing behaviour of the same-document form.
+    //  * Duplicate headings. comrak appends `-1`, `-2`, … to the second and
+    //    later headings with the same text; a wikilink can only ever address
+    //    the first one (see the doc comment on `heading_anchor_id`).
+    //  * The actual click-through. The href *shape* the frontend accepts is
+    //    pinned from the TypeScript side in scripts/wikilinkFileTargets.test.ts.
+
+    #[test]
+    fn copy_reference_output_becomes_a_real_link() {
+        // `[[Notes#Setup]]` is exactly what the app's own "Copy Reference"
+        // menu item writes to the clipboard (MarkdownViewer.svelte); it used
+        // to render as literal text because the pattern required `#` to
+        // follow `[[` immediately.
+        let out = process_wikilinks("[[Notes#Setup]]\n");
+        assert!(out.contains("[Notes > Setup](Notes.md#setup)"), "got: {out}");
+    }
+
+    #[test]
+    fn file_wikilink_href_carries_a_markdown_extension_the_frontend_recognizes() {
+        // getMarkdownLinkTarget() only claims a link whose path has a known
+        // markdown extension, so a note name written without one — the way
+        // Copy Reference writes it — has to gain one here or the click falls
+        // through to the external-URL opener.
+        let out = process_wikilinks("[[docs/Guide#Setup]]\n");
+        assert!(out.contains("(docs/Guide.md#setup)"), "got: {out}");
+    }
+
+    #[test]
+    fn file_wikilink_keeps_an_extension_it_was_already_given() {
+        let out = process_wikilinks("[[Notes.md#Setup]]\n");
+        assert!(out.contains("(Notes.md#setup)"), "got: {out}");
+        assert!(!out.contains("Notes.md.md"), "got: {out}");
+
+        let txt = process_wikilinks("[[log.txt#Errors]]\n");
+        assert!(txt.contains("(log.txt#errors)"), "got: {txt}");
+        assert!(!txt.contains("log.txt.md"), "got: {txt}");
+    }
+
+    #[test]
+    fn wikilinks_without_a_heading_are_deliberately_left_literal() {
+        // Obsidian's bare note link "[[Notes]]" is out of scope: this change
+        // fixes Copy Reference, whose every call site emits a "#". Claiming
+        // every "[[…]]" would also swallow bracketed citation numbering and
+        // pre-empt CommonMark reference links, neither of which is a wikilink.
+        // See the PR description.
+        for input in [
+            "[[Notes]]\n",
+            "[[1]] Author, Title.\n",
+            "[[TODO]] revisit this.\n",
+            "[[foo]] and [[foo|bar]]\n",
+            "[[docs/Guide|Guide]]\n",
+        ] {
+            assert_eq!(process_wikilinks(input), input, "should be literal");
+        }
+
+        // A "#" in the alias half does not make it a heading link either.
+        let aliased = "[[Notes|see #1]]\n";
+        assert_eq!(process_wikilinks(aliased), aliased);
+
+        // A reference definition must keep resolving the CommonMark way.
+        let html = convert_markdown("[[foo]] here.\n\n[foo]: https://example.com\n");
+        assert!(html.contains("href=\"https://example.com\""), "got: {html}");
+        assert!(!html.contains("foo.md"), "got: {html}");
+    }
+
+    #[test]
+    fn file_wikilink_alias_and_subfolder_and_punctuated_heading() {
+        let out = process_wikilinks("[[docs/Guide#1. 概述|Overview]]\n");
+        assert!(out.contains("[Overview](docs/Guide.md#1-概述)"), "got: {out}");
+    }
+
+    #[test]
+    fn file_wikilink_percent_encodes_what_would_break_the_destination() {
+        // A space would end the destination and the rest would be read as a
+        // title; parentheses would close it early. decodeLinkPath() on the
+        // frontend undoes all of this.
+        let out = process_wikilinks("[[My Notes (v2)#Setup]]\n");
+        assert!(out.contains("(My%20Notes%20%28v2%29.md#setup)"), "got: {out}");
+        assert!(out.contains("[My Notes (v2) > Setup]"), "got: {out}");
+    }
+
+    #[test]
+    fn file_wikilink_block_reference_targets_the_block_id_anchor() {
+        // `^abc123` at the end of a line becomes <a id="abc123">, and comrak's
+        // anchorizer drops the caret, so both sides agree on "abc123".
+        let out = process_wikilinks("[[Notes#^abc123]]\n");
+        assert!(out.contains("(Notes.md#abc123)"), "got: {out}");
+    }
+
+    #[test]
+    fn wikilinks_to_files_the_viewer_cannot_open_stay_literal() {
+        // A non-markdown target would not be claimed by getMarkdownLinkTarget,
+        // so the click would reach openUrl() with a relative path resolved
+        // against the webview origin. Leaving it as text is the honest result.
+        for input in ["[[report.pdf#Intro]]\n", "[[diagram.svg#part]]\n"] {
+            let out = process_wikilinks(input);
+            assert_eq!(out, input, "got: {out}");
+        }
+    }
+
+    #[test]
+    fn same_document_wikilinks_are_unchanged_by_the_file_form() {
+        let out = process_wikilinks("[[#Some Heading|jump]]\n");
+        assert!(out.contains("[jump](#some-heading)"), "got: {out}");
+
+        let bare = process_wikilinks("[[#Setup]]\n");
+        assert!(bare.contains("[Setup](#setup)"), "got: {bare}");
+    }
+
+    #[test]
+    fn file_wikilinks_in_code_spans_and_fences_stay_literal() {
+        let span = process_wikilinks("`[[Notes#Setup]]` but [[Notes#Setup]]\n");
+        assert!(span.contains("`[[Notes#Setup]]`"), "got: {span}");
+        assert!(span.contains("(Notes.md#setup)"), "got: {span}");
+
+        let fence = process_wikilinks("```\n[[Notes#Setup]]\n```\n");
+        assert!(fence.contains("```\n[[Notes#Setup]]\n```"), "got: {fence}");
+    }
+
+    #[test]
+    fn embeds_are_not_also_treated_as_file_wikilinks() {
+        // process_internal_embeds runs first and consumes `![[…]]`; the guard
+        // matters for the standalone call and for an embed it declined.
+        let out = process_wikilinks("![[photo.png]]\n");
+        assert!(out.contains("![[photo.png]]"), "got: {out}");
+
+        let html = convert_markdown("![[photo.png]]\n");
+        assert!(html.contains("<img src=\"photo.png\""), "got: {html}");
+    }
+
+    #[test]
+    fn bracketed_link_text_is_still_a_commonmark_link() {
+        // "[[1]](https://example.com)" is a CommonMark link whose text is
+        // "[1]" — a common citation spelling in READMEs. Requiring a "#"
+        // already protects that spelling, so the first case here would pass
+        // without the trailing-"(" guard; the second would not, which is why
+        // the guard stays.
+        for input in [
+            "See [[1]](https://example.com) for details.\n",
+            "See [[1#x]](https://example.com) for details.\n",
+            "[[Notes#Setup]](https://example.com)\n",
+        ] {
+            assert_eq!(process_wikilinks(input), input, "should be literal");
+            let html = convert_markdown(input);
+            assert!(html.contains("href=\"https://example.com\""), "got: {html}");
+        }
+    }
+
+    #[test]
+    fn file_wikilink_survives_the_full_render_pipeline() {
+        let html = convert_markdown("[[Notes#Setup]]\n");
+        assert!(html.contains("href=\"Notes.md#setup\""), "got: {html}");
+    }
+
     #[test]
     fn attribute_escaping_covers_the_html_metacharacters() {
         assert_eq!(
@@ -1050,26 +1292,85 @@ fn process_internal_embeds(content: &str) -> Cow<'_, str> {
 fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
     let mut processed = Cow::Borrowed(content);
 
-    // 1. Process [[#target]] or [[#target|alias]]
+    // 1. Process [[#heading]], [[file#heading]] and the |alias form of each.
+    //    Obsidian documents all of these (help.obsidian.md/links:
+    //    "[[About Obsidian#Links are first-class citizens]]",
+    //    "[[2023-01-01#^37066d]]", "[[Example#Details|Section name]]"), and
+    //    the file form is what Markpad's own "Copy Reference" menu item puts
+    //    on the clipboard — it used to paste back in as dead literal text.
+    //
+    //    Obsidian's bare note link "[[Notes]]" is NOT handled: it is a
+    //    separate feature rather than part of this defect, and claiming every
+    //    "[[…]]" would capture bracketed citation numbering ("[[1]]") and
+    //    pre-empt CommonMark reference links ("[[foo]]" with a "[foo]: url"
+    //    definition). Every Copy Reference call site emits a "#", so requiring
+    //    one fixes the defect completely without touching either.
     if WIKILINK_RE.is_match(&processed) {
         let regions = code_region_ranges(&processed);
-        let replaced = WIKILINK_RE.replace_all(&processed, |caps: &Captures| {
+        let source: &str = &processed;
+        let replaced = WIKILINK_RE.replace_all(source, |caps: &Captures| {
             let full = caps.get(0).unwrap();
+            let literal = || full.as_str().to_string();
             if in_code_region(&regions, full.start()) {
-                return full.as_str().to_string();
+                return literal();
             }
-            // The pattern is line-agnostic, but a heading id never contains a
-            // newline, so a target spanning lines can never resolve. Leaving
-            // it literal also keeps the line count stable — rewriting it to a
-            // single-line id would shift the source positions of every task
-            // checkbox below it (see
+            // The pattern is line-agnostic, but neither a heading id nor a
+            // filename contains a newline, so a target spanning lines can
+            // never resolve. Leaving it literal also keeps the line count
+            // stable — rewriting it to a single line would shift the source
+            // positions of every task checkbox below it (see
             // `multiline_wikilinks_do_not_shift_task_source_positions`).
             if full.as_str().contains('\n') {
-                return full.as_str().to_string();
+                return literal();
             }
-            let target = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-            let alias = caps.get(2).map(|m| m.as_str()).unwrap_or(target);
-            format!("[{}](#{})", alias, heading_anchor_id(target))
+            // `![[…]]` is an embed, already rewritten by
+            // process_internal_embeds; it is never a link.
+            if source.as_bytes()[..full.start()].last() == Some(&b'!') {
+                return literal();
+            }
+            // "[[1#x]](https://example.com)" is a CommonMark link whose text
+            // is "[1#x]"; claiming the brackets would strand the "(url)".
+            // Requiring a "#" already protects the common citation spelling
+            // "[[1]](url)", but not the forms that do carry one.
+            if source[full.end()..].starts_with('(') {
+                return literal();
+            }
+
+            let inner = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let (target, alias) = match inner.split_once('|') {
+                Some((target, alias)) => (target, Some(alias)),
+                None => (inner, None),
+            };
+            let alias = alias.filter(|a| !a.trim().is_empty());
+            // The `#` the pattern matched may have been in the alias half
+            // ("[[Notes|see #1]]"), which is a bare note link, not a heading
+            // link. Only a `#` in the target counts.
+            let Some((path, heading)) = target.split_once('#') else {
+                return literal();
+            };
+            let (path, heading) = (path.trim(), heading.trim());
+            if heading.is_empty() {
+                return literal();
+            }
+            let anchor = heading_anchor_id(heading);
+
+            if path.is_empty() {
+                // Same document: [[#Setup]] / [[#Setup|jump]].
+                return format!("[{}](#{anchor})", alias.unwrap_or(heading));
+            }
+
+            let Some(destination) = wikilink_file_destination(path) else {
+                return literal();
+            };
+            // Obsidian renders an un-aliased heading link as "Note > Heading";
+            // keeping that spelling means a pasted reference reads the same in
+            // both apps.
+            format!(
+                "[{}]({destination}#{anchor})",
+                alias
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("{path} > {heading}")),
+            )
         });
         processed = Cow::Owned(replaced.into_owned());
     }
