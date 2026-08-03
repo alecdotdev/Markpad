@@ -20,7 +20,7 @@
 
 const SOURCE_ATTR = 'data-mermaid-source';
 
-export const MERMAID_PRINT_THEME = 'neutral';
+const MERMAID_PRINT_THEME = 'neutral';
 
 interface MermaidRenderer {
 	initialize(config: { startOnLoad: boolean; theme: string }): void;

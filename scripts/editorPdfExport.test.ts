@@ -375,6 +375,13 @@ test('the refresh actually lands before the print', () => {
 
 test('a failed refresh does not pass off a stale export as a fresh one', () => {
 	const body_ = sliceBetween(viewer, 'async function syncPreviewForPrint', 'async function exportAsPdf');
-	assert.match(body_, /catch \(error\)/);
-	assert.match(body_, /addToast\(/);
+	// The export goes ahead on a failed refresh — printing the stale DOM beats
+	// not printing — so what carries the claim in this test's name is entirely
+	// the *severity* of what the user is told. `/catch \(error\)/` plus
+	// `/addToast\(/` is satisfied by a catch that reports success, which is the
+	// inverse of the contract: swapping the warning for
+	// `addToast('Export refreshed', 'success')` left both regexes matching.
+	const failure = sliceFrom(body_, 'catch (error)');
+	const severities = [...failure.matchAll(/addToast\([^;]*?,\s*'([a-z]+)'\)/g)].map((match) => match[1]);
+	assert.deepEqual(severities, ['warning'], 'the failed refresh must warn, not report a fresh export');
 });

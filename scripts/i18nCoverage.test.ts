@@ -450,5 +450,10 @@ test('per-locale completeness (reported, never enforced)', () => {
 	}
 	console.log(`    ${'total'.padEnd(6)} ${total} untranslated key-slots (falling back to English)\n`);
 
-	assert.ok(total >= 0);
+	// No assertion, deliberately. `total` is a sum of array lengths, so the
+	// `assert.ok(total >= 0)` that used to close this block was true for every
+	// possible dictionary — it read as a gate while enforcing nothing. The gates
+	// are the two tests above: every key the source asks for exists in English,
+	// and no language defines a key English does not have. Completeness per
+	// locale stays a worklist.
 });

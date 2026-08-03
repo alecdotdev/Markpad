@@ -191,8 +191,11 @@ test('persistence installs one effect per key plus the storage listener', () => 
 	storageListeners.length = 0;
 	registeredEffects.length = 0;
 
-	const store = new SettingsStore();
-	assert.ok(store instanceof SettingsStore);
+	// Constructing the store is what installs the effects; the counts below are
+	// the assertion. `assert.ok(store instanceof SettingsStore)` stood here and
+	// could not fail — a constructor that throws fails the line above it, and
+	// one that returns fails nothing.
+	new SettingsStore();
 
 	const entryCount = createSettingsPersistence().length;
 	assert.equal(registeredEffects.length, entryCount + 1);

@@ -295,7 +295,16 @@ test('a document with no math carries no KaTeX fonts at all', async () => {
 	// the file. They now go, rather than travelling as a lie about what the
 	// document needs.
 	const cssOnly = KATEX_CSS;
-	const document = inlineKatexFontFaces(cssOnly, new Set(), new Map());
+	// Every face's bytes are in hand, so the family filter is the only thing
+	// left that can drop them. Handing this an empty byte map — which is what
+	// it used to do — deletes every face through the "bytes could not be read"
+	// branch instead, and deleting the family filter outright stayed green.
+	const bytes = new Map(
+		findKatexFontFaces(cssOnly).map((face) => [face.woff2Url!, 'data:font/woff2;base64,d09GMg==']),
+	);
+	assert.equal(bytes.size, 3, 'the fixture stylesheet declares three faces, all with woff2 bytes');
+
+	const document = inlineKatexFontFaces(cssOnly, new Set(), bytes);
 	assert.doesNotMatch(document, /@font-face/);
 	assert.match(document, /\.katex \{/);
 });

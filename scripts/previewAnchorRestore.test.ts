@@ -324,7 +324,19 @@ test('the viewer restores through the measured resolver', async () => {
 	const { readFileSync } = await import('node:fs');
 	const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 
-	assert.match(viewer, /import \{[\s\S]*findAnchorElement[\s\S]*\} from '\.\/utils\/previewAnchor\.js'/);
+	// Read out of the one import statement rather than matched across the whole
+	// file: `import \{[\s\S]*findAnchorElement[\s\S]*\} from '…previewAnchor.js'`
+	// starts at the first import in the file and runs past every brace in
+	// between, so forking the two resolvers into another module while leaving
+	// the rest of the import behind satisfied it.
+	const anchorImport = viewer.match(/import \{([^}]*)\} from '\.\/utils\/previewAnchor\.js'/);
+	assert.ok(anchorImport, 'the viewer must import from previewAnchor.js');
+	const imported = anchorImport[1].split(',').map((name) => name.trim()).filter(Boolean);
+	assert.deepEqual(
+		['findAnchorElement', 'getAnchorScrollTop'].filter((name) => !imported.includes(name)),
+		[],
+		'the restore must resolve through the measured helpers, not a fork of them',
+	);
 	assert.match(
 		viewer,
 		/const match = findAnchorElement\(body, tab\.anchorLine\);[\s\S]*body\.scrollTop = getAnchorScrollTop\(/,

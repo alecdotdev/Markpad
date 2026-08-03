@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
-	MERMAID_PRINT_THEME,
 	findRestorableDiagrams,
 	readDiagramSource,
 	rememberDiagramSource,
@@ -100,18 +99,23 @@ test('exporting re-renders with the print theme and then restores the screen ren
 
 	assert.equal(first.innerHTML, '<svg>light:sequenceDiagram</svg>');
 	assert.equal(second.innerHTML, '<svg>light:flowchart TD</svg>');
-	assert.deepEqual(mermaid.themes, [MERMAID_PRINT_THEME]);
+	// Spelled out rather than compared against the constant the implementation
+	// reads. `[MERMAID_PRINT_THEME]` is satisfied by whatever that constant
+	// happens to say, so retheming the whole print path dark passes it — which
+	// is the one thing this file exists to prevent. The literal is the claim:
+	// paper gets the light theme.
+	assert.deepEqual(mermaid.themes, ['neutral']);
 
 	restore();
 	assert.equal(first.innerHTML, '<svg>dark-1</svg>');
 	assert.equal(second.innerHTML, '<svg>dark-2</svg>');
-	assert.deepEqual(mermaid.themes, [MERMAID_PRINT_THEME, 'dark']);
+	assert.deepEqual(mermaid.themes, ['neutral', 'dark']);
 
 	// Restoring twice must not re-run initialize or clobber a later render.
 	first.innerHTML = '<svg>re-rendered later</svg>';
 	restore();
 	assert.equal(first.innerHTML, '<svg>re-rendered later</svg>');
-	assert.deepEqual(mermaid.themes, [MERMAID_PRINT_THEME, 'dark']);
+	assert.deepEqual(mermaid.themes, ['neutral', 'dark']);
 });
 
 test('a diagram that fails to re-render keeps its screen rendering', async () => {
@@ -142,14 +146,36 @@ test('a diagram that fails to re-render keeps its screen rendering', async () =>
 });
 
 test('the helper is inert when there is nothing to re-render', async () => {
-	const restore = await renderDiagramsForPrint({
-		root: null,
+	// Both early returns. `typeof restore === 'function'` used to stand in for
+	// "inert" here, after the handle had already been called — so it could not
+	// be the assertion that fires, and nothing observed what the handle did.
+	// What has to hold is that the export's `finally` can call it without
+	// re-theming Mermaid or touching the DOM.
+
+	// No renderer: the diagram under the root must be left exactly as it is.
+	const untouched = diagram('flowchart TD\n A --> B', '<svg>screen</svg>');
+	const withoutRenderer = await renderDiagramsForPrint({
+		root: new FakeRoot([untouched]) as unknown as ParentNode,
 		mermaid: null,
 		sanitizeSvg: (svg) => svg,
 		screenTheme: 'dark',
 	});
-	restore();
-	assert.equal(typeof restore, 'function');
+	withoutRenderer();
+	assert.equal(untouched.innerHTML, '<svg>screen</svg>');
+
+	// A root with no restorable diagrams: Mermaid must not be reconfigured at
+	// all, in either direction. An export of a document without diagrams that
+	// re-initializes Mermaid twice is a global side effect for nothing.
+	const mermaid = makeMermaid((source) => `<svg>${source}</svg>`);
+	const withoutDiagrams = await renderDiagramsForPrint({
+		root: new FakeRoot([]) as unknown as ParentNode,
+		mermaid,
+		sanitizeSvg: (svg) => svg,
+		screenTheme: 'dark',
+	});
+	assert.deepEqual(mermaid.themes, [], 'nothing to re-render must not re-theme mermaid');
+	withoutDiagrams();
+	assert.deepEqual(mermaid.themes, [], 'the inert restore must not re-theme mermaid either');
 });
 
 test('the PDF export wraps the print render and always restores', () => {
@@ -182,9 +208,21 @@ test('the PDF export wraps the print render and always restores', () => {
 	);
 	const screenTheme = viewer.match(/\bscreenTheme:\s*([^,\n]+),/);
 	assert.ok(screenTheme, 'the print render must be told the screen theme so it can restore it');
-	assert.match(
-		viewer,
-		new RegExp(`\\bmermaidTheme:\\s*${screenTheme![1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')},`),
-		'the on-screen render and the print restore must resolve the theme the same way',
+
+	// Every render, not "some render". The component hands `mermaidTheme` to the
+	// shared renderer twice — once for the live preview, once for the HTML
+	// export — and asserting that the expression appears *somewhere* in the file
+	// is satisfied by either one of them. Diverting only the preview left this
+	// green, which is precisely the divergence that makes the print restore put
+	// back a theme the preview is no longer using.
+	const renderThemes = [...viewer.matchAll(/\bmermaidTheme:\s*([^,\n]+),/g)].map((match) => match[1]);
+	assert.ok(
+		renderThemes.length >= 2,
+		'the preview render and the HTML export both hand the shared renderer a theme',
+	);
+	assert.deepEqual(
+		renderThemes.filter((expression) => expression !== screenTheme![1]),
+		[],
+		`every diagram render must resolve the theme the way the print restore does (${screenTheme![1]})`,
 	);
 });

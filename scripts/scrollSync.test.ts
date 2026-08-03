@@ -48,9 +48,11 @@ test('the front-matter boundary in one pane lands on the boundary in the other',
 	// scrollTop/scrollMax ratio would put the editor's boundary at
 	// (200 / 1000) * 600 = 120px in the preview — twice past the end of the
 	// preview's own front matter, i.e. already scrolled into the body.
-	const naiveGlobalRatio = (EDITOR.frontMatterEnd / EDITOR.scrollMax) * PREVIEW.scrollMax;
-	assert.equal(naiveGlobalRatio, 120);
-
+	//
+	// That 120 used to be asserted. It is arithmetic over the two fixture
+	// constants above and never reaches `src/`, so it belongs in this comment
+	// and not in an assert; the two assertions below are the claim, and they
+	// are on numbers the mapping returned.
 	assert.equal(across(EDITOR, PREVIEW, 200), 60, 'editor boundary must land on the preview boundary');
 	assert.equal(across(PREVIEW, EDITOR, 60), 200, 'preview boundary must land on the editor boundary');
 });

@@ -249,11 +249,10 @@ test('display math reaches KaTeX with its underscores intact', () => {
 			expected,
 			`${name}: the rendered text no longer matches the math source`,
 		);
-		assert.equal(
-			(math[0].getAttribute('data-math-source') || '').split('_').length - 1,
-			expected.split('_').length - 1,
-			`${name}: underscores were consumed on the way to KaTeX`,
-		);
+		// The underscore count used to be compared here as well, between
+		// `data-math-source` and `expected` — two strings the assertion above
+		// has already established are equal. It could only pass when it ran,
+		// and it only ran when the assertion that dominates it had passed.
 	}
 });
 

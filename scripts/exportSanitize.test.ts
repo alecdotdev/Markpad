@@ -53,7 +53,10 @@ test('the proof-of-concept payload cannot reach an exported file', () => {
 	// relative path and is meant to stay allowed. So nothing about the URI
 	// policy stops this one — two other things do, and both are asserted here,
 	// because on the unfixed export path neither was in the way.
-	assert.match(POC, /onerror=/);
+	//
+	// (`assert.match(POC, /onerror=/)` used to sit here. POC is a template
+	// literal three lines above, so the assertion restated the fixture back to
+	// itself and no change to `src/` could reach it.)
 	assert.equal(uriIsAllowed('x'), true);
 
 	// 1. The renderer output carrying the payload goes through the shared

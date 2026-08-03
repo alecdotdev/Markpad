@@ -21,8 +21,12 @@ function closeHandler(): string {
 test('the aggregate unsaved-files modal is gone from the close handler', () => {
 	const handler = closeHandler();
 	assert.doesNotMatch(handler, /youHaveUnsavedFiles/);
-	// and the old "clear all dirty flags then close" discard path with it
-	assert.doesNotMatch(handler, /tabManager\.tabs\.forEach\(\(t\) => \(t\.isDirty = false\)\)/);
+	// and the old "clear all dirty flags then close" discard path with it.
+	// Pinned as the assignment rather than as the `forEach` one-liner it was
+	// written in: the same silent discard spelled `for (const t of
+	// tabManager.tabs) t.isDirty = false;` passed the old regex, and the walk
+	// below then found nothing to review.
+	assert.doesNotMatch(handler, /\.isDirty\s*=\s*false/);
 });
 
 test('dirty tabs are reviewed one at a time through the existing canCloseTab flow', () => {
