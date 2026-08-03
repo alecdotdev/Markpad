@@ -82,6 +82,58 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		selfWriteUntilByPath.delete(path);
 	}
 
+	/**
+	 * Per tab: a promise that settles once every save queued for it so far has
+	 * finished. Absent means nothing is in flight.
+	 */
+	const writeChainByTab = new Map<string, Promise<void>>();
+
+	/**
+	 * Run `write` only once the tab's previous write has settled.
+	 *
+	 * Two saves can be aimed at one tab at the same instant. #436 stopped an
+	 * *armed* auto-save debounce from firing during an explicit save, but the
+	 * timer callback drops itself from the timer map as its first statement and
+	 * only then calls `saveContent` — so a debounce that has ALREADY fired is
+	 * past cancelling, and its write is free to race a Cmd+S that arrives while
+	 * it awaits. `atomic_write` (also #436) makes two concurrent writers safe
+	 * for the file, but that is a safety property, not an ordering one: the
+	 * older snapshot can still rename last and publish itself over the newer.
+	 *
+	 * Waiting, rather than handing the in-flight promise back to the second
+	 * caller — those are different answers. The second caller pressed Cmd+S
+	 * *after* typing more, so returning the running write would report success
+	 * for a file that does not contain those keystrokes. Waiting costs one disk
+	 * write and ends with the text the user actually asked to save on disk.
+	 *
+	 * Keyed by tab rather than by path: the state these writes corrupt is the
+	 * tab's own (`originalContent`, `isDirty`, its path), the two racers are by
+	 * construction one tab's, and an untitled tab has no path to key on until
+	 * its Save dialog closes. Two tabs pointing at one file still write
+	 * concurrently — that is last-writer-wins between two documents, which this
+	 * app permits by allowing the second tab at all, and is not this race.
+	 *
+	 * A chain and not a bare `await inFlight`, because several callers awaiting
+	 * one promise all wake together and then all write at once — the race again.
+	 */
+	function writeExclusively<T>(tabId: string, write: () => Promise<T>): Promise<T> {
+		const previous = writeChainByTab.get(tabId);
+		const result = previous ? previous.then(write) : write();
+		// Outcome-free by design: a save that fails must not strand the queue
+		// behind it, and nothing here is the owner of that rejection.
+		const settled = result.then(
+			() => {},
+			() => {},
+		);
+		writeChainByTab.set(tabId, settled);
+		void settled.then(() => {
+			// Only the tail clears the entry. An earlier link finishing must not
+			// drop a chain that later callers are still queued behind.
+			if (writeChainByTab.get(tabId) === settled) writeChainByTab.delete(tabId);
+		});
+		return result;
+	}
+
 	function shouldReloadExternalChange(path: string) {
 		const until = selfWriteUntilByPath.get(path);
 		if (until === undefined) return true;
@@ -435,23 +487,27 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		// auto-save effect only arms tabs that already have a path.
 		options.cancelPendingAutoSave(tab.id);
 		if (refuseIfLossilyDecoded(tab, targetPath, targetKey)) return false;
-		const snapshot = tab.rawContent;
-		markSelfWrite(targetPath);
-		try {
-			await invoke('save_file_content', { path: targetPath, content: snapshot });
+		return writeExclusively(tab.id, async () => {
+			// Snapshot taken on the far side of the wait. Anything typed while
+			// the previous write drained is part of what this save is for.
+			const snapshot = tab.rawContent;
 			markSelfWrite(targetPath);
-			if (tab.path === '') {
-				tabManager.updateTabPath(tab.id, targetPath, targetKey);
-				options.saveRecentFile(targetPath);
+			try {
+				await invoke('save_file_content', { path: targetPath, content: snapshot });
+				markSelfWrite(targetPath);
+				if (tab.path === '') {
+					tabManager.updateTabPath(tab.id, targetPath, targetKey);
+					options.saveRecentFile(targetPath);
+				}
+				tab.originalContent = snapshot;
+				tab.isDirty = tab.rawContent !== snapshot;
+				return true;
+			} catch (error) {
+				clearSelfWrite(targetPath);
+				options.onError('Failed to save file', error);
+				return false;
 			}
-			tab.originalContent = snapshot;
-			tab.isDirty = tab.rawContent !== snapshot;
-			return true;
-		} catch (error) {
-			clearSelfWrite(targetPath);
-			options.onError('Failed to save file', error);
-			return false;
-		}
+		});
 	}
 
 	async function saveContentAs(): Promise<boolean> {
@@ -476,25 +532,32 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		// which land on the very same file.
 		const selectedKey = await canonicalizePath(selected);
 		if (refuseIfLossilyDecoded(tab, selected, selectedKey)) return false;
-		const snapshot = tab.rawContent;
-		markSelfWrite(selected);
-		try {
-			await invoke('save_file_content', { path: selected, content: snapshot });
+		// Shares the tab's guard with `saveContent`. The target is usually a
+		// different file, so the renames need not collide — but both
+		// continuations write the same tab's `originalContent`, `isDirty` and
+		// path, and picking the tab's own file in the dialog is an allowed
+		// overwrite that collides outright.
+		return writeExclusively(tab.id, async () => {
+			const snapshot = tab.rawContent;
 			markSelfWrite(selected);
-			tabManager.updateTabPath(tab.id, selected, selectedKey);
-			// The buffer now has a UTF-8 file of its own that it matches
-			// exactly, so it is safe to save from here on.
-			tabManager.setTabDecodedLossy(tab.id, false);
-			lossySaveWarnedTabs.delete(tab.id);
-			options.saveRecentFile(selected);
-			tab.originalContent = snapshot;
-			tab.isDirty = tab.rawContent !== snapshot;
-			return true;
-		} catch (error) {
-			clearSelfWrite(selected);
-			options.onError('Failed to save file as', error);
-			return false;
-		}
+			try {
+				await invoke('save_file_content', { path: selected, content: snapshot });
+				markSelfWrite(selected);
+				tabManager.updateTabPath(tab.id, selected, selectedKey);
+				// The buffer now has a UTF-8 file of its own that it matches
+				// exactly, so it is safe to save from here on.
+				tabManager.setTabDecodedLossy(tab.id, false);
+				lossySaveWarnedTabs.delete(tab.id);
+				options.saveRecentFile(selected);
+				tab.originalContent = snapshot;
+				tab.isDirty = tab.rawContent !== snapshot;
+				return true;
+			} catch (error) {
+				clearSelfWrite(selected);
+				options.onError('Failed to save file as', error);
+				return false;
+			}
+		});
 	}
 
 	async function toggleTaskCheckbox(sourceLine: number, nowChecked: boolean) {
