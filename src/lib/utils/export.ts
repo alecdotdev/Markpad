@@ -242,17 +242,21 @@ ${input.articleHtml}
  * That `<style>` is the one genuinely new thing an export now carries, so it is
  * worth being explicit about why it is acceptable here:
  *
- *   - It is namespaced. Mermaid compiles the block through stylis with a
- *     middleware that prefixes every rule with `#<svg-id>` and drops any at-rule
- *     outside a small allowlist (`@import` and `@font-face` are removed). The
- *     id is one Markpad generates, not one the document chose. So the block
- *     cannot restyle anything outside its own diagram, and cannot pull in a
- *     remote stylesheet or font.
- *   - It is not a new capability. A diagram's `classDef` declarations do reach
- *     the block, so a hostile document could in principle land a
- *     `url(https://…)` in it and have the exported file phone home when opened.
- *     But the export already leaves remote `<img src="https://…">` exactly as
- *     the author wrote it, and the export CSP allows `img-src https: http:`
+ *   - It is namespaced, and that was audited rather than assumed — about 110
+ *     payloads across every entry point a document controls, run through the
+ *     real Mermaid in a real browser, measuring computed styles on probes
+ *     outside the diagram. See `scripts/mermaidStyleScope.test.ts` for what
+ *     holds it up; the short version is that stylis prefixes every emitted
+ *     selector with `#<svg-id>`, and CSS has no ancestor combinator, so a rule
+ *     beginning with that id can only ever match the SVG or its descendants.
+ *     The id is one Markpad generates, never one the document chose.
+ *   - It is not a new capability. A hostile document can land a
+ *     `url(https://…)` in the block and have the exported file phone home when
+ *     opened — through `themeCSS`, set from a `%%{init}%%` directive or YAML
+ *     front matter. (Not through `classDef`, as an earlier version of this
+ *     comment said: the flowchart lexer rejects `url()` there outright.) But
+ *     the export already leaves remote `<img src="https://…">` exactly as the
+ *     author wrote it, and the export CSP allows `img-src https: http:`
  *     precisely so those keep working. A document that wants to beacon on open
  *     can already do it in one line of Markdown, with no diagram involved.
  *   - The exported file is a *less* privileged place for it than the preview,

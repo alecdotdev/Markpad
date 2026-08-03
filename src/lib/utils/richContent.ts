@@ -150,6 +150,19 @@ export async function renderRichContent(options: RenderRichContentOptions): Prom
 
 				const container = doc.createElement('div');
 				container.className = 'mermaid-diagram';
+				// Keep the `<svg>` the only child of this container. Mermaid's
+				// generated `<style>` is confined by an `#<svg-id>` prefix on
+				// every selector, with one measured exception: stylis
+				// substitutes `&` with that prefix, and the namespacing
+				// middleware then skips a selector that already starts with it.
+				// So `themeCSS: "& ~ *{display:none}"` emits
+				// `#<svg-id>~*{display:none}` — a rule that escapes the
+				// diagram and hits its *siblings*. It reaches nothing today
+				// only because there are no siblings. A caption, a copy
+				// button, or an overlay added here would re-arm it; put such
+				// things outside this element, or namespace them out of that
+				// selector's reach. Pinned by
+				// scripts/mermaidStyleScope.test.ts.
 				// Kept so the PDF path can rebuild the diagram with a light theme
 				// instead of recolouring Mermaid's output.
 				rememberDiagramSource(container, mermaidCode);
