@@ -1543,6 +1543,91 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------
+    // `restore_math_spans` must stay linear in the size of the HTML
+    //
+    // It was not. It asked `str::find` for both spellings of the mask
+    // token at every step, and the anchorized spelling occurs only in a
+    // heading — so in any document without one, each token paid a scan of
+    // the *whole remaining HTML* to be told "not found", and then paid it
+    // again for the next token. On a 10 000-formula document that was
+    // 1.36 s of a 1.39 s `convert_markdown`.
+    //
+    // Removing the carrying again would not change one byte of output, so
+    // no output test can see the regression; and a wall-clock assertion
+    // would be measuring how busy the CI runner is, which is why there is
+    // not one here. The two tests below pin the mechanism instead: that
+    // the carried offset really is reused, and that the pass does not go
+    // around it.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_carried_search_reuses_its_answer_instead_of_searching_again() {
+        // Both properties are asserted by handing the scan a *different*
+        // haystack: an implementation that searched again could not
+        // produce the expected answer from it.
+        let mut scan = TokenScan::new("..NEEDLE..", "NEEDLE");
+        assert_eq!(scan.at_or_after("..NEEDLE..", 0), Some(2));
+        // Still ahead of the cursor, so the haystack is never consulted —
+        // it does not matter that this one has no needle in it at all.
+        assert_eq!(scan.at_or_after("xxxxxxxxxx", 2), Some(2));
+        // The cursor has passed it, so now it must search, and it searches
+        // the haystack it is handed.
+        assert_eq!(scan.at_or_after("xxxxxxxxxx", 3), None);
+
+        // "No occurrence from here on" is the answer that used to be paid
+        // for over and over, and it has to stay sticky.
+        let mut exhausted = TokenScan::new("xxxxxxxxxx", "NEEDLE");
+        assert_eq!(exhausted.at_or_after("..NEEDLE..", 0), None);
+
+        // The answers themselves are the ones a fresh search gives.
+        let haystack = "a NEEDLE b NEEDLE c";
+        let mut walk = TokenScan::new(haystack, "NEEDLE");
+        for from in 0..=haystack.len() {
+            assert_eq!(
+                walk.at_or_after(haystack, from),
+                haystack[from..].find("NEEDLE").map(|at| from + at),
+                "the carried scan disagrees with a fresh search at {from}",
+            );
+        }
+    }
+
+    #[test]
+    fn restore_math_spans_scans_only_through_a_carried_search() {
+        // Re-reads this file, the way
+        // `every_convert_markdown_preprocessing_step_is_registered` does,
+        // because the property is about the shape of the pass rather than
+        // about its output. Line endings are normalised first: git checks
+        // this file out with CRLF wherever `core.autocrlf` is on, which is
+        // the default on Windows and what the Windows CI runner does.
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
+        let needle = format!(
+            "\nfn {}(html: &str, masked: &MaskedMath) -> String {{",
+            "restore_math_spans",
+        );
+        let start = source
+            .find(&needle)
+            .expect("restore_math_spans must keep its signature");
+        let rest = &source[start + needle.len()..];
+        let body = &rest[..rest
+            .find("\n}\n")
+            .expect("restore_math_spans must be terminated")];
+
+        assert!(
+            body.contains("TokenScan::new("),
+            "restore_math_spans no longer walks the HTML with a carried \
+             search — see TokenScan for why that made the pass quadratic",
+        );
+        assert!(
+            !body.contains(".find("),
+            "restore_math_spans searches the remaining HTML by itself \
+             again. That is the shape the pass had when it was quadratic: \
+             one scan per token, each one able to run to the end of the \
+             document. Search through TokenScan, or, if this really is a \
+             bounded search, say so here and relax the check.",
+        );
+    }
+
     #[test]
     fn math_in_a_link_destination_keeps_the_link_working() {
         // The token has to survive `escape_href` too, which is why it is
@@ -3185,6 +3270,54 @@ fn mask_math_spans(content: &str) -> MaskedMath {
     }
 }
 
+/// A forward-only search for one fixed needle, carrying its last answer.
+///
+/// `restore_math_spans` looks for two spellings of the token at once and walks
+/// a cursor that only ever moves forward. Asking `str::find` for both
+/// spellings at every step is what made that pass quadratic: the anchorized
+/// spelling only occurs in a heading, so in a document without one, every
+/// token paid a full scan of the remaining HTML to conclude "not found" — and
+/// concluded it again for the next token, and the next.
+///
+/// Carrying the answer removes the repetition without changing a single
+/// result. An offset that is the first occurrence at or after some cursor is
+/// still the first occurrence at or after any *later* cursor it survives, so a
+/// needle is only searched for again once the cursor has passed its last
+/// answer, and `None` — "no occurrence from here on" — stays true forever.
+/// Consecutive searches therefore start where the previous one stopped and
+/// cover disjoint stretches of the haystack: linear in total, whatever the
+/// number of tokens.
+///
+/// The haystack is passed in rather than held, so the carried offset is the
+/// scan's entire state. The test named at the top of `mod tests`' section on
+/// this pass leans on that: it hands one scan a haystack the needle does not
+/// occur in at all, which no implementation that searched again could answer
+/// correctly. Reuse is otherwise invisible — it changes no result, only how
+/// many bytes were read to reach it.
+struct TokenScan<'needle> {
+    needle: &'needle str,
+    carried: Option<usize>,
+}
+
+impl<'needle> TokenScan<'needle> {
+    fn new(haystack: &str, needle: &'needle str) -> Self {
+        Self {
+            needle,
+            carried: haystack.find(needle),
+        }
+    }
+
+    /// The offset of the first `needle` at or after `from`.
+    ///
+    /// `from` must not go backwards between calls.
+    fn at_or_after(&mut self, haystack: &str, from: usize) -> Option<usize> {
+        if self.carried.is_some_and(|at| at < from) {
+            self.carried = haystack[from..].find(self.needle).map(|at| from + at);
+        }
+        self.carried
+    }
+}
+
 /// Puts the masked source back into the rendered HTML.
 ///
 /// The span is re-escaped the way comrak escapes a text node, not inserted
@@ -3212,21 +3345,33 @@ fn restore_math_spans(html: &str, masked: &MaskedMath) -> String {
     }
     let anchor_prefix = masked.prefix.to_ascii_lowercase();
     let mut out = String::with_capacity(html.len());
-    let mut rest = html;
+    let mut cursor = 0usize;
     let mut in_tag = false;
-    while let Some((at, anchored)) = [
-        (rest.find(masked.prefix.as_str()), false),
-        (rest.find(anchor_prefix.as_str()), true),
-    ]
-    .into_iter()
-    .filter_map(|(at, anchored)| at.map(|at| (at, anchored)))
-    .min()
-    {
-        out.push_str(&rest[..at]);
-        if let Some(bracket) = rest[..at].rfind(['<', '>']) {
-            in_tag = rest.as_bytes()[bracket] == b'<';
+    // All scanning goes through `TokenScan` — see it for why, and see
+    // `restore_math_spans_scans_only_through_a_carried_search` for the test
+    // that keeps it that way.
+    let mut plain = TokenScan::new(html, masked.prefix.as_str());
+    let mut anchor = TokenScan::new(html, anchor_prefix.as_str());
+    loop {
+        // The plain spelling wins a tie, as it did when both candidates were
+        // compared as `(offset, anchored)` pairs.
+        let (at, anchored) = match (
+            plain.at_or_after(html, cursor),
+            anchor.at_or_after(html, cursor),
+        ) {
+            (Some(upper), Some(lower)) if lower < upper => (lower, true),
+            (Some(upper), _) => (upper, false),
+            (None, Some(lower)) => (lower, true),
+            (None, None) => break,
+        };
+
+        let gap = &html[cursor..at];
+        out.push_str(gap);
+        if let Some(bracket) = gap.rfind(['<', '>']) {
+            in_tag = gap.as_bytes()[bracket] == b'<';
         }
-        let after = &rest[at + masked.prefix.len()..];
+        let body = at + masked.prefix.len();
+        let after = &html[body..];
         let digits = after
             .as_bytes()
             .iter()
@@ -3245,7 +3390,7 @@ fn restore_math_spans(html: &str, masked: &MaskedMath) -> String {
         match index.and_then(|index| masked.spans.get(index)) {
             Some(original) if anchored => {
                 out.push_str(&Anchorizer::new().anchorize(&original.text));
-                rest = &after[digits + suffix.len_utf8()..];
+                cursor = body + digits + suffix.len_utf8();
             }
             Some(original) => {
                 out.push_str(&escape_html_text(if in_tag {
@@ -3253,15 +3398,15 @@ fn restore_math_spans(html: &str, masked: &MaskedMath) -> String {
                 } else {
                     &original.text
                 }));
-                rest = &after[digits + suffix.len_utf8()..];
+                cursor = body + digits + suffix.len_utf8();
             }
             None => {
-                out.push_str(&rest[at..at + masked.prefix.len()]);
-                rest = after;
+                out.push_str(&html[at..body]);
+                cursor = body;
             }
         }
     }
-    out.push_str(rest);
+    out.push_str(&html[cursor..]);
     out
 }
 
