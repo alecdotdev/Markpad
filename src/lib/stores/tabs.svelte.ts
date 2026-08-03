@@ -19,12 +19,50 @@ export interface Tab {
 	id: string;
 	path: string;
 	title: string;
+	/**
+	 * The three buffers. They are the same shape, they usually hold the same
+	 * document, and picking the wrong one loses the user's work.
+	 *
+	 * `rawContent` IS the document — the Markdown as it stands right now. The
+	 * editor two-way binds to it, the preview and the HTML export render from
+	 * it, and it is the exact string `saveContent` hands to `save_file_content`.
+	 * Anything that reads or changes the user's text wants this one.
+	 *
+	 * `originalContent` is that same buffer as it last came off, or last went
+	 * onto, disk. It exists only to answer "changed?": `isDirty` is literally
+	 * `rawContent !== originalContent` (`updateTabRawContent` below), and
+	 * discarding edits is `rawContent = originalContent` (`canCloseTab`). Write
+	 * it to a file and you save the last-saved text over the user's unsaved
+	 * edits; overwrite it and the edits stop even looking unsaved, which is why
+	 * `resolveExternalChange` refuses to reload a dirty tab.
+	 *
+	 * `content` is not Markdown at all. It is the rendered preview HTML, cached
+	 * per tab and re-sanitized at the sink (`sanitizedHtml`). It is allowed to
+	 * lag `rawContent`, and routinely does — nothing re-renders in plain edit
+	 * mode with the TOC closed, which is what `syncPreviewForPrint` exists to
+	 * repair. So it answers "what is on screen", never "what does the document
+	 * say", and it must never reach a file.
+	 *
+	 * Two things that are easy to assume and are not true. Assigning
+	 * `rawContent` directly does NOT update `isDirty` — go through
+	 * `updateTabRawContent` (edits) or `setTabRawContent` (a fresh read), or
+	 * maintain the flag yourself as `saveContent` does. And a clean tab is not
+	 * necessarily a copy of its file: a partial or failed read puts the same
+	 * prefix — or `''` — in BOTH buffers and clears `isDirty`, so "not dirty"
+	 * means "no unsaved edits", not "matches disk". See `isTruncated`.
+	 */
 	content: string;
 	rawContent: string;
 	originalContent: string;
 	scrollTop: number;
 	isDirty: boolean;
 	isEditing: boolean;
+	/**
+	 * Back/forward navigation, not undo — despite sitting next to three text
+	 * buffers. The entries are file PATHS this tab has shown (see
+	 * `navigate` below and tabHistory.ts), and `historyIndex` is the current
+	 * position in them. Text undo belongs to Monaco's model, not to the tab.
+	 */
 	history: string[];
 	historyIndex: number;
 	editorViewState: any; // monaco.editor.ICodeEditorViewState | null
