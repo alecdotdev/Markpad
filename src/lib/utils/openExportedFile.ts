@@ -1,7 +1,7 @@
 export type ExportedFileFormat = 'HTML' | 'PDF';
 export type OpenExportedFileResult = 'opened' | 'declined' | 'failed';
 
-export type OpenExportedFileLabels = {
+type OpenExportedFileLabels = {
 	title?: string;
 	message?: string;
 };

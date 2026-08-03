@@ -2,7 +2,7 @@ import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { getVersion } from '@tauri-apps/api/app';
 
-export type UpdatePhase =
+type UpdatePhase =
 	| 'idle'
 	| 'checking'
 	| 'up-to-date'
@@ -10,7 +10,7 @@ export type UpdatePhase =
 	| 'downloading'
 	| 'error';
 
-export type ErrorSource = 'check' | 'download' | 'install';
+type ErrorSource = 'check' | 'download' | 'install';
 
 // Match only messages that genuinely indicate the updater plugin lacks an
 // endpoint / pubkey configuration. We deliberately do NOT match the bare

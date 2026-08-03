@@ -1,6 +1,6 @@
 import { parseDocument } from 'yaml';
 
-export type FrontMatterValueKind = 'string' | 'number' | 'boolean' | 'list' | 'object' | 'null';
+type FrontMatterValueKind = 'string' | 'number' | 'boolean' | 'list' | 'object' | 'null';
 
 export type FrontMatterField = {
 	key: string;
@@ -198,7 +198,7 @@ export function updateFrontMatterField(content: string, key: string, value: unkn
 	return `---${parsed.lineEnding}${serialized}${parsed.lineEnding}---${parsed.lineEnding}${parsed.lineEnding}${parsed.body}`;
 }
 
-export function parseFrontMatterTagInput(value: string): string[] {
+function parseFrontMatterTagInput(value: string): string[] {
 	return value
 		.split(',')
 		.map((item) => item.trim())

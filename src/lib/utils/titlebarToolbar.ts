@@ -20,7 +20,7 @@ export type ConfiguredTitlebarToolbarIds = {
 	menuIds: string[];
 };
 
-export const TITLEBAR_TOOLBAR_ACTIONS: TitlebarToolbarAction[] = [
+const TITLEBAR_TOOLBAR_ACTIONS: TitlebarToolbarAction[] = [
 	{ id: 'back', labelKey: 'menu.back', fallbackName: 'Back', sample: '<', defaultPlacement: 'bar' },
 	{ id: 'forward', labelKey: 'menu.forward', fallbackName: 'Forward', sample: '>', defaultPlacement: 'bar' },
 	{ id: 'reload', labelKey: 'tooltip.reloadFromDisk', fallbackName: 'Reload from Disk', sample: 'R', defaultPlacement: 'bar' },

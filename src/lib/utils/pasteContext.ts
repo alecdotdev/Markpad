@@ -26,7 +26,7 @@ export const MARKDOWN_LANGUAGE_ID = 'markdown';
  * A plain letter is used on purpose: it carries no markdown meaning, so it
  * cannot open or close a construct that would change the caret's own token.
  */
-export const PASTE_PROBE_CHARACTER = 'x';
+const PASTE_PROBE_CHARACTER = 'x';
 
 export type PasteContextToken = {
 	readonly offset: number;
@@ -34,7 +34,7 @@ export type PasteContextToken = {
 	readonly language: string;
 };
 
-export type PasteContextTokenizer = (text: string) => readonly (readonly PasteContextToken[])[];
+type PasteContextTokenizer = (text: string) => readonly (readonly PasteContextToken[])[];
 
 /**
  * Token types Monaco's markdown grammar emits for code. The `.md` suffix is
@@ -79,7 +79,7 @@ export function findTokenAtOffset(
 	return found;
 }
 
-export function isCodeAtOffset(tokens: readonly PasteContextToken[], offset: number): boolean {
+function isCodeAtOffset(tokens: readonly PasteContextToken[], offset: number): boolean {
 	const token = findTokenAtOffset(tokens, offset);
 	return token ? isCodeToken(token) : false;
 }

@@ -22,7 +22,7 @@ const SOURCE_ATTR = 'data-mermaid-source';
 
 export const MERMAID_PRINT_THEME = 'neutral';
 
-export interface MermaidRenderer {
+interface MermaidRenderer {
 	initialize(config: { startOnLoad: boolean; theme: string }): void;
 	render(id: string, source: string): Promise<{ svg: string }>;
 }

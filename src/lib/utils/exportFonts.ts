@@ -53,7 +53,7 @@ function selectorClasses(selector: string): string[] {
 		.filter((name) => name !== 'katex');
 }
 
-export interface KatexFamilyRule {
+interface KatexFamilyRule {
 	/** Class tokens that must all be present for the rule to apply. */
 	classes: string[];
 	families: string[];
@@ -64,7 +64,7 @@ export interface KatexFamilyRule {
  * family, read out of the stylesheet rather than hard-coded, so a KaTeX upgrade
  * that renames a class or adds a family is picked up without edits here.
  */
-export function parseKatexFamilyRules(css: string): KatexFamilyRule[] {
+function parseKatexFamilyRules(css: string): KatexFamilyRule[] {
 	const rules: KatexFamilyRule[] = [];
 	for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
 		const selector = match[1].trim();
@@ -81,7 +81,7 @@ export function parseKatexFamilyRules(css: string): KatexFamilyRule[] {
 }
 
 /** Every class token used anywhere under `root`, including `root` itself. */
-export function collectClassNames(root: Element): Set<string> {
+function collectClassNames(root: Element): Set<string> {
 	const names = new Set<string>();
 	// Walked rather than selected: `querySelectorAll('*')` is the one call that
 	// would tie this to a full selector engine, and the walk is no slower.
@@ -221,7 +221,7 @@ export function katexFontUrlsToEmbed(css: string, usedFamilies: Set<string>): st
 }
 
 /** `btoa` in chunks: a 30 KB font blows the argument limit of `apply`. */
-export function bytesToBase64(bytes: Uint8Array): string {
+function bytesToBase64(bytes: Uint8Array): string {
 	let binary = '';
 	const chunk = 0x8000;
 	for (let index = 0; index < bytes.length; index += chunk) {

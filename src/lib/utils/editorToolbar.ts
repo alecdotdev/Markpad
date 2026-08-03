@@ -1,4 +1,4 @@
-export type EditorToolbarGroup = 'inline' | 'block' | 'list' | 'insert';
+type EditorToolbarGroup = 'inline' | 'block' | 'list' | 'insert';
 
 export type EditorToolbarTool = {
 	id: string;
@@ -13,7 +13,7 @@ export type EditorToolbarMove = {
 	toIndex: number;
 };
 
-export const EDITOR_TOOLBAR_TOOLS: EditorToolbarTool[] = [
+const EDITOR_TOOLBAR_TOOLS: EditorToolbarTool[] = [
 	{ id: 'fmt-bold', label: 'B', name: 'Bold', shortcut: (modifier) => `${modifier}+B`, group: 'inline' },
 	{ id: 'fmt-italic', label: 'I', name: 'Italic', shortcut: (modifier) => `${modifier}+I`, group: 'inline' },
 	{ id: 'fmt-underline', label: 'U', name: 'Underline', shortcut: (modifier) => `${modifier}+U`, group: 'inline' },

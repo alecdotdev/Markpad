@@ -1,6 +1,6 @@
 import { isHomePath } from './homeTab.js';
 
-export type TabFileActionId = 'copy-path' | 'open-location';
+type TabFileActionId = 'copy-path' | 'open-location';
 
 export type TabFileAction = {
 	id: TabFileActionId;

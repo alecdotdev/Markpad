@@ -52,7 +52,7 @@ export type LanguageCode =
 	| 'id' // Indonesian
 	| 'tr'; // Turkish
 
-export const SUPPORTED_LANGUAGES: { code: LanguageCode; name: string; nativeName: string }[] = [
+const SUPPORTED_LANGUAGES: { code: LanguageCode; name: string; nativeName: string }[] = [
 	{ code: 'cs', name: 'Czech', nativeName: 'Čeština' },
 	{ code: 'da', name: 'Danish', nativeName: 'Dansk' },
 	{ code: 'nl', name: 'Dutch', nativeName: 'Nederlands' },
@@ -81,9 +81,9 @@ export const SUPPORTED_LANGUAGES: { code: LanguageCode; name: string; nativeName
 	{ code: 'zh-TW', name: 'Chinese (Traditional)', nativeName: '繁體中文' },
 ];
 
-export const SUPPORTED_LANGUAGE_CODES: readonly LanguageCode[] = SUPPORTED_LANGUAGES.map((entry) => entry.code);
+const SUPPORTED_LANGUAGE_CODES: readonly LanguageCode[] = SUPPORTED_LANGUAGES.map((entry) => entry.code);
 
-export function isSupportedLanguage(value: unknown): value is LanguageCode {
+function isSupportedLanguage(value: unknown): value is LanguageCode {
 	return typeof value === 'string' && (SUPPORTED_LANGUAGE_CODES as readonly string[]).includes(value);
 }
 
@@ -305,7 +305,7 @@ export function writeStoredSetting(key: string, value: string | null): boolean {
 }
 
 /** Applies everything currently in localStorage onto `target`. */
-export function loadPersistedSettings<T>(target: T, entries: readonly PersistedSetting<T>[]): void {
+function loadPersistedSettings<T>(target: T, entries: readonly PersistedSetting<T>[]): void {
 	if (typeof localStorage === 'undefined') return;
 	for (const entry of entries) {
 		entry.load(target, localStorage.getItem(entry.key));
@@ -326,7 +326,7 @@ export function loadPersistedSettings<T>(target: T, entries: readonly PersistedS
  * *other* same-origin document, so each window folds its siblings' changes into
  * its own state instead of drifting until the next restart.
  */
-export function installPersistedSettings<T>(target: T, entries: readonly PersistedSetting<T>[]): void {
+function installPersistedSettings<T>(target: T, entries: readonly PersistedSetting<T>[]): void {
 	for (const entry of entries) {
 		$effect(() => {
 			writeStoredSetting(entry.key, entry.read(target));

@@ -15,7 +15,7 @@ export function hasMarkdownLinkExtension(path: string): boolean {
 	return /\.(md|markdown|mdown|mkd|txt)$/i.test(path);
 }
 
-export function isAbsoluteMarkdownPath(path: string): boolean {
+function isAbsoluteMarkdownPath(path: string): boolean {
 	return path.startsWith('/') || path.startsWith('\\') || /^[a-z]:/i.test(path);
 }
 
