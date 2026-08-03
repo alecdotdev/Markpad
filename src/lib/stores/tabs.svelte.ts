@@ -185,7 +185,69 @@ class TabManager {
 		}
 	}
 
+	/**
+	 * A file path identifies a tab: at most one tab per window may hold a given
+	 * path. Two tabs on the same file are two independent buffers with two
+	 * independent dirty flags and two auto-save timers writing the same file in
+	 * turn, so whichever lands last silently overwrites the other's work — and
+	 * the store is the only place that can rule it out, because every duplicate
+	 * arrives through a different caller (a link opened in a new tab, Save As
+	 * onto an open file, a tab moved in from another window).
+	 *
+	 * Mainstream editors make this state unrepresentable rather than merely
+	 * unlikely: VS Code keys one `ITextModel` per file URI and points every
+	 * editor at it, and Sublime Text's Open File links to the view that already
+	 * holds the buffer (`clone_file` makes a second VIEW of the SAME buffer,
+	 * never a second buffer). Markpad has no buffer/view split — a tab is the
+	 * buffer — so the equivalent invariant is one tab per path.
+	 *
+	 * Resolving a conflict must not cost the user anything, so the loser is
+	 * handled by what it has to lose:
+	 * - clean: closed, since its buffer is a copy of the file the winner now
+	 *   holds. It lands on the reopen-closed-tab stack like any other close.
+	 * - dirty: kept, with its buffer intact, but its claim on the path is
+	 *   released (it becomes untitled). Nothing is discarded and nothing can
+	 *   auto-save over the file behind the user's back; saving it asks where to
+	 *   put it, which is the one decision only the user can make.
+	 *
+	 * Only real file paths are exclusive: untitled tabs (`''`) and the home
+	 * sentinel are not files, and several untitled tabs are normal.
+	 *
+	 * Known boundary: paths are compared exactly, so on a case-insensitive
+	 * filesystem `/notes/A.md` and `/notes/a.md` still read as two files — the
+	 * same limitation `documentSession.refuseIfLossilyDecoded` documents; both
+	 * need the backend to canonicalize paths.
+	 */
+	private claimPath(path: string, claimantId: string) {
+		if (!hasRealFilePath(path)) return;
+		for (const other of this.tabs.filter((t) => t.id !== claimantId && t.path === path)) {
+			if (!other.isDirty) {
+				this.closeTab(other.id);
+				continue;
+			}
+			other.path = '';
+			// The title still names the file the buffer came from — that is what
+			// makes the tab recognizable, and `saveContent` offers it as the
+			// default filename when the user places it.
+			other.history = [''];
+			other.historyIndex = 0;
+		}
+	}
+
 	addTab(path: string, content: string = '') {
+		// Opening a file that is already open activates that tab instead of
+		// building a second buffer for it — VS Code and Sublime Text both
+		// resolve an open request to the existing view. `content` is ignored in
+		// that case on purpose: the open tab may hold unsaved edits, and a
+		// freshly read copy of the file would erase them.
+		if (hasRealFilePath(path)) {
+			const existing = this.tabs.find((t) => t.path === path);
+			if (existing) {
+				this.activeTabId = existing.id;
+				return;
+			}
+		}
+
 		const id = crypto.randomUUID();
 		const filename =
 			path.split('\\').pop()?.split('/').pop() ||
@@ -298,6 +360,9 @@ class TabManager {
 			this.tabs.map((tab) => tab.title),
 			t('tabs.untitled', settings.language),
 		);
+		// The destination window may already have this file open, which would
+		// leave the arriving buffer and the resident one saving over each other.
+		this.claimPath(tab.path, tab.id);
 		this.tabs.push(tab);
 		this.activeTabId = tab.id;
 		return tab.id;
@@ -488,6 +553,10 @@ class TabManager {
 	updateTabPath(id: string, path: string) {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
+			// Save As can name a file that is already open here; the write has
+			// happened by the time this runs, so the other tab's buffer is
+			// already stale and must stop claiming the path.
+			this.claimPath(path, id);
 			tab.path = path;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
@@ -505,6 +574,7 @@ class TabManager {
 	renameTab(id: string, newPath: string) {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
+			this.claimPath(newPath, id);
 			tab.path = newPath;
 			tab.title = newPath.split(/[/\\]/).pop() || 'Untitled';
 			const fileHistory = replaceCurrentHistoryEntry({
@@ -522,6 +592,13 @@ class TabManager {
 		const tab = this.tabs.find(t => t.id === id);
 		if (tab) {
 			if (tab.path === path) return;
+
+			// Following a link to a file another tab already holds. The caller
+			// has read that file and is about to put its text in THIS tab, so
+			// declining the navigation is not an option: the tab would keep its
+			// old path and get the other document's content, and the next save
+			// would write it to the wrong file.
+			this.claimPath(path, id);
 
 			const fileHistory = navigateFileHistory({
 				currentPath: tab.path,
@@ -555,6 +632,9 @@ class TabManager {
 			const result = goBackInHistory(tab);
 			if (!result.path) return null;
 			const path = result.path;
+			// Back/forward walk this tab's own history, which can lead to a file
+			// that has since been opened in another tab.
+			this.claimPath(path, id);
 			tab.history = result.history;
 			tab.historyIndex = result.historyIndex;
 			tab.path = path;
@@ -571,6 +651,7 @@ class TabManager {
 			const result = goForwardInHistory(tab);
 			if (!result.path) return null;
 			const path = result.path;
+			this.claimPath(path, id);
 			tab.history = result.history;
 			tab.historyIndex = result.historyIndex;
 			tab.path = path;

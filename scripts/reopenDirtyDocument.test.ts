@@ -125,6 +125,24 @@ test('following a link into a new tab never costs the target tab its unsaved edi
 	assert.equal(edited.isDirty, true, 'the tab still knows it has something to save');
 });
 
+// One tab per path makes `addTab` resolve the click to the tab that already
+// holds the file instead of building a second one — which is what hands that
+// edited buffer to the loader in the first place. The test above is what makes
+// that safe; this one is what makes it useful.
+test('following a link into a new tab shows the tab that already holds the file', async () => {
+	reset();
+	const session = makeSession();
+	const edited = openEdited('/notes/target.md', 'on disk', 'my unsaved paragraph');
+	tabManager.addTab('/notes/from.md', 'from text');
+
+	tabManager.addTab('/notes/target.md');
+	await session.loadMarkdown('/notes/target.md', { skipTabManagement: true, resetScrollHistory: true });
+
+	assert.equal(tabManager.tabs.filter((tab) => tab.path === '/notes/target.md').length, 1);
+	assert.equal(tabManager.activeTabId, edited.id);
+	assert.deepEqual(reads, [], 'the file is not even read');
+});
+
 test('the call shape this guards is still the one MarkdownViewer uses', () => {
 	const body = viewer.slice(viewer.indexOf('async function openMarkdownTargetInNewTab'));
 	const fn = body.slice(0, body.indexOf('\n\tasync function', 1));
