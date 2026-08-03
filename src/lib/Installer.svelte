@@ -251,11 +251,25 @@
 
 	.content {
 		flex: 1;
+		/* Flex items refuse to shrink below their content by default, so without
+		   this the pane stays taller than the window and the buttons at the
+		   bottom are clipped by the container with no way to reach them. */
+		min-height: 0;
 		display: flex;
 		flex-direction: column;
+		/* `safe` only takes effect when the content overflows: centering would
+		   then push the header past the top edge, which is unreachable even
+		   when scrolling. Declared twice so engines without `safe` still
+		   center. */
 		justify-content: center;
+		justify-content: safe center;
 		align-items: center;
 		padding: 40px;
+		/* Scrolls here rather than on .installer-container: the container is the
+		   drag region, and a scrollbar on it would start a window drag instead
+		   of scrolling. */
+		overflow-y: auto;
+		overflow-x: hidden;
 	}
 
 	.header {
@@ -302,7 +316,7 @@
 		padding: 3px;
 		border-radius: 20px;
 		margin: 0 0 24px 0;
-		height: 38px;
+		min-height: 38px;
 		box-sizing: border-box;
 	}
 
@@ -326,7 +340,7 @@
 	}
 
 	.options-container {
-		height: 140px; /* Fixed height to prevent layout shift */
+		min-height: 140px; /* Reserved height to prevent layout shift */
 		margin-bottom: 10px;
 	}
 
@@ -382,7 +396,7 @@
 	}
 
 	.error-container {
-		height: 44px; /* Fixed space for potential error message */
+		min-height: 44px; /* Reserved space for potential error message */
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -458,7 +472,7 @@
 	}
 
 	.notice-container {
-		height: 24px; /* Fixed height for admin notice */
+		min-height: 24px; /* Reserved height for admin notice */
 		margin: 12px 0 0 0;
 		display: flex;
 		align-items: center;
