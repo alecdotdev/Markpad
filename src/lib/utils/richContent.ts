@@ -1,4 +1,10 @@
 import DOMPurify from 'dompurify';
+import {
+	fillDiagramTemplate,
+	lookupDiagramTemplate,
+	storeDiagramTemplate,
+	templateDiagramSvg,
+} from './diagramCache.js';
 import { rememberDiagramSource } from './mermaidPrint.js';
 
 /**
@@ -146,7 +152,26 @@ export async function renderRichContent(options: RenderRichContentOptions): Prom
 		if (codeEl.classList.contains('language-mermaid')) {
 			const mermaidCode = codeEl.textContent || '';
 			try {
-				const { svg } = await mermaid.render(idFactory(diagramIndex++), mermaidCode);
+				// The preview re-renders the whole article roughly once per keystroke
+				// and `{@html}` puts every diagram's source back, so drawing is the
+				// one step worth remembering between passes. The cache holds a
+				// *template* rather than the SVG: the id below is stamped into it, so
+				// a reused diagram is as uniquely identified as a fresh one. See
+				// `diagramCache.ts` for why that is the whole difficulty.
+				const svgId = idFactory(diagramIndex++);
+				const cached = lookupDiagramTemplate(mermaidCode, options.mermaidTheme);
+				let svg: string;
+				if (cached !== null) {
+					svg = fillDiagramTemplate(cached, svgId);
+				} else {
+					svg = (await mermaid.render(svgId, mermaidCode)).svg;
+					// A source that contains the render id would have its own text
+					// rewritten by the substitution, so that one is left uncached.
+					if (!mermaidCode.includes(svgId)) {
+						const template = templateDiagramSvg(svg, svgId);
+						if (template !== null) storeDiagramTemplate(mermaidCode, options.mermaidTheme, template);
+					}
+				}
 
 				const container = doc.createElement('div');
 				container.className = 'mermaid-diagram';
