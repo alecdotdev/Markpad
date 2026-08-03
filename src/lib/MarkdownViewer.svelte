@@ -1718,6 +1718,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			preserveEditState: true,
 			skipTabManagement: true,
 			resetScrollHistory: true,
+			// The user answered "the file changed under your edits" with the
+			// disk version. Every other caller of loadMarkdown is an OPEN and
+			// must leave an edited buffer alone; this one is the revert, and
+			// says so rather than leaving the session to infer it.
+			discardUnsavedBuffer: true,
 		});
 	}
 
@@ -2002,6 +2007,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			preserveEditState: true,
 			skipTabManagement: true,
 			resetScrollHistory: true,
+			// canCloseTab has already resolved the buffer, so normally there is
+			// nothing left to discard — but the user can type during that await,
+			// and a reload that silently did nothing would be worse than one
+			// that does what its menu item says.
+			discardUnsavedBuffer: true,
 		});
 		addToast('Reloaded from disk', 'info');
 	}

@@ -11,6 +11,19 @@ export type LoadMarkdownOptions = {
 	skipTabManagement?: boolean;
 	preserveEditState?: boolean;
 	resetScrollHistory?: boolean;
+	/**
+	 * Read the file even though the tab that will receive it holds unsaved
+	 * edits, discarding them. This is a REVERT, not an open, and only a caller
+	 * acting on an explicit user decision may ask for it — the "Reload" answer
+	 * to the external-change conflict, or "Reload from disk" after the close
+	 * dialog has already resolved the buffer.
+	 *
+	 * Defaults to false, which is what makes `loadMarkdown` safe to call from
+	 * every "open this file" entry point (recent files, drag-and-drop, a link
+	 * opened in a new tab, the OS handing us a path) without each of them
+	 * having to know whether that file is already open and edited.
+	 */
+	discardUnsavedBuffer?: boolean;
 };
 
 /**
@@ -212,6 +225,34 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			}
 			const activeId = tabManager.activeTabId;
 			if (!activeId) return;
+
+			// Opening a file that is already open, in a tab that has unsaved
+			// edits, must not re-read it: the load below replaces rawContent AND
+			// originalContent, so the edits would be gone and the tab would not
+			// even look dirty afterwards — the same silent loss
+			// `resolveExternalChange` refuses for a watcher event, reached
+			// through the ordinary open path instead.
+			//
+			// The whole request is answered by activating that tab, which every
+			// mainstream editor does: VS Code reveals the existing editor over
+			// its dirty `ITextModel`, Sublime Text focuses the view that already
+			// holds the buffer, and Vim's `:e` refuses outright without `!`.
+			// Discarding a buffer is a separate, explicit command everywhere —
+			// here, "Reload from disk" and the external-change "Reload", and both
+			// declare it by passing `discardUnsavedBuffer`. Authorization is
+			// something a caller states, never something this function infers
+			// from surrounding state.
+			//
+			// Note the tab is found by `activeTabId`: whether the caller reached
+			// it by `setActive` on an already-open file, by `addTab` resolving to
+			// it, or by never having left it, the buffer at risk is the same one.
+			const receiving = tabManager.tabs.find((item) => item.id === activeId);
+			if (receiving && receiving.isDirty && receiving.path === filePath && !loadOptions.discardUnsavedBuffer) {
+				if (filePath) options.saveRecentFile(filePath);
+				await options.afterLoad();
+				return;
+			}
+
 			const fullLoadRevision = (loadRevisionByTab.get(activeId) ?? 0) + 1;
 			loadRevisionByTab.set(activeId, fullLoadRevision);
 			const isMarkdown = hasMarkdownLinkExtension(filePath);
