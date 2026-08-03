@@ -190,6 +190,12 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	// because if the user picks Cancel, the timer is gone forever and
 	// background auto-save is silently disabled for that tab until the
 	// next keystroke.
+	//
+	// The *save* half is no longer a call-site duty: `saveContent` cancels the
+	// tab's timer itself, past the point where it can still bail out. Only the
+	// discard path still calls this directly, because nothing saves on its
+	// behalf. Do not re-add a cancel before a `saveContent` — it is redundant,
+	// and reintroduces the question of whether every new entry point remembered.
 	function cancelPendingAutoSave(tabId: string) {
 		const t = autoSaveTimers.get(tabId);
 		if (t) {
@@ -1605,7 +1611,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		// disables this flush too.
 		if (!settings.autoSave || settings.confirmBeforeSave) return;
 
-		cancelPendingAutoSave(tab.id);
 		const success = await saveContent(tab.id);
 		if (!success) {
 			// Reported, not obeyed. A file that cannot be written — read-only
@@ -2984,11 +2989,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 							// dirty tab that has a real path. Untitled tabs need a
 							// Save dialog, so the walk below handles them. A failed
 							// silent save is surfaced and its tab also goes to the
-							// walk. Timers are cancelled per tab right before its
-							// save to avoid duplicate writes.
+							// walk. `saveContent` cancels each tab's pending timer
+							// itself, so no writer here can be raced by its own
+							// debounce.
 							if (settings.autoSave && !settings.confirmBeforeSave) {
 								for (const tab of dirtyTabs.filter((t) => t.path !== '')) {
-									cancelPendingAutoSave(tab.id);
 									const ok = await saveContent(tab.id);
 									if (!ok) {
 										addToast(t('toast.autoSaveFailed', settings.language), 'error');

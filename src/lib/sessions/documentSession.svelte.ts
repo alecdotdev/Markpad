@@ -419,6 +419,21 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			targetPath = selected;
 			targetKey = await canonicalizePath(selected);
 		}
+		// The pending debounce exists to write a tab that nobody is writing.
+		// This call is that writer, so the timer has nothing left to do — and
+		// leaving it armed is not merely redundant: it can fire *during* the
+		// await below and put a second write on the same file, racing this one
+		// to the rename. The loser publishes the older snapshot while the tab
+		// records the newer one as saved, so the buffer reads clean while the
+		// disk holds the earlier text.
+		//
+		// It belongs here rather than at the call sites: two of the five
+		// explicit saves remembered to cancel and three did not, and a sixth
+		// entry point would have had to remember too. Placed after the Save
+		// dialog above, so it never runs before a modal the user can still
+		// cancel — an untitled tab has no timer to cancel anyway, since the
+		// auto-save effect only arms tabs that already have a path.
+		options.cancelPendingAutoSave(tab.id);
 		if (refuseIfLossilyDecoded(tab, targetPath, targetKey)) return false;
 		const snapshot = tab.rawContent;
 		markSelfWrite(targetPath);
@@ -507,7 +522,6 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		if (!tab || (!tab.isDirty && tab.path !== '')) return true;
 		if (!tab.isDirty) return true;
 		if (settings.autoSave && !settings.confirmBeforeSave && tab.path !== '') {
-			options.cancelPendingAutoSave(tabId);
 			const success = await saveContent(tabId);
 			if (success && !tab.isDirty) return true;
 			if (success) options.onCloseSaveNewerEdits();
@@ -516,9 +530,16 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		const response = await options.askClose(tab.title);
 		if (response === 'cancel') return false;
 		if (response === 'save') {
-			options.cancelPendingAutoSave(tabId);
 			return saveContent(tabId);
 		}
+		// Kept, but not because the timer would otherwise fire: the three lines
+		// below are synchronous, so nothing can run between them, and the
+		// auto-save effect drops the timer on its own once `isDirty` is false.
+		// That route rests on the effect flushing ahead of a pending macrotask
+		// and on the effect running at all — neither is obvious while a window
+		// is tearing down on the quit path. A synchronous cancel rests on
+		// neither, and unlike the branches above there is no `saveContent` here
+		// to do it on this path's behalf.
 		options.cancelPendingAutoSave(tabId);
 		tab.rawContent = tab.originalContent;
 		tab.isDirty = false;
