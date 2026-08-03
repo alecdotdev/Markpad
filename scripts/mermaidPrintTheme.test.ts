@@ -150,17 +150,38 @@ test('the helper is inert when there is nothing to re-render', async () => {
 });
 
 test('the PDF export wraps the print render and always restores', () => {
-	assert.match(viewer, /const restoreDiagrams = await renderDiagramsForPrint\(\{/);
-	assert.match(viewer, /\} finally \{\n\t\t\trestoreDiagrams\(\);\n\t\t\}/);
+	// Whatever the restore handle is called, a `finally` has to call it — an
+	// export that throws between the print render and the restore would otherwise
+	// leave every diagram on screen stuck in the print theme.
+	const handle = viewer.match(/(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*await renderDiagramsForPrint\(/);
+	assert.ok(handle, 'the PDF export must take a restore handle from renderDiagramsForPrint');
+	assert.match(
+		viewer,
+		new RegExp(`\\}\\s*finally\\s*\\{[^}]*\\b${handle![1]}\\(\\)`),
+		'the restore must run from a finally block',
+	);
+
 	// The screen render must record the source, or there is nothing to rebuild.
 	// It moved into the shared renderer in #4xx, when the HTML export started
 	// calling the same function; the assertion follows it rather than being
 	// relaxed, because "some path renders diagrams without remembering the
 	// source" is exactly the drift that deleted the markdown.ts copy.
-	assert.match(richContent, /rememberDiagramSource\(container, mermaidCode\);/);
-	// One theme decision, shared by the screen render and the restore: the
-	// viewer resolves it once and hands it to both.
-	assert.match(richContent, /mermaid\.initialize\(\{ startOnLoad: false, theme: options\.mermaidTheme \}\)/);
-	assert.match(viewer, /mermaidTheme: currentMermaidTheme\(\),/);
-	assert.match(viewer, /screenTheme: currentMermaidTheme\(\),/);
+	assert.match(richContent, /rememberDiagramSource\(\s*\w+\s*,\s*\w+\s*\)/);
+
+	// One theme decision, shared by the screen render and the restore. Asserted
+	// as "both options are fed the same expression" rather than as the literal
+	// `currentMermaidTheme()`: what must not drift is that the two agree, and the
+	// private helper producing the value is free to be renamed or inlined.
+	assert.match(
+		richContent,
+		/mermaid\.initialize\(\{[^}]*\btheme:\s*\w+\.mermaidTheme\b/,
+		'the shared renderer must use the theme it was handed, not resolve its own',
+	);
+	const screenTheme = viewer.match(/\bscreenTheme:\s*([^,\n]+),/);
+	assert.ok(screenTheme, 'the print render must be told the screen theme so it can restore it');
+	assert.match(
+		viewer,
+		new RegExp(`\\bmermaidTheme:\\s*${screenTheme![1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')},`),
+		'the on-screen render and the print restore must resolve the theme the same way',
+	);
 });

@@ -86,12 +86,14 @@ test('tab cycling avoids Cmd+Tab, which macOS never delivers to the app', () => 
 		'no unconditional CtrlCmd+Shift+Tab binding',
 	);
 
+	// Back-reference rather than the literal `tabCycleModifier`: what has to hold
+	// is that the binding uses the same value the platform check produced, and
+	// the local holding it is free to be renamed.
 	assert.match(
 		editor,
-		/const tabCycleModifier = isMacPlatform\(\)\s*\?\s*monaco\.KeyMod\.WinCtrl\s*:\s*monaco\.KeyMod\.CtrlCmd/,
-		'modifier is chosen per platform: real Ctrl on macOS, CtrlCmd elsewhere',
+		/const (\w+) = isMacPlatform\(\)\s*\?\s*monaco\.KeyMod\.WinCtrl\s*:\s*monaco\.KeyMod\.CtrlCmd[\s\S]*?keybindings: \[\1 \| monaco\.KeyCode\.Tab\]/,
+		'modifier is chosen per platform (real Ctrl on macOS, CtrlCmd elsewhere) and tab-next uses it',
 	);
-	assert.match(editor, /keybindings: \[tabCycleModifier \| monaco\.KeyCode\.Tab\]/, 'tab-next uses the platform modifier');
 	assert.match(
 		editor,
 		/tabCycleModifier \| monaco\.KeyMod\.Shift \| monaco\.KeyCode\.Tab/,

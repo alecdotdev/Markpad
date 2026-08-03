@@ -19,7 +19,7 @@ test('processMarkdownHtml promotes the anchor id onto the heading element', () =
 
 test('fold restore keys by heading id before falling back to text', () => {
 	const source = readFileSync('src/lib/utils/markdown.ts', 'utf8');
-	assert.match(source, /const key = h\.id \|\| h\.textContent/, 'restore key prefers the (now populated) heading id');
+	assert.match(source, /const \w+ = \w+\.id \|\| \w+\.textContent/, 'restore key prefers the (now populated) heading id');
 });
 
 test('viewer fold handlers key by heading id before falling back to text', () => {

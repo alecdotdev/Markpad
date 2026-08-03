@@ -81,9 +81,23 @@ test('the extension list the rewriter mirrors still matches markdownLinks.ts', (
 	}
 });
 
-test('Copy Reference still emits the wikilink form the rewriter parses', () => {
-	// Both call sites (document context menu and the TOC context menu) build
-	// `[[<basename without extension>#<heading>]]`.
-	const emitted = [...viewerSource.matchAll(/`\[\[\$\{(?:fn|filename)\}#\$\{[^}]+\}\]\]`/g)];
-	assert.equal(emitted.length, 3, `Copy Reference reference format changed: ${emitted.length} call sites matched`);
+test('every wikilink Copy Reference builds carries the heading the rewriter needs', () => {
+	// The rewriter only rewrites heading-bearing forms; a bare `[[Notes]]` stays
+	// literal text (see the scope note above). So the contract is that *every*
+	// `[[...]]` the viewer writes to the clipboard contains a `#`.
+	//
+	// Asserted that way round rather than as "three call sites match
+	// `[[${fn}#${...}]]`". That form hard-coded the local variable names holding
+	// the basename — renaming `fn` broke it — and the count, so adding a fourth
+	// correct Copy Reference entry failed while replacing one of the three with a
+	// broken bare form still left three matches and passed.
+	const emitted = [...viewerSource.matchAll(/`\[\[[^`]*\]\]`/g)].map((match) => match[0]);
+	assert.ok(emitted.length > 0, 'Copy Reference no longer builds a wikilink — has the format moved?');
+	for (const wikilink of emitted) {
+		assert.match(
+			wikilink,
+			/#/,
+			`${wikilink}: a wikilink without a heading is left as literal text by process_wikilinks()`,
+		);
+	}
 });

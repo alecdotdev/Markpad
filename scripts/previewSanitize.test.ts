@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { MARKDOWN_SANITIZE_CONFIG, ALLOWED_MARKDOWN_URI_REGEXP } from '../src/lib/utils/sanitize.js';
+import { SANITIZER_FILES, callSiteOffsets, enclosingFunctionName, filesMatching, readSourceFiles } from './sourceTree.js';
 
 // The preview is the path the `<style>` clause in the shared policy was written
 // for, and it was the one path not using it. `tab.content` (the rendered,
@@ -32,27 +32,48 @@ import { MARKDOWN_SANITIZE_CONFIG, ALLOWED_MARKDOWN_URI_REGEXP } from '../src/li
 // gets, and that is what these tests pin.
 const POC_STYLE = '<style>.titlebar{display:none} body{background-image:url("https://attacker.example/beacon")}</style>';
 
+const SOURCES = readSourceFiles('src');
 const viewerSource = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 const sanitizeSource = readFileSync('src/lib/utils/sanitize.ts', 'utf8');
 const richContentSource = readFileSync('src/lib/utils/richContent.ts', 'utf8');
 
+/**
+ * The identifier the preview injects with `{@html}`, proved to be the shared
+ * sanitizer's output.
+ *
+ * The chain is what matters — something is declared from
+ * `sanitizeMarkdownHtml(...)` and *that* something is what reaches `{@html}` —
+ * so this reads the name out of the source instead of pinning it. The previous
+ * form spelled the whole declaration out (`let sanitizedHtml = $derived(...)`),
+ * which made the private binding name, the `let`, and the `$derived` wrapper
+ * into contract; renaming the variable or switching how it is computed would
+ * have failed the suite while the security property held.
+ */
+function sanitizedSinkName(): string {
+	const declaration = viewerSource.match(/(?:let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*[^;\n]*\bsanitizeMarkdownHtml\(/);
+	assert.ok(declaration, 'the preview must derive what it injects from sanitizeMarkdownHtml');
+	return declaration![1];
+}
+
 test('the preview sanitizes through the shared policy, not a local config', () => {
 	assert.match(
 		viewerSource,
-		/import \{ sanitizeMarkdownHtml \} from '\.\/utils\/sanitize\.js'/,
+		/import\s*\{[^}]*\bsanitizeMarkdownHtml\b[^}]*\}\s*from\s*'[^']*\/sanitize\.js'/,
 		'the viewer must import the shared sanitizer',
 	);
-	assert.match(
-		viewerSource,
-		/let sanitizedHtml = \$derived\(sanitizeMarkdownHtml\(htmlContent\)\)/,
-		'the preview sink must run the shared sanitizer over tab.content',
-	);
 
-	// The regression itself: a DOMPurify call on the document HTML with a
-	// config assembled at the call site. Whatever that config contains, it is
-	// by construction not the shared one, and the `<style>` clause is exactly
-	// the kind of rule that gets left out of a copy.
-	assert.doesNotMatch(viewerSource, /DOMPurify\.sanitize\(\s*htmlContent/);
+	// The sink itself: every bare `{@html ident}` in the viewer injects the
+	// sanitizer's output and nothing else. Stated over *all* of them rather than
+	// over one known-good spelling, so adding a second injection point of the raw
+	// document is a failure instead of an unnoticed addition.
+	const injected = [...new Set([...viewerSource.matchAll(/\{@html\s+([A-Za-z_$][\w$]*)\s*\}/g)].map((m) => m[1]))];
+	assert.deepEqual(injected, [sanitizedSinkName()], 'the preview sink must inject the shared sanitizer output');
+
+	// The regression itself — a DOMPurify call with a config assembled at the
+	// call site — is caught for the whole tree by the call-site allowlist below;
+	// the viewer is not on it. What stays here is the other half of that
+	// regression, which the allowlist cannot see: the viewer hand-copied the URI
+	// pattern out of the shared policy.
 	assert.doesNotMatch(
 		viewerSource,
 		/ALLOWED_URI_REGEXP/,
@@ -76,40 +97,26 @@ test('the shared policy the preview now gets is the one that forbids author styl
 // silently reintroduces a private policy — this file exists because that is
 // precisely what happened. Pin the set of call sites: a document that reaches
 // the DOM must go through `sanitizeMarkdownHtml`, and anything else has to
-// justify itself here.
-const SANITIZE_CALL_SITES: Record<string, number> = {
-	// The shared policy itself.
-	'src/lib/utils/sanitize.ts': 1,
-	// Mermaid's own SVG output, not a user's markdown: it needs `foreignObject`
-	// (which the document policy does not allow) and it depends on the inline
-	// `<style>` the document policy forbids, so it is deliberately a different
-	// configuration on a different input. Verified in a browser: the pinned
-	// DOMPurify keeps mermaid's `<style>` under the diagram config and strips it
-	// under MARKDOWN_SANITIZE_CONFIG, which would flatten every diagram.
-	// It sits next to the only thing that produces diagrams, which is now the
-	// renderer the preview and the HTML export share.
-	'src/lib/utils/richContent.ts': 1,
-};
-
-function walk(dir: string): string[] {
-	const out: string[] = [];
-	for (const name of readdirSync(dir)) {
-		const path = join(dir, name);
-		if (statSync(path).isDirectory()) out.push(...walk(path));
-		else if (/\.(ts|svelte|js)$/.test(name)) out.push(path);
-	}
-	return out;
-}
-
+// justify itself.
+//
+// The allowlist itself (`sanitize.ts`, which owns the document policy, and
+// `richContent.ts`, which sanitizes Mermaid's own SVG under a deliberately
+// different config — it needs `foreignObject` and the inline `<style>` the
+// document policy forbids, verified in a browser against the pinned DOMPurify)
+// lives in scripts/sourceTree.ts, because singleImplementationConvention.test.ts
+// pins the *import* sites against the same two files. It used to be written out
+// in both places, so widening one and forgetting the other was a silent way to
+// end up with one scan guarding a set the other had already given up on.
 test('DOMPurify call sites in src are the allowlisted ones', () => {
-	const found: Record<string, number> = {};
-	for (const path of walk('src')) {
-		const count = readFileSync(path, 'utf8').split('DOMPurify.sanitize(').length - 1;
-		if (count > 0) found[path.replace(/\\/g, '/')] = count;
-	}
+	// A per-file occurrence count used to be asserted here as well. It is dropped
+	// on purpose: what a reviewer has to approve is *which files* may configure a
+	// sanitizer, and "richContent.ts calls it once, not twice" made every
+	// refactor inside an already-approved file a test failure. A second config in
+	// an allowlisted file is still visible — the two tests below pin what each of
+	// the two configs must contain.
 	assert.deepEqual(
-		found,
-		SANITIZE_CALL_SITES,
+		filesMatching(SOURCES, /DOMPurify\.sanitize\(/),
+		SANITIZER_FILES,
 		'unexpected DOMPurify.sanitize call site — rendered markdown goes through sanitizeMarkdownHtml',
 	);
 });
@@ -128,16 +135,24 @@ test('the two paths keep their opposite orders on purpose', () => {
 	// (scripts/exportSanitize.test.ts pins that). The preview processes first
 	// and sanitizes at the sink, so the string that reaches `{@html}` is exactly
 	// the sanitizer's output — there is no parse/serialize round trip after the
-	// filter has run. Pin the shape so the difference cannot be "tidied up"
+	// filter has run. Pin the order so the difference cannot be "tidied up"
 	// into a weaker one without reading why.
-	const renderCall = viewerSource.indexOf('return processMarkdownHtml(html, filePath, collapsedHeaders);');
-	const sinkCall = viewerSource.indexOf('let sanitizedHtml = $derived(sanitizeMarkdownHtml(htmlContent))');
-	assert.ok(renderCall !== -1, 'renderMarkdownPreview must process the renderer output');
-	assert.ok(sinkCall !== -1, 'the sink must sanitize');
+	//
+	// The order is what is asserted, by naming the function each half runs in.
+	// The previous form searched for the two statements verbatim — down to the
+	// argument list `(html, filePath, collapsedHeaders)` and the trailing
+	// semicolon — which pinned three private parameter names and a formatting
+	// choice as the price of checking which call happens where.
+	assert.deepEqual(
+		callSiteOffsets(viewerSource, 'processMarkdownHtml').map((offset) => enclosingFunctionName(viewerSource, offset)),
+		['renderMarkdownPreview'],
+		'renderMarkdownPreview must be the one place that processes the renderer output',
+	);
 	assert.doesNotMatch(
 		viewerSource,
 		/processMarkdownHtml\(\s*sanitizeMarkdownHtml/,
 		'the preview must not move the filter ahead of processing without revisiting the note above',
 	);
-	assert.match(viewerSource, /\{@html sanitizedHtml\}/, 'the sink injects the sanitized string');
+	// The sink half — that what `{@html}` injects is the sanitizer's output — is
+	// asserted over every injection point in the first test above.
 });

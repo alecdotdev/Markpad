@@ -202,9 +202,9 @@ test('only this key, and a wholesale clear, count as a remote change', () => {
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 
 test('every mutation goes through the read-modify-write helper', () => {
-	assert.match(viewer, /recentFiles = updateStoredRecentFiles\(\(current\) => promoteRecentFile\(current, path\)\)/);
-	assert.match(viewer, /recentFiles = updateStoredRecentFiles\(\(current\) => dropRecentFile\(current, path\)\)/);
-	assert.match(viewer, /recentFiles = updateStoredRecentFiles\(\(current\) => renameRecentFile\(current, oldPath, newPath\)\)/);
+	assert.match(viewer, /recentFiles = updateStoredRecentFiles\(\((\w+)\) => promoteRecentFile\(\1, path\)\)/);
+	assert.match(viewer, /recentFiles = updateStoredRecentFiles\(\((\w+)\) => dropRecentFile\(\1, path\)\)/);
+	assert.match(viewer, /recentFiles = updateStoredRecentFiles\(\((\w+)\) => renameRecentFile\(\1, oldPath, newPath\)\)/);
 	assert.equal(viewer.match(/updateStoredRecentFiles\(/g)?.length, 3, 'exactly three call sites, all of them shown above');
 });
 
