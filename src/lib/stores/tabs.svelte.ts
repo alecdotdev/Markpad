@@ -311,11 +311,21 @@ class TabManager {
 		}
 	}
 
-	addTab(path: string, content: string = '', pathKey?: string) {
+	/**
+	 * `rawContent` is the Markdown this tab starts with — the file's text, or
+	 * `''` for a tab whose file is read afterwards, which is what both callers
+	 * in the app do. It is NOT the rendered `content`: that starts empty here
+	 * as it does at every other construction site (`addNewTab`, `restoreState`,
+	 * `addHomeTab`, `buildTransferredTab`), and the first preview render fills
+	 * it. Seeding it from this argument put Markdown in the field that is
+	 * injected via `{@html}` — sanitized at the sink, so it showed as escaped
+	 * source rather than being a hole, but it is not what that field means.
+	 */
+	addTab(path: string, rawContent: string = '', pathKey?: string) {
 		// Opening a file that is already open activates that tab instead of
 		// building a second buffer for it — VS Code and Sublime Text both
-		// resolve an open request to the existing view. `content` is ignored in
-		// that case on purpose: the open tab may hold unsaved edits, and a
+		// resolve an open request to the existing view. `rawContent` is ignored
+		// in that case on purpose: the open tab may hold unsaved edits, and a
 		// freshly read copy of the file would erase them.
 		if (hasRealFilePath(path)) {
 			const existing = this.tabs.find((t) => isSameFilePath(t, { path, pathKey }));
@@ -332,15 +342,15 @@ class TabManager {
 				this.tabs.map((tab) => tab.title),
 				t('tabs.untitled', settings.language),
 			);
-		const fileHistory = createFileHistory(path, content);
+		const fileHistory = createFileHistory(path, rawContent);
 
 		this.tabs.push({
 			id,
 			path,
 			title: filename,
-			content,
-			rawContent: content,
-			originalContent: content,
+			content: '',
+			rawContent,
+			originalContent: rawContent,
 			scrollTop: 0,
 			isDirty: false,
 			isEditing: false,

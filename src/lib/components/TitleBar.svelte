@@ -477,7 +477,16 @@
 						</button>
 					{/if}
 					{/if}
-					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.content)}
+					<!--
+						`rawContent`, not `content`: the exports read the Markdown buffer
+						(`exportAsHtml` returns null on an empty `ctx.rawContent`), while
+						`content` is the rendered-preview HTML, refreshed only while the
+						preview is on screen. In plain edit mode with the TOC closed —
+						the default state of a new file — `content` is still empty for a
+						buffer that has never been rendered, so gating on it hid an export
+						that would have produced a file.
+					-->
+					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.rawContent)}
 						<div class="home-menu-divider"></div>
 						<button
 						class="home-menu-item"
