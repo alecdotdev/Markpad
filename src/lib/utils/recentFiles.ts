@@ -58,6 +58,15 @@ export function readStoredRecentFiles(): string[] {
  * makes each change a change to the *stored* list rather than to a stale copy
  * of it.
  *
+ * It narrows the race rather than closing it. Two windows are two documents
+ * over one storage area and the spec's storage mutex is not implemented
+ * anywhere, so the `getItem`/`setItem` pair below can still interleave with
+ * another window's. It is accepted here because the cycle is one synchronous
+ * turn of the event loop, it runs only on discrete user actions, and the worst
+ * loss is one recent-file entry the next open restores — three things that are
+ * NOT true of every shared key. `update_pinned_tags` in `window_runtime.rs`
+ * documents the contrast and takes a real lock.
+ *
  * The write goes through {@link writeStoredSetting} (#370) so that a write
  * which changes nothing does not fire a `storage` event in the other windows.
  * That is what keeps the listener below from bouncing an update back and

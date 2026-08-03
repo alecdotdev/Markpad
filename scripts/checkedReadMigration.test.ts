@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { readSourceFiles } from './sourceTree.js';
+
 // Runes and the Tauri bridge, shimmed the way truncatedBufferGuard.test.ts
 // shims them: the stores are runes modules, and Node's test runner gives every
 // file its own process, so this cannot leak into another suite.
@@ -152,14 +154,23 @@ test('the completed buffer is refused or accepted according to that verdict', as
 
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 
-test('no writable buffer in the app is filled by the unchecked command', () => {
-	for (const [name, source] of [
-		['MarkdownViewer.svelte', viewer],
-		['documentSession.svelte.ts', readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8')],
-		['windowSession.svelte.ts', readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8')],
-	] as const) {
-		assert.doesNotMatch(source, /invoke\('read_file_content'/, `${name} still uses the unchecked command`);
-	}
+test('the unchecked read command is gone, and nothing calls it', () => {
+	// This was a three-file allowlist — the files #379 migrated. That is the
+	// wrong shape for a rule that means "nobody, anywhere": a fourth file
+	// added the call and the test still passed. Two changes fix it. The scan
+	// below covers the whole tree, so a new file cannot slip under it. And the
+	// Rust command itself is deleted, which is what turns the rule from a
+	// convention into a fact: `read_file_content` is not registered any more,
+	// so invoking it fails loudly instead of quietly filling a buffer with
+	// mojibake nothing flagged.
+	const offenders = readSourceFiles('src')
+		.filter(({ text }) => /invoke\('read_file_content'/.test(text))
+		.map(({ path }) => path);
+	assert.deepEqual(offenders, [], 'read_file_content no longer exists; read_file_content_checked is the read');
+
+	const rust = readFileSync('src-tauri/src/lib.rs', 'utf8');
+	assert.doesNotMatch(rust, /\basync fn read_file_content\(/, 'the unchecked command must stay deleted');
+	assert.doesNotMatch(rust, /^\s*read_file_content,\s*$/m, 'and must not be registered again');
 });
 
 test('entering the editor reads the fidelity and stores it', () => {

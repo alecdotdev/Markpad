@@ -140,10 +140,41 @@ fn read_pinned_tags(app: &AppHandle) -> Vec<PinnedTag> {
 /// its pinned tag from its own close handler.
 ///
 /// This is the same defect the frontend fixed in #405 for the recent-files
-/// list. That fix was a re-read alone, which is sufficient there because
-/// `localStorage` is per-document and single-threaded, making an RMW cycle
-/// atomic by construction. Rust commands have no such property, so here the
-/// cycle needs an explicit lock.
+/// list, where a re-read alone was enough. The previous revision of this
+/// comment — written here, by #424, the change that added this lock —
+/// explained why by saying that `localStorage` is per-document and
+/// single-threaded,
+/// "making an RMW cycle atomic by construction". That is false, and it is
+/// corrected here rather than softened, because someone reasoning from it
+/// about some other shared `localStorage` key would conclude they need no
+/// synchronisation at all. Each *document* is single-threaded; two Markpad
+/// windows are two documents sharing one origin's storage area. The storage
+/// mutex the HTML standard describes for exactly this case is not implemented
+/// by any shipping engine, WebKit and WebView2 included, so a `getItem` …
+/// `setItem` pair in one window can interleave with the other window's and
+/// lose precisely the update drawn above.
+///
+/// What the re-read buys is a narrower window, not atomicity:
+///
+/// - Before it, the exposure was the whole lifetime of a window's in-memory
+///   copy — from the last time that window looked at the list until it next
+///   wrote, which is minutes. After it, the cycle is one synchronous turn of
+///   the event loop containing no `await`: `getItem`, a `JSON.parse` of at
+///   most nine short strings, `setItem`.
+/// - The writes happen on discrete user actions (open a file, remove an
+///   entry, rename), so colliding means two windows landing inside those
+///   microseconds.
+/// - What a collision costs is one entry of a recent-file list, which the
+///   next open puts back.
+///
+/// It is a residual race, accepted on those three grounds — not a guarantee.
+/// None of the three holds here. This cycle is a file read, a parse, a
+/// serialize and an `atomic_write`: milliseconds of I/O on a preemptively
+/// scheduled thread pool, not microseconds of straight-line JS. The collision
+/// is not a coincidence but the ordinary shape of quitting, since ⌘Q makes
+/// every window write from its own close handler at once. And a dropped pin is
+/// a thing the user made, with nothing to recreate it from. Unlocked, this
+/// cycle was measured losing updates; hence the lock.
 ///
 /// Serialising also keeps two `atomic_write` calls off the same target at
 /// once, which is not something `atomic_write` handles either: its temp file

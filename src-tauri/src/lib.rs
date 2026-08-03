@@ -1072,6 +1072,82 @@ mod tests {
         assert!(out.contains("[jump](#real)"), "got: {out}");
     }
 
+    /// A document that has BOTH kinds of code region, with the inline span at
+    /// a lower offset than the fence.
+    ///
+    /// `in_code_region` is a binary search, so `code_region_ranges` has to
+    /// emit its regions in document order. The two kinds are found by
+    /// different parts of the scan — fences by the line walk, inline spans by
+    /// `push_inline_code_spans` over the text between fences — and a build
+    /// order that appends all of one kind after all of the other leaves the
+    /// vector unsorted for exactly this shape of document. The binary search
+    /// then walks straight past the fence and every marker inside it is
+    /// reported as ordinary prose (#375 / #389 all over again).
+    ///
+    /// Every marker below is checked, not just one. `process_wikilinks` runs
+    /// a separate pass per marker kind and each probes `in_code_region` at its
+    /// own offset, so a probe that happens to land inside the region does not
+    /// say anything about the probes beside it.
+    const FENCE_AFTER_INLINE_CODE: &str = concat!(
+        "Prose with `a code span` in it.\n",
+        "\n",
+        "```text\n",
+        "![[embed.md]]\n",
+        "[[wikilink]]\n",
+        "==highlight==\n",
+        "^[footnote]\n",
+        "```\n",
+    );
+
+    #[test]
+    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_embeds() {
+        let out = process_internal_embeds(FENCE_AFTER_INLINE_CODE);
+        assert!(
+            out.contains("![[embed.md]]") && !out.contains("<img"),
+            "an embed inside the fence was rewritten — code regions reached \
+             `in_code_region` out of document order: {out}",
+        );
+    }
+
+    #[test]
+    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_wikilinks() {
+        let out = process_wikilinks(FENCE_AFTER_INLINE_CODE);
+        for marker in ["[[wikilink]]", "==highlight==", "^[footnote]"] {
+            assert!(
+                out.contains(marker),
+                "`{marker}` inside the fence was rewritten — code regions \
+                 reached `in_code_region` out of document order: {out}",
+            );
+        }
+        // The inline span itself is still protected, and still a span.
+        assert!(out.contains("`a code span`"), "got: {out}");
+    }
+
+    #[test]
+    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_autolinks() {
+        // The third consumer. A bare URL inside a fence must stay text;
+        // comrak's own autolinker never sees a code block.
+        let input = "Prose with `a code span` in it.\n\n```text\n(https://example.com/x)y\n```\n";
+        let out = process_parenthesized_autolinks(input);
+        assert!(
+            !out.contains("]("),
+            "a URL inside the fence was linkified: {out}",
+        );
+    }
+
+    #[test]
+    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_math() {
+        // The fourth consumer. `mask_math_spans` hides math from CommonMark's
+        // inline rules; dollars inside a fence are not math and masking them
+        // rewrites the code block the user typed.
+        let input = "Prose with `a code span` in it.\n\n```text\n$x_1$ and $y_2$\n```\n";
+        let masked = mask_math_spans(input);
+        assert_eq!(
+            masked.text, input,
+            "dollars inside the fence were masked as math",
+        );
+    }
+
     #[test]
     fn multibyte_content_inside_a_fence_does_not_panic() {
         let input = "```text\n中文开头的一行\n```\n\n![[outside.png]]\n";
@@ -2088,6 +2164,73 @@ mod tests {
         }
     }
 
+    /// The body of `convert_markdown`, read back out of this source file.
+    ///
+    /// The needle is assembled at runtime so that it does not match this
+    /// file's own source text. Line endings are normalised first: git checks
+    /// this file out with CRLF wherever `core.autocrlf` is on — the default
+    /// on Windows, and what the Windows CI runner does — and the `\n`-anchored
+    /// needles are about the shape of the source, not about how the working
+    /// tree happens to store it.
+    fn convert_markdown_body() -> String {
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
+        let needle = format!("\nfn {}(content: &str) -> String {{", "convert_markdown");
+        let start = source
+            .find(&needle)
+            .expect("convert_markdown must keep its `&str -> String` signature");
+        let rest = &source[start + needle.len()..];
+        rest[..rest
+            .find("\n}\n")
+            .expect("convert_markdown must be terminated")]
+            .to_string()
+    }
+
+    #[test]
+    fn convert_markdown_hands_the_fail_safe_the_raw_buffer() {
+        // `annotate_task_checkboxes` is a fail-safe only while what reaches it
+        // is the buffer the command was called with. The hazard is not the
+        // call — it is the *name*: adding a step the obvious way,
+        //
+        //     let content = process_new_thing(content);
+        //
+        // near the top rebinds the parameter, and the unchanged call at the
+        // bottom starts handing over preprocessed text. Nothing about that
+        // edit looks wrong and no behavioural test can see it, because the two
+        // sides it is supposed to cross-check now agree by definition.
+        //
+        // "This string is the one the caller passed in" is provenance, not a
+        // type, so the compiler cannot be made to check it. What can be made
+        // structural is the shadowing: `convert_markdown` copies its input to
+        // `raw_buffer` before anything else runs, which turns the shadowing
+        // edit above into a harmless one. This test pins the three properties
+        // that copy depends on.
+        let body = convert_markdown_body();
+
+        let capture = "let raw_buffer = content;";
+        let first_let = body
+            .find("\n    let ")
+            .map(|i| i + "\n    ".len())
+            .expect("convert_markdown must bind something");
+        assert!(
+            body[first_let..].starts_with(capture),
+            "the raw buffer must be captured before the first preprocessing \
+             step, or the step can shadow `content` above it:\n{body}",
+        );
+        assert_eq!(
+            body.matches(capture).count(),
+            1,
+            "`raw_buffer` is bound more than once — a second binding is the \
+             same hole under a new name:\n{body}",
+        );
+        assert!(
+            Regex::new(r"annotate_task_checkboxes\([^;]*,\s*raw_buffer\s*\)")
+                .unwrap()
+                .is_match(&body),
+            "the fail-safe is no longer handed `raw_buffer`; whatever it now \
+             receives can agree with the HTML by construction:\n{body}",
+        );
+    }
+
     #[test]
     fn every_convert_markdown_preprocessing_step_is_registered() {
         // Re-reads this file so that a fifth preprocessing step cannot be
@@ -2295,10 +2438,19 @@ fn remove_pinned_tag(app: AppHandle, name: String) -> Result<(), String> {
 /// N. One mismatched pairing (e.g. a 4-backtick inline sample, or a ~~~
 /// fence, which the old pattern did not know at all) desynchronized the
 /// protection for the entire rest of the document.
+///
+/// The result is in ascending document order, which is not cosmetic:
+/// `in_code_region` binary-searches it. That order is produced by
+/// construction rather than by a sort at the end — the scan alternates
+/// between the two kinds of region (the text before a fence, then the fence,
+/// then the text after it), so each push is at a higher offset than the last.
+/// The previous shape collected fences here and appended every inline span in
+/// a second pass afterwards, which left the vector unsorted for any document
+/// containing both, and made a single `sort_unstable()` call the only thing
+/// standing between the search and a wrong answer.
 fn code_region_ranges(content: &str) -> Vec<(usize, usize)> {
     let len = content.len();
     let mut regions: Vec<(usize, usize)> = Vec::new();
-    let mut plain_segments: Vec<(usize, usize)> = Vec::new();
     // (fence char, opener run length, region start)
     let mut fence: Option<(u8, usize, usize)> = None;
     let mut seg_start = 0usize;
@@ -2338,8 +2490,10 @@ fn code_region_ranges(content: &str) -> Vec<(usize, usize)> {
                 // The info string of a backtick fence may not contain backticks.
                 let info_ok = marker != Some(b'`') || !trimmed[run_len..].contains('`');
                 if is_fence_line && info_ok {
+                    // Before the fence region itself, so the two kinds of
+                    // region stay interleaved in document order.
                     if seg_start < line_start {
-                        plain_segments.push((seg_start, line_start));
+                        push_inline_code_spans(content, seg_start, line_start, &mut regions);
                     }
                     fence = Some((marker.unwrap(), run_len, line_start));
                 }
@@ -2352,36 +2506,47 @@ fn code_region_ranges(content: &str) -> Vec<(usize, usize)> {
         Some((_, _, start)) => regions.push((start, len)),
         None => {
             if seg_start < len {
-                plain_segments.push((seg_start, len));
+                push_inline_code_spans(content, seg_start, len, &mut regions);
             }
         }
     }
 
-    // Inline code spans in the text between fences. CommonMark parses inline
-    // elements one block at a time and a blank line ends a block, so pairing
-    // is confined to each blank-line-delimited chunk: a stray backtick in
-    // prose must not open a span that runs on until the opening backtick of a
-    // real code span paragraphs later, suppressing every embed, wikilink and
-    // highlight in between.
-    for (seg_s, seg_e) in plain_segments {
-        let mut chunk_start = seg_s;
-        let mut line_start = seg_s;
-        while line_start < seg_e {
-            let line_end = content[line_start..seg_e]
-                .find('\n')
-                .map(|i| line_start + i + 1)
-                .unwrap_or(seg_e);
-            if content[line_start..line_end].trim().is_empty() {
-                pair_inline_code_runs(content, chunk_start, line_start, &mut regions);
-                chunk_start = line_end;
-            }
-            line_start = line_end;
-        }
-        pair_inline_code_runs(content, chunk_start, seg_e, &mut regions);
-    }
-
-    regions.sort_unstable();
+    debug_assert!(
+        regions.windows(2).all(|pair| pair[0] <= pair[1]),
+        "code_region_ranges emitted regions out of document order, which \
+         makes in_code_region's binary search miss them: {regions:?}",
+    );
     regions
+}
+
+/// Splits `content[start..end]` — a stretch of text between fences — into
+/// blocks and records the inline code spans of each.
+///
+/// CommonMark parses inline elements one block at a time and a blank line
+/// ends a block, so pairing is confined to each blank-line-delimited chunk: a
+/// stray backtick in prose must not open a span that runs on until the
+/// opening backtick of a real code span paragraphs later, suppressing every
+/// embed, wikilink and highlight in between.
+fn push_inline_code_spans(
+    content: &str,
+    start: usize,
+    end: usize,
+    regions: &mut Vec<(usize, usize)>,
+) {
+    let mut chunk_start = start;
+    let mut line_start = start;
+    while line_start < end {
+        let line_end = content[line_start..end]
+            .find('\n')
+            .map(|i| line_start + i + 1)
+            .unwrap_or(end);
+        if content[line_start..line_end].trim().is_empty() {
+            pair_inline_code_runs(content, chunk_start, line_start, regions);
+            chunk_start = line_end;
+        }
+        line_start = line_end;
+    }
+    pair_inline_code_runs(content, chunk_start, end, regions);
 }
 
 /// Records the inline code spans inside `content[start..end]`, which must be
@@ -3287,6 +3452,14 @@ fn escape_html_text(text: &str) -> String {
 /// a new step here must also be registered in `line_preserving_transforms()`.
 #[tauri::command]
 fn convert_markdown(content: &str) -> String {
+    // The buffer this command was called with, captured before anything runs
+    // and never rebound. What `annotate_task_checkboxes` is handed at the end
+    // has to be this rather than the parameter name: a new step written as a
+    // `let content = ...` shadow would rebind that name and silently retarget
+    // the call without touching it. See that function's doc comment and
+    // `convert_markdown_hands_the_fail_safe_the_raw_buffer`.
+    let raw_buffer = content;
+
     let processed_autolinks = process_parenthesized_autolinks(content);
     let processed_embeds = process_internal_embeds(&processed_autolinks);
     let processed_links = process_wikilinks(&processed_embeds);
@@ -3309,7 +3482,7 @@ fn convert_markdown(content: &str) -> String {
     options.render.sourcepos = true;
 
     let html = markdown_to_html(&masked_math.text, &options);
-    annotate_task_checkboxes(restore_math_spans(&html, &masked_math), content)
+    annotate_task_checkboxes(restore_math_spans(&html, &masked_math), raw_buffer)
 }
 
 /// Marks the rendered task checkboxes the frontend is allowed to toggle.
@@ -3322,18 +3495,35 @@ fn convert_markdown(content: &str) -> String {
 /// number of the *raw* buffer (`documentSession.toggleTaskCheckbox`). The two
 /// only agree while every preprocessing step preserves line numbers. Checking
 /// the raw buffer here is what turns a broken step into "the checkbox stays
-/// disabled" instead of "the checkbox writes a `- [x]` marker into whatever
-/// happens to sit on that line" — the P0 that issue #352 fixed, where the
-/// marker could land inside a fenced code block.
+/// disabled" instead of a write aimed at the wrong line of the user's
+/// document — the P0 that issue #352 fixed.
+///
+/// What a wrong line costs is narrower than it was, and worth stating
+/// precisely, because an overstated reason invites the next reader to check
+/// it, find it false, and delete the guard as theatre. Since #352 the
+/// frontend rewrites only lines that already match
+/// `/^(\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+)\[( |x|X)\]/`
+/// (`documentSession.toggleTaskCheckbox`), so a wrong line that is ordinary
+/// prose is a no-op and the toggle reports failure — it does NOT write a
+/// `- [x]` marker into whatever happens to sit there, as this comment used to
+/// claim of the pre-#352 frontend. What still corrupts is a wrong line that
+/// is itself task-shaped, and neither spelling of that is exotic: a task list
+/// quoted inside a fenced code block is ordinary content in a notes app, and
+/// a real task elsewhere in the same document means the user clicks one
+/// checkbox and a different one silently flips.
 ///
 /// So do NOT "unify" this with the preprocessed text that produced the HTML.
 /// Passing `&processed_links` here would make the two sides agree by
 /// definition, delete the guard, and turn every future line-count regression
-/// straight into document corruption. Keep the contract honest in the
+/// straight into a mis-aimed write. Nor is passing the *parameter name*
+/// enough at the call site: `convert_markdown` captures its input as
+/// `raw_buffer` first precisely so that a later `let content = …` cannot
+/// retarget the call without touching it. Keep the contract honest in the
 /// transforms instead; `every_preprocessing_step_preserves_source_line_numbers`
-/// is what enforces it, and
+/// is what enforces it,
 /// `task_checkboxes_stay_inert_when_the_html_and_the_buffer_disagree` pins
-/// this guard.
+/// this guard, and `convert_markdown_hands_the_fail_safe_the_raw_buffer` pins
+/// the argument it is given.
 fn annotate_task_checkboxes(html: String, markdown: &str) -> String {
     let markdown_lines = markdown.lines().collect::<Vec<_>>();
 
@@ -3455,29 +3645,25 @@ async fn render_markdown(content: String) -> Result<String, String> {
     .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Reads a file, with the fidelity of the decode: returns `(content, lossy)`.
+/// Since every read path decodes leniently, a caller that puts the text into
+/// an EDITABLE buffer must carry `lossy` onto the tab — otherwise the first
+/// auto-save writes U+FFFD over a file that was merely in another encoding.
+///
+/// This is now the only read-to-string command. Its sibling
+/// `read_file_content` returned the text and dropped the verdict; it survived
+/// #379 for callers that re-read a file whose tab was already flagged, then
+/// lost its last call site and stayed registered — a command whose defining
+/// property is that it hides the flag, one `invoke` away from any new caller.
+/// Deleting it makes "which command should this use" a question with one
+/// answer rather than a convention.
+///
 /// Deliberately async, like every other file-touching command here. A
 /// synchronous `#[tauri::command]` runs on the main thread, so a read from a
 /// slow volume (SMB, iCloud, a failing USB stick) freezes the whole
 /// application — every window, its menus and its scrolling — until the I/O
 /// returns. `spawn_blocking` moves the wait onto the blocking pool, which is
 /// what `tauri::async_runtime` provides it for.
-#[tauri::command]
-async fn read_file_content(path: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        read_to_string_lossy(&path)
-            .map(|decoded| decoded.content)
-            .map_err(|e| e.to_string())
-    })
-    .await
-    .unwrap_or_else(|e| Err(e.to_string()))
-}
-
-/// `read_file_content` plus the fidelity of the decode: returns
-/// `(content, lossy)`. Since every read path decodes leniently, a caller that
-/// puts the text into an EDITABLE buffer must use this one and carry `lossy`
-/// onto the tab — otherwise the first auto-save writes U+FFFD over a file
-/// that was merely in another encoding. The bare `read_file_content` remains
-/// for callers that re-read a file whose tab is already flagged.
 #[tauri::command]
 async fn read_file_content_checked(path: String) -> Result<(String, bool), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -4459,7 +4645,6 @@ pub fn run() {
             open_markdown_preview,
             render_markdown,
             send_markdown_path,
-            read_file_content,
             read_file_content_checked,
             canonicalize_path,
             read_file_as_data_url,
