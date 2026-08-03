@@ -118,6 +118,11 @@ export interface Tab {
 	 *
 	 * A tab field also covers untitled buffers, which have no path to key by.
 	 *
+	 * Per tab is not the same as per document, because a tab can be repointed at
+	 * another file without a tab switch — following a link, and back/forward.
+	 * Those routes clear this set, together with the reading position above; see
+	 * `forgetPreviousDocument`.
+	 *
 	 * Replace the set to change it — never mutate in place. The preview render
 	 * reads this value, and Svelte cannot see a mutation of a Set it is already
 	 * holding.
@@ -790,10 +795,36 @@ class TabManager {
 	}
 
 	/**
-	 * This tab is about to show a DIFFERENT document, so everything that says
-	 * where the reader was in the old one is void. The three routes that do
-	 * that — `navigate` (following a link), `goBack` and `goForward` — all end
-	 * here, because the fields have to be cleared as a set.
+	 * This tab now shows a DIFFERENT document, so everything the TAB records
+	 * about the one it was showing is void. The three routes that repoint a tab
+	 * — `navigate` (following a link), `goBack` and `goForward` — call this and
+	 * nothing else, so a fourth route has one question to answer ("does this
+	 * change which document the tab holds?") rather than one per field group.
+	 *
+	 * The two helpers stay separate because they are separate concerns with
+	 * separate reasons: a stale reading position moves the viewport, a stale
+	 * fold hides text, and each needs its own explanation. What they share is
+	 * this trigger — both doc comments below used to open by restating it, which
+	 * is what an unnamed shared concept looks like. This is its name.
+	 *
+	 * Not the buffer: `rawContent`, `originalContent` and `content` are
+	 * overwritten by the load that follows, not cleared here. This is only the
+	 * state that describes a document without being it.
+	 *
+	 * Only a change of DOCUMENT gets here. Save As and rename (`updateTabPath`,
+	 * `renameTab`) change the tab's path while the text on screen stays put: the
+	 * reader has not moved, and the folds they put in that text still describe
+	 * it. Tests guard both directions.
+	 */
+	private forgetPreviousDocument(tab: Tab) {
+		this.clearReadingPosition(tab);
+		this.clearCollapsedHeaders(tab);
+	}
+
+	/**
+	 * Everything that says where the reader was in the document this tab has
+	 * just left. Called only from `forgetPreviousDocument`; the fields have to
+	 * be cleared as a set.
 	 *
 	 * Clearing one of them is not enough and reads as if it were. Both restore
 	 * paths are fallback cascades that stop at the first entry that resolves
@@ -809,15 +840,35 @@ class TabManager {
 	 * editor mount, which is why the symptom of getting this wrong shows up on
 	 * a later tab switch rather than at the moment of the navigation.
 	 *
-	 * Only a change of DOCUMENT clears them. Save As and rename
-	 * (`updateTabPath`, `renameTab`) change the tab's path while the text on
-	 * screen stays put, and the reader has not moved.
+	 * Which routes reach here, and which deliberately do not, is stated once in
+	 * `forgetPreviousDocument` rather than in each helper.
 	 */
 	private clearReadingPosition(tab: Tab) {
 		tab.editorViewState = null;
 		tab.anchorLine = 0;
 		tab.scrollPercentage = 0;
 		tab.scrollTop = 0;
+	}
+
+	/**
+	 * The folded-heading set of the document this tab has just left. Called only
+	 * from `forgetPreviousDocument`.
+	 *
+	 * A fold key is a heading slug (see `Tab.collapsedHeaders`), which is only
+	 * unique WITHIN a document, so carrying the set across means the incoming
+	 * document is rendered with any section whose slug happens to match already
+	 * shut. `loadMarkdown` reads the set on the line after the `navigate` call,
+	 * so nothing is deferred: the HTML that first appears already carries
+	 * `is-collapsed`, and the outline hides the same section's children on the
+	 * same render, with nothing on screen to explain either. That is #425's
+	 * failure reached through the navigation route instead of a window-wide set.
+	 *
+	 * Replaces the set rather than emptying it, as every other writer does — the
+	 * viewer holds it through a `$derived`, and Svelte cannot see a `.clear()`
+	 * of a Set it is already holding.
+	 */
+	private clearCollapsedHeaders(tab: Tab) {
+		tab.collapsedHeaders = new Set<string>();
 	}
 
 	navigate(id: string, path: string, pathKey?: string) {
@@ -845,7 +896,7 @@ class TabManager {
 			tab.pathKey = pathKey;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
-			this.clearReadingPosition(tab);
+			this.forgetPreviousDocument(tab);
 		}
 	}
 
@@ -877,7 +928,7 @@ class TabManager {
 			tab.pathKey = undefined;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
-			this.clearReadingPosition(tab);
+			this.forgetPreviousDocument(tab);
 			return path;
 		}
 		return null;
@@ -896,7 +947,7 @@ class TabManager {
 			tab.pathKey = undefined;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
-			this.clearReadingPosition(tab);
+			this.forgetPreviousDocument(tab);
 			return path;
 		}
 		return null;
