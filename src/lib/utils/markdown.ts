@@ -125,6 +125,23 @@ function extractDisplayMathBlock(element: Element): string | null {
 	return math ? math : null;
 }
 
+/**
+ * Rewrites the math of one text node into delimiters KaTeX's auto-renderer can
+ * find, and resolves the dollar escapes the backend handed over intact.
+ *
+ * The output vocabulary is deliberately small and deliberately unspellable in
+ * Markdown: `\(…\)` for inline, `\[…\]` for a same-line `$$…$$`. CommonMark
+ * eats a user-typed `\(` or `\[` long before this function runs, so every one
+ * of these that exists was minted here — which is what lets KaTeX be given no
+ * `$`-based delimiter at all (see MATH_DELIMITERS in richContent.ts) and what
+ * makes this function the single place that decides what a reader sees as a
+ * formula.
+ *
+ * That in turn is why `\$` arrives here still escaped. comrak would have
+ * resolved it, and then `\$\$x\$\$` and `$$x$$` would be the same eight bytes
+ * and the reader's literal dollars would be typeset. `mask_math_spans` in
+ * src-tauri/src/lib.rs hides the escape from comrak for exactly this moment.
+ */
 function convertInlineMathDelimiters(text: string): string {
 	const parts: string[] = [];
 	let index = 0;
@@ -134,6 +151,25 @@ function convertInlineMathDelimiters(text: string): string {
 
 	while (index < text.length) {
 		const char = text[index];
+		if (char === "\\") {
+			let run = 1;
+			while (text[index + run] === "\\") run += 1;
+			if (text[index + run] !== "$") {
+				parts.push(text.slice(index, index + run));
+				previousDollarAllowsInlineOpen = false;
+				index += run;
+				continue;
+			}
+			// CommonMark's own arithmetic: each `\\` is one literal backslash,
+			// and the odd one left over is what marks the `$` as text. Whether
+			// the run is odd or even the `$` is not a delimiter — that is the
+			// rule the backend ports in `find_math_spans`, and the two have to
+			// stay the same rule.
+			parts.push("\\".repeat(run >> 1) + "$");
+			previousDollarAllowsInlineOpen = false;
+			index += run + 1;
+			continue;
+		}
 		if (char !== "$") {
 			parts.push(char);
 			previousDollarAllowsInlineOpen = false;
@@ -141,10 +177,10 @@ function convertInlineMathDelimiters(text: string): string {
 			continue;
 		}
 
-		if (text[index - 1] !== "\\" && text[index + 1] === "$") {
+		if (text[index + 1] === "$") {
 			const displayEnd = findDisplayMathEnd(text, index + 2);
 			if (displayEnd !== -1) {
-				parts.push(text.slice(index, displayEnd + 2));
+				parts.push(`\\[${text.slice(index + 2, displayEnd).trim()}\\]`);
 				previousDollarAllowsInlineOpen = true;
 				index = displayEnd + 2;
 				continue;
@@ -156,8 +192,9 @@ function convertInlineMathDelimiters(text: string): string {
 			continue;
 		}
 
+		// A backslash in front of this `$` is impossible: the branch above
+		// consumes the whole run together with the `$` it escapes.
 		if (
-			text[index - 1] === "\\" ||
 			(text[index - 1] === "$" && !previousDollarAllowsInlineOpen) ||
 			/\s/.test(text[index + 1] || "")
 		) {

@@ -18,12 +18,12 @@
 		"reports. Never hand-edit `html`, and never edit `math` to match a failure --",
 		"a disagreement here is the bug, not the test.",
 		"",
-		"KNOWN GAP: a same-line `$$x$$` mixed into prose is passed through verbatim",
-		"by convertInlineMathDelimiters, so the frontend's decision about it is not",
-		"observable without re-implementing the rule in the test (which would defeat",
-		"the purpose). Display cases here therefore use the block form, whose",
-		"decision surfaces as data-math-source. Same-line `$$` is covered by the",
-		"Rust-side tests alone."
+		"Every span the frontend renders surfaces as one of three artefacts only it",
+		"mints: `\\(…\\)` and `\\[…\\]` from convertInlineMathDelimiters, and",
+		"data-math-source from processDisplayMathBlocks. KaTeX's auto-renderer is",
+		"given no `$`-based delimiter at all (see MATH_DELIMITERS in",
+		"src/lib/utils/richContent.ts), so there is no fourth, unobservable channel:",
+		"what the extractor below sees is what the reader sees."
 	],
 	"cases": [
 		{
@@ -71,7 +71,7 @@
 		{
 			"name": "an escaped dollar alone",
 			"markdown": "Costs \\$5 only.\n",
-			"html": "<p data-sourcepos=\"1:1-1:15\">Costs $5 only.</p>\n",
+			"html": "<p data-sourcepos=\"1:1-1:25\">Costs \\$5 only.</p>\n",
 			"math": []
 		},
 		{
@@ -95,7 +95,7 @@
 		{
 			"name": "an escaped dollar next to real math",
 			"markdown": "Pay \\$100 for $x$ items.\n",
-			"html": "<p data-sourcepos=\"1:1-1:33\">Pay $100 for $x$ items.</p>\n",
+			"html": "<p data-sourcepos=\"1:1-1:43\">Pay \\$100 for $x$ items.</p>\n",
 			"math": [
 				{
 					"kind": "inline",
@@ -225,6 +225,46 @@
 				{
 					"kind": "display",
 					"source": "\\begin{aligned}\na &= b \\\\\nc &= d\n\\end{aligned}"
+				}
+			]
+		},
+		{
+			"name": "an escaped display delimiter in prose",
+			"markdown": "Literal \\$\\$x\\$\\$ here.\n",
+			"html": "<p data-sourcepos=\"1:1-1:63\">Literal \\$\\$x\\$\\$ here.</p>\n",
+			"math": []
+		},
+		{
+			"name": "an escaped display delimiter alone in a paragraph",
+			"markdown": "\\$\\$x\\$\\$\n",
+			"html": "<p data-sourcepos=\"1:1-1:49\">\\$\\$x\\$\\$</p>\n",
+			"math": []
+		},
+		{
+			"name": "an escaped inline delimiter",
+			"markdown": "Literal \\$x\\$ here.\n",
+			"html": "<p data-sourcepos=\"1:1-1:39\">Literal \\$x\\$ here.</p>\n",
+			"math": []
+		},
+		{
+			"name": "same-line display math mixed into prose",
+			"markdown": "Inline prose with $$x_1$$ mixed in.\n",
+			"html": "<p data-sourcepos=\"1:1-1:40\">Inline prose with $$x_1$$ mixed in.</p>\n",
+			"math": [
+				{
+					"kind": "display",
+					"source": "x_1"
+				}
+			]
+		},
+		{
+			"name": "an escaped dollar inside a formula stays TeX",
+			"markdown": "$a \\$ b$\n",
+			"html": "<p data-sourcepos=\"1:1-1:12\">$a \\$ b$</p>\n",
+			"math": [
+				{
+					"kind": "inline",
+					"source": "a \\$ b"
 				}
 			]
 		},

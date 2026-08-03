@@ -273,13 +273,17 @@ test('display math on its own lines is joined without the hard line breaks', () 
 	assert.equal(math.querySelectorAll('br').length, 0, 'hard breaks leaked into the math source');
 });
 
-test('math mixed with prose stays literal instead of becoming a math block', () => {
+test('math mixed with prose becomes a same-line display span, not a math block', () => {
 	// Two `$$` spans in a paragraph that also carries text: the block form does
-	// not apply, but the underscores still have to survive for the inline pass.
+	// not apply, but the underscores still have to survive, and each span still
+	// has to reach KaTeX. It reaches it as `\[…\]` — a spelling only this
+	// function mints — because the auto-renderer is deliberately given no
+	// `$`-based delimiter; see MATH_DELIMITERS in src/lib/utils/richContent.ts
+	// and scripts/mathDelimiterContract.test.ts.
 	const mixed = render('mathTwoBlocksOneLine');
 	assert.equal(mixed.querySelectorAll('[data-math]').length, 0);
 	assert.equal(mixed.querySelectorAll('em').length, 0);
-	assert.equal(mixed.textContent.trim(), 'before $$a_1$$ middle $$b_2$$ after');
+	assert.equal(mixed.textContent.trim(), 'before \\[a_1\\] middle \\[b_2\\] after');
 
 	const withEmphasis = render('mathEmphasisOutsideStillWorks');
 	assert.deepEqual(
@@ -288,7 +292,7 @@ test('math mixed with prose stays literal instead of becoming a math block', () 
 		'emphasis outside display math must keep working',
 	);
 	assert.ok(
-		withEmphasis.textContent.includes('$$p_1 + q_2$$'),
+		withEmphasis.textContent.includes('\\[p_1 + q_2\\]'),
 		'underscores inside display math were emphasised away',
 	);
 });

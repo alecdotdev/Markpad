@@ -28,6 +28,27 @@ import { rememberDiagramSource } from './mermaidPrint.js';
  * comes from `root` — because a detached `<div>` is a first-class caller.
  */
 
+/**
+ * The delimiters KaTeX's auto-renderer is allowed to look for.
+ *
+ * Every one of them is a spelling CommonMark cannot produce. That is the whole
+ * specification: this scanner runs over comrak's *output*, where an explicitly
+ * escaped `\$\$x\$\$` and a real `$$x$$` are the same eight bytes, so any
+ * `$`-based entry here silently overrules the reader. `$$` used to be in this
+ * list, and a `\$\$…\$\$` written to mean "I want literal dollar signs" came
+ * out typeset.
+ *
+ * `\(` and `\[` reach this point only because `processMarkdownHtml` mints
+ * them — comrak eats a user-typed `\(` long before the preview exists. So the
+ * set rendered here is exactly the set `src/lib/utils/markdown.ts` decided on,
+ * and that set is what scripts/mathDelimiterContract.test.ts holds against the
+ * backend's. Adding a delimiter Markdown *can* spell reopens the gap.
+ */
+export const MATH_DELIMITERS = [
+	{ left: '\\(', right: '\\)', display: false },
+	{ left: '\\[', right: '\\]', display: true },
+];
+
 export interface RichContentLibraries {
 	hljs: any;
 	katex: any;
@@ -258,11 +279,7 @@ export async function renderRichContent(options: RenderRichContentOptions): Prom
 
 	if (renderMathInElement) {
 		renderMathInElement(root, {
-			delimiters: [
-				{ left: '$$', right: '$$', display: true },
-				{ left: '\\(', right: '\\)', display: false },
-				{ left: '\\[', right: '\\]', display: true },
-			],
+			delimiters: MATH_DELIMITERS,
 			throwOnError: false,
 		});
 	}

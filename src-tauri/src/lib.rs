@@ -1280,8 +1280,64 @@ mod tests {
     fn an_escaped_dollar_never_opens_a_math_span() {
         let html = convert_markdown("Pay \\$100 for $x$ items.\n");
         assert!(
-            html.contains("Pay $100 for $x$ items."),
+            html.contains("Pay \\$100 for $x$ items."),
             "the escaped dollar opened a span: {html}",
+        );
+    }
+
+    #[test]
+    fn an_escaped_dollar_reaches_the_frontend_still_escaped() {
+        // comrak resolves `\$` to `$`, after which nothing downstream can tell
+        // "the reader wants a dollar sign" from "the reader wants a formula" —
+        // and the frontend, which is the side that decides, renders the second.
+        // So the escape is masked like math is and handed over intact; the
+        // frontend resolves it in `convertInlineMathDelimiters`.
+        let html = convert_markdown("Literal \\$\\$x\\$\\$ here.\n");
+        assert!(
+            html.contains("Literal \\$\\$x\\$\\$ here."),
+            "the escape was resolved before the frontend could honour it: {html}",
+        );
+    }
+
+    #[test]
+    fn an_escaped_backslash_keeps_the_dollar_behind_it_live() {
+        // `\\$` is an escaped backslash and then an ordinary `$`. Masking only
+        // the last backslash would hand the frontend `\$` and lose the
+        // distinction the whole mask exists to preserve.
+        let html = convert_markdown("A backslash \\\\$ here.\n");
+        assert!(
+            html.contains("A backslash \\\\$ here."),
+            "the backslash run was split: {html}",
+        );
+    }
+
+    #[test]
+    fn an_escaped_dollar_inside_a_formula_stays_part_of_the_formula() {
+        // Inside math, `\$` is TeX for a dollar sign. The math span already
+        // shields it, and claiming it separately would cut the span in two.
+        let html = convert_markdown("$a \\$ b$\n");
+        assert_eq!(rendered_math_source(&html).trim(), "$a \\$ b$");
+    }
+
+    #[test]
+    fn an_escaped_dollar_in_a_link_destination_is_resolved_not_forwarded() {
+        // Nothing unescapes an `href` on the way to the reader, so the
+        // backslash would simply become part of the URL.
+        let html = convert_markdown("[t](http://example.com/\\$5)\n");
+        assert!(
+            html.contains("href=\"http://example.com/$5\""),
+            "the escape leaked into the link destination: {html}",
+        );
+    }
+
+    #[test]
+    fn an_escaped_dollar_inside_code_is_left_to_commonmark() {
+        // A backslash is not an escape character inside code, so `\$` is two
+        // literal characters there and comrak already gets it right.
+        let html = convert_markdown("Use `\\$x\\$` here.\n");
+        assert!(
+            html.contains(">\\$x\\$</code>"),
+            "the mask reached into a code span: {html}",
         );
     }
 
@@ -2670,12 +2726,21 @@ fn process_parenthesized_autolinks(content: &str) -> Cow<'_, str> {
 // cannot win: Markdown has no business parsing TeX at all. So the whole span
 // is replaced by an opaque token before comrak runs and put back afterwards.
 //
+// Escaped dollars are hidden the same way, for the mirror-image reason. A
+// reader who writes `\$\$x\$\$` is saying "not a formula", and CommonMark
+// resolving that escape destroys the only evidence of it: the frontend, which
+// is the side that actually decides, then sees the same bytes a real `$$x$$`
+// produces and typesets the reader's dollar signs. See
+// `find_escaped_dollar_spans`.
+//
 // Deliberately NOT handled here: `\(…\)` and `\[…\]`, which the frontend also
 // renders. They have the same root cause and are not an oversight — CommonMark
 // eats the backslash (`\(` → `(`) before the frontend ever sees a delimiter, so
 // they have never worked in Markpad at all. Fixing them is a separate change
 // with its own regression surface; masking them here would silently start
-// claiming text that no released version ever treated as math.
+// claiming text that no released version ever treated as math. That the
+// frontend *emits* those two spellings is a different matter: they are its
+// private vocabulary for a decision it has already made.
 //
 // The token is deliberately plain ASCII rather than a private-use character:
 // comrak percent-encodes anything non-ASCII that ends up in a link
@@ -2690,12 +2755,25 @@ const MATH_MASK_PREFIX: &str = "MPMATHMASK";
 const MATH_MASK_SUFFIX: char = 'E';
 
 struct MaskedMath {
-    /// The source with every math span replaced by a token.
+    /// The source with every math span and every escaped dollar replaced by a
+    /// token.
     text: String,
     /// The token prefix actually used — see `mask_math_spans`.
     prefix: String,
     /// The masked source, one entry per line of each span, indexed by token.
-    spans: Vec<String>,
+    spans: Vec<MaskedSpan>,
+}
+
+/// One masked piece of source and the two spellings it can come back as.
+struct MaskedSpan {
+    /// The source, verbatim. This is what a text node gets, because a text
+    /// node is where the frontend's own passes run.
+    text: String,
+    /// What an attribute value gets instead. Nothing unescapes an `href` or an
+    /// `alt` on the way to the reader, so an escaped dollar has to arrive there
+    /// already resolved — the way comrak would have resolved it. For a math
+    /// span the two spellings are the same string.
+    attribute: String,
 }
 
 /// Byte ranges of `content` that may hold math: one entry per line, with the
@@ -2946,7 +3024,70 @@ fn find_math_spans(content: &str, regions: &[(usize, usize)]) -> Vec<(usize, usi
     spans
 }
 
-/// Replaces every math span with a token comrak cannot rewrite.
+/// The escaped dollars of `content`: a `$` carrying a run of backslashes in
+/// front of it, masked together with the whole run.
+///
+/// Declining to treat `\$` as a delimiter — which `find_math_spans` already
+/// does — protects the formula that is not there, and nothing else. comrak
+/// still resolves the escape, so `\$\$x\$\$` reaches the frontend as the same
+/// eight bytes an unescaped `$$x$$` does, and from that point on no rule can
+/// tell the two apart: the frontend renders the reader's literal dollars as a
+/// formula. `convertInlineMathDelimiters` has carried a "a `$` behind a
+/// backslash is not a delimiter" branch since before #402, and it has never
+/// once been able to fire, because the backslash is gone by the time the
+/// frontend looks.
+///
+/// So the escape is hidden from comrak exactly the way math is, and put back
+/// verbatim. The frontend gets its backslash, its dead branch comes alive, and
+/// resolving the escape becomes the job of the side that also decides what is
+/// math — which is the only way the two decisions can agree.
+///
+/// The whole backslash run is taken, not just the last one, so that `\\$`
+/// (an escaped backslash, then a live dollar) is not mistaken for `\$` after
+/// comrak has halved the run. Ranges inside a math span are skipped: there a
+/// `\$` is TeX for a dollar sign, and the math span already shields it.
+fn find_escaped_dollar_spans(
+    content: &str,
+    regions: &[(usize, usize)],
+    math: &[(usize, usize)],
+) -> Vec<(usize, usize)> {
+    let bytes = content.as_bytes();
+    let mut spans = Vec::new();
+    for (segment_start, segment_end) in math_scan_segments(content, regions) {
+        let mut index = segment_start;
+        while index < segment_end {
+            if bytes[index] != b'\\' {
+                index += content[index..].chars().next().map_or(1, char::len_utf8);
+                continue;
+            }
+            let mut run_end = index;
+            while run_end < segment_end && bytes[run_end] == b'\\' {
+                run_end += 1;
+            }
+            if run_end < segment_end && bytes[run_end] == b'$' {
+                if !math.iter().any(|&(start, end)| start < run_end + 1 && end > index) {
+                    spans.push((index, run_end + 1));
+                }
+                index = run_end + 1;
+            } else {
+                index = run_end;
+            }
+        }
+    }
+    spans
+}
+
+/// `\$` as comrak would have rendered it: every pair of backslashes collapses
+/// to one, and the escaping backslash in front of the `$` disappears.
+fn resolve_escaped_dollar(span: &str) -> String {
+    let backslashes = span.len() - 1;
+    let mut out = "\\".repeat(backslashes / 2);
+    out.push('$');
+    out
+}
+
+/// Replaces every math span — and every escaped dollar — with a token comrak
+/// cannot rewrite.
 ///
 /// One token per line of a span, so a six-line `$$…$$` block still occupies
 /// six lines: the line-number contract in `mod tests` is not negotiable, and a
@@ -2963,7 +3104,20 @@ fn mask_math_spans(content: &str) -> MaskedMath {
     }
 
     let regions = code_region_ranges(content);
-    let found = find_math_spans(content, &regions);
+    let math = find_math_spans(content, &regions);
+    // Both halves of one decision: what the frontend must render, and what it
+    // must refuse to render. Hiding only the first half is what let an
+    // explicitly escaped `\$\$x\$\$` come out typeset.
+    let mut found: Vec<(usize, usize, bool)> = math
+        .iter()
+        .map(|&(start, end)| (start, end, false))
+        .chain(
+            find_escaped_dollar_spans(content, &regions, &math)
+                .into_iter()
+                .map(|(start, end)| (start, end, true)),
+        )
+        .collect();
+    found.sort_by_key(|&(start, _, _)| start);
     if found.is_empty() {
         return MaskedMath {
             text: content.to_owned(),
@@ -2973,9 +3127,9 @@ fn mask_math_spans(content: &str) -> MaskedMath {
     }
 
     let mut text = String::with_capacity(content.len());
-    let mut spans: Vec<String> = Vec::new();
+    let mut spans: Vec<MaskedSpan> = Vec::new();
     let mut copied_to = 0usize;
-    for (start, end) in found {
+    for (start, end, escaped) in found {
         text.push_str(&content[copied_to..start]);
         for piece in content[start..end].split_inclusive('\n') {
             let mut body = piece;
@@ -2993,7 +3147,14 @@ fn mask_math_spans(content: &str) -> MaskedMath {
             let core = &body[indent..];
             if !core.is_empty() {
                 text.push_str(&format!("{prefix}{}{MATH_MASK_SUFFIX}", spans.len()));
-                spans.push(core.to_owned());
+                spans.push(MaskedSpan {
+                    attribute: if escaped {
+                        resolve_escaped_dollar(core)
+                    } else {
+                        core.to_owned()
+                    },
+                    text: core.to_owned(),
+                });
             }
             text.push_str(line_ending);
         }
@@ -3021,6 +3182,14 @@ fn mask_math_spans(content: &str) -> MaskedMath {
 /// `href="#…"`, which lowercases it. There the *anchorized* source goes back
 /// instead, so that `[[#A heading with $x_1$]]` still resolves — the wikilink
 /// side computes the same id from the raw buffer with `heading_anchor_id`.
+///
+/// Whether the token landed in markup or in text is tracked as it goes, and it
+/// is not a nicety: an escaped dollar goes back as `\$` only where a frontend
+/// pass will resolve it. Nothing resolves anything inside an `href` or an
+/// `alt`, so a token that landed there gets the resolved `$` instead — putting
+/// the backslash into a link destination would break the link. comrak escapes
+/// `<` and `>` everywhere else, so an unclosed `<` really does mean "inside a
+/// tag".
 fn restore_math_spans(html: &str, masked: &MaskedMath) -> String {
     if masked.spans.is_empty() {
         return html.to_owned();
@@ -3028,6 +3197,7 @@ fn restore_math_spans(html: &str, masked: &MaskedMath) -> String {
     let anchor_prefix = masked.prefix.to_ascii_lowercase();
     let mut out = String::with_capacity(html.len());
     let mut rest = html;
+    let mut in_tag = false;
     while let Some((at, anchored)) = [
         (rest.find(masked.prefix.as_str()), false),
         (rest.find(anchor_prefix.as_str()), true),
@@ -3037,6 +3207,9 @@ fn restore_math_spans(html: &str, masked: &MaskedMath) -> String {
     .min()
     {
         out.push_str(&rest[..at]);
+        if let Some(bracket) = rest[..at].rfind(['<', '>']) {
+            in_tag = rest.as_bytes()[bracket] == b'<';
+        }
         let after = &rest[at + masked.prefix.len()..];
         let digits = after
             .as_bytes()
@@ -3055,11 +3228,15 @@ fn restore_math_spans(html: &str, masked: &MaskedMath) -> String {
         };
         match index.and_then(|index| masked.spans.get(index)) {
             Some(original) if anchored => {
-                out.push_str(&Anchorizer::new().anchorize(original.clone()));
+                out.push_str(&Anchorizer::new().anchorize(original.text.clone()));
                 rest = &after[digits + suffix.len_utf8()..];
             }
             Some(original) => {
-                out.push_str(&escape_html_text(original));
+                out.push_str(&escape_html_text(if in_tag {
+                    &original.attribute
+                } else {
+                    &original.text
+                }));
                 rest = &after[digits + suffix.len_utf8()..];
             }
             None => {
