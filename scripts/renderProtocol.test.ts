@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { installShimDom, parseHtml, type ShimElement } from './renderProtocolDom.ts';
+import { offsetOf } from './sourceTree.js';
 
 installShimDom();
 
@@ -223,7 +224,10 @@ const DISPLAY_MATH_FIXTURES = [
 
 /** The text between the outermost `$$` pair of a fixture's Markdown. */
 function displayMathSource(markdown: string): string {
-	return markdown.slice(markdown.indexOf('$$') + 2, markdown.lastIndexOf('$$')).trim();
+	const open = offsetOf(markdown, '$$');
+	const close = markdown.lastIndexOf('$$');
+	assert.notEqual(close, open, 'a display-math fixture must close its $$ pair');
+	return markdown.slice(open + 2, close).trim();
 }
 
 test('display math reaches KaTeX with its underscores intact', () => {

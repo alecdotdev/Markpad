@@ -3,6 +3,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import test from 'node:test';
 
+import { callbackBodies } from './sourceTree.js';
+
 // Monaco is ~86% of Markpad's startup JavaScript (measured: a 4.4 MB chunk out
 // of 4.7 MB on first paint, ~360ms of parse+eval, paid once per window because
 // every window is its own webview) and a reader who only ever views Markdown
@@ -189,7 +191,22 @@ test('every effect that drives the editor waits for editorReady', () => {
 	// alone runs once against nothing and is never re-triggered, which silently
 	// drops scroll sync, the zoom-aware font size, the theme and Vim mode.
 	const editor = readFileSync('src/lib/components/Editor.svelte', 'utf8');
-	const effects = [...editor.matchAll(/\$effect\(\(\) => \{([\s\S]*?)\n\t\}\);/g)].map((m) => m[1]);
+
+	// The bodies come from the parsed component, not from
+	// `/\$effect\(\(\) => \{([\s\S]*?)\n\t\}\);/`. That pattern needed a
+	// tab-indented `});` to end a body, so an effect written on one line had no
+	// terminator of its own and the lazy match ran on to the *next* effect's —
+	// returning the two as a single body whose text contains the `editorReady`
+	// the first half was missing. Measured, by planting
+	// `$effect(() => { if (editor) editor.layout(); });` in Editor.svelte: the
+	// ungated read passed, and `effects.length >= 5` did not notice because the
+	// merge kept the count at six. scripts/sourceTree.test.ts pins that form.
+	const effects = callbackBodies(editor, '$effect');
+
+	// Vacuity guard, restated so it cannot be satisfied by a body going missing:
+	// the parse must account for every `$effect` the file spells.
+	const spelled = (editor.match(/\$effect\s*\(/g) ?? []).length;
+	assert.equal(effects.length, spelled, `every $effect(…) yielded a body (spelled ${spelled})`);
 	assert.ok(effects.length >= 5, `found the effects (got ${effects.length})`);
 
 	for (const body of effects) {

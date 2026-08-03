@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { sliceBetween, sliceFrom } from './sourceTree.js';
+
 // A markdown file larger than 50KB is opened twice: `open_markdown_preview`
 // returns the first 50KB so something renders immediately, and a background
 // `read_file_content` fills in the rest. Between the two, the tab's ONLY
@@ -241,8 +243,7 @@ test('entering split view completes a partial buffer instead of trusting it', ()
 	// The old guard was `!tab.rawContent`, which a partial buffer satisfies:
 	// split view opened on the truncated text, the first keystroke made it
 	// dirty, and auto-save wrote it back 1.5s later.
-	const split = viewer.slice(viewer.indexOf('async function toggleSplitView'));
-	const enter = split.slice(0, split.indexOf('} else {'));
+	const enter = sliceBetween(viewer, 'async function toggleSplitView', '} else {');
 	assert.match(enter, /ensureFullContent/);
 	// And it has to stop when the buffer could not be completed, rather than
 	// opening an editor over the partial text anyway.
@@ -255,16 +256,27 @@ test('entering split view completes a partial buffer instead of trusting it', ()
 test('a partial buffer cannot be handed to another window', () => {
 	// The destination rebuilds the tab from the payload alone and has no way
 	// to know the text is incomplete, so its auto-save would truncate the file.
-	const canTransfer = viewer.slice(viewer.indexOf('canTransfer: (tabId)'), viewer.indexOf('transferPayload:'));
+	const canTransfer = sliceBetween(viewer, 'canTransfer: (tabId)', 'transferPayload:');
 	assert.match(canTransfer, /isTruncated/);
-	const detach = viewer.slice(viewer.indexOf('async function handleDetach'), viewer.indexOf('async function carryActiveTabToNextWindow'));
+	const detach = sliceBetween(viewer, 'async function handleDetach', 'async function carryActiveTabToNextWindow');
 	assert.match(detach, /ensureFullContent/);
 });
 
 test('front matter edits in preview mode complete the buffer first', () => {
 	for (const entry of ['async function handleFrontMatterEdit', 'async function handleFrontMatterListChange']) {
-		const handler = viewer.slice(viewer.indexOf(entry));
-		const body = handler.slice(0, handler.indexOf('\n\tfunction ') + 1 || handler.indexOf('\n\tasync function ') + 1);
+		// One handler is followed by a `function`, the other by an `async
+		// function`, so the slice ends at whichever comes first. The previous
+		// expression was `indexOf(a) + 1 || indexOf(b) + 1`, which reads as
+		// "or else" but is really "or else, if the first is absent *or at
+		// offset 0*" — and when the first form appeared later in the file than
+		// the second it won anyway, widening the body past the handler and
+		// letting a neighbouring function satisfy the `assert.match` below.
+		const handler = sliceFrom(viewer, entry);
+		const ends = ['\n\tfunction ', '\n\tasync function ']
+			.map((marker) => handler.indexOf(marker))
+			.filter((at) => at !== -1);
+		assert.ok(ends.length > 0, `${entry} must be followed by a declaration that bounds it`);
+		const body = handler.slice(0, Math.min(...ends));
 		assert.match(body, /ensureFullContent/, `${entry} must not edit a partial buffer`);
 	}
 });

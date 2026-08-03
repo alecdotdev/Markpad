@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { parse } from 'svelte/compiler';
+
 // Shared plumbing for the few tests that have to read `src/` as text.
 //
 // They exist because some contracts are invisible to the compiler: a Tauri
@@ -50,6 +52,22 @@ export function sliceBetween(source: string, start: string, end: string): string
 	return source.slice(from, to);
 }
 
+/**
+ * The offset of `marker` in `source`, which must be present.
+ *
+ * The third shape, for the assertions that compare two offsets rather than
+ * slice with them: `assert.ok(a < b)` reads as "a comes first" but is also
+ * satisfied by `a === -1`, so a marker that stopped existing turns the
+ * ordering claim into a claim about nothing — the same failure `sliceFrom`
+ * exists for, one operator away. `from` mirrors `String#indexOf`'s second
+ * argument for the "…after this point" cases.
+ */
+export function offsetOf(source: string, marker: string, from = 0): number {
+	const at = source.indexOf(marker, from);
+	assert.notEqual(at, -1, `expected to find ${JSON.stringify(marker)}`);
+	return at;
+}
+
 /** Every compilable source file under `dir`, with forward-slash paths. */
 export function walkSourceFiles(dir: string): string[] {
 	const out: string[] = [];
@@ -85,25 +103,206 @@ export function filesMatching(sources: SourceFile[], marker: RegExp): string[] {
  */
 export const SANITIZER_FILES = ['src/lib/utils/richContent.ts', 'src/lib/utils/sanitize.ts'];
 
+// ------------------------------------------------------------ syntax, parsed
+//
+// The three helpers below answer questions about *scope* — "which function is
+// this offset inside", "what is the body of this callback". Those were regexes
+// until they were shown to be answerable by writing the code differently:
+//
+//   const renderRawBypass = async (raw: string) => {
+//       return (await invoke('render_markdown', { content: raw })) as string;
+//   };
+//
+// dropped into MarkdownViewer.svelte left the whole suite green, because
+// `enclosingFunctionName` matched `\n\t…function NAME(` and nothing else, so the
+// call was attributed to whichever `function` happened to precede it — which was
+// the wrapper the convention test demands. Fixing that by adding arrow functions
+// to the pattern fixes one spelling. The forms actually in `src/` are 451 classic
+// declarations, 74 `const f = (…) =>` / `const f = async (…) =>`, the class
+// methods in `stores/`, and object-literal shorthand (`acceptNode(node) {`) — and
+// the next contributor is free to invent a 5th.
+//
+// So the scope questions are answered from the real AST instead. `svelte/compiler`
+// is already a dependency and `homeTabRender.test.ts` already parses a component
+// with it; a function node is a function node whatever the spelling, and there is
+// no pattern left to write around. The cost is ~170ms for the largest component,
+// paid once per file thanks to the cache below.
+
+type FunctionScope = { start: number; end: number; name: string | null };
+
+/** Node kinds that introduce a function scope. */
+const FUNCTION_TYPES = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+function offsetsOf(node: Record<string, unknown>): { start: number; end: number } | null {
+	return typeof node.start === 'number' && typeof node.end === 'number'
+		? { start: node.start, end: node.end }
+		: null;
+}
+
 /**
- * The name of the top-level `<script>`/module function whose body contains
- * `index`, or null if the offset sits outside every function.
+ * The parsed component, plus the shift from AST offsets back to `text` offsets.
+ *
+ * A `.ts` file is not a component, so it is wrapped in a `<script>` before
+ * parsing and the wrapper's length is subtracted from every offset afterwards.
+ * Svelte's parser reads TypeScript in a `lang="ts"` block, which is what every
+ * `.svelte` file in `src/` uses anyway.
+ */
+const parseCache = new Map<string, { root: unknown; shift: number }>();
+
+function parsedSource(text: string): { root: unknown; shift: number } {
+	const cached = parseCache.get(text);
+	if (cached) return cached;
+
+	const prefix = '<script lang="ts">\n';
+	const isComponent = /<script[\s>]/.test(text);
+	const parsed = {
+		root: parse(isComponent ? text : `${prefix}${text}\n</script>`, { modern: true }) as unknown,
+		shift: isComponent ? 0 : -prefix.length,
+	};
+	parseCache.set(text, parsed);
+	return parsed;
+}
+
+/** Depth-first walk of every node in the tree, with the binding name in scope. */
+function walkAst(
+	node: unknown,
+	visit: (node: Record<string, unknown>, boundName: string | null) => void,
+	boundName: string | null = null,
+	seen: Set<object> = new Set(),
+): void {
+	if (Array.isArray(node)) {
+		for (const child of node) walkAst(child, visit, boundName, seen);
+		return;
+	}
+	if (!isRecord(node) || seen.has(node)) return;
+	seen.add(node);
+
+	if (typeof node.type === 'string') visit(node, boundName);
+
+	for (const [key, value] of Object.entries(node)) {
+		if (key === 'loc' || key === 'range' || key === 'parent' || key === 'metadata') continue;
+		walkAst(value, visit, nameBoundTo(node, key), seen);
+	}
+}
+
+/** `foo` for `const foo = …`, `{ foo: … }`, `foo() {}`, `x.foo = …`. */
+function nameBoundTo(parent: Record<string, unknown>, key: string): string | null {
+	switch (parent.type) {
+		case 'VariableDeclarator':
+			return key === 'init' ? identifierName(parent.id) : null;
+		case 'Property':
+		case 'PropertyDefinition':
+		case 'MethodDefinition':
+			return key === 'value' ? identifierName(parent.key) : null;
+		case 'AssignmentExpression':
+			return key === 'right' ? identifierName(parent.left) : null;
+		default:
+			return null;
+	}
+}
+
+function identifierName(node: unknown): string | null {
+	if (!isRecord(node)) return null;
+	switch (node.type) {
+		case 'Identifier':
+			return typeof node.name === 'string' ? node.name : null;
+		case 'PrivateIdentifier':
+			return typeof node.name === 'string' ? `#${node.name}` : null;
+		case 'Literal':
+			return typeof node.value === 'string' ? node.value : null;
+		case 'MemberExpression':
+			return identifierName(node.property);
+		default:
+			return null;
+	}
+}
+
+const scopeCache = new Map<string, FunctionScope[]>();
+
+/** Every function scope in `text`, outermost first, with the name it is bound to. */
+function functionScopes(text: string): FunctionScope[] {
+	const cached = scopeCache.get(text);
+	if (cached) return cached;
+
+	const { root, shift } = parsedSource(text);
+	const scopes: FunctionScope[] = [];
+	walkAst(root, (node, boundName) => {
+		if (typeof node.type !== 'string' || !FUNCTION_TYPES.has(node.type)) return;
+		const span = offsetsOf(node);
+		if (!span) return;
+		scopes.push({
+			start: span.start + shift,
+			end: span.end + shift,
+			name: identifierName(node.id) ?? boundName,
+		});
+	});
+	scopes.sort((a, b) => a.start - b.start || b.end - a.end);
+
+	scopeCache.set(text, scopes);
+	return scopes;
+}
+
+/**
+ * The name of the innermost *named* function whose body contains `index`, or
+ * null if the offset sits outside every named function.
  *
  * Used instead of "the two strings appear within N characters of each other":
  * a proximity window silently stops guarding when the function grows, and it
- * cannot see a *second* call site that escaped the wrapper entirely. Both files
- * this serves declare their functions at one level of indentation, which is
- * what makes the enclosing function findable without parsing braces (and
- * without being fooled by braces inside strings, regexes or Svelte templates).
+ * cannot see a *second* call site that escaped the wrapper entirely.
+ *
+ * Anonymous functions are transparent rather than fatal: a call inside
+ * `.then(() => …)` inside `renderMarkdownPreview` is still lexically inside
+ * `renderMarkdownPreview`, which is the question the callers ask. An offset
+ * inside an anonymous function with no named function above it — an inline
+ * `onclick={() => …}` in the markup, say — is null, and a caller comparing
+ * against a wrapper name fails loudly on it.
  */
 export function enclosingFunctionName(text: string, index: number): string | null {
-	const declarations = [...text.matchAll(/\n\t(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)];
-	let enclosing: string | null = null;
-	for (const declaration of declarations) {
-		if (declaration.index! > index) break;
-		enclosing = declaration[1];
+	let name: string | null = null;
+	for (const scope of functionScopes(text)) {
+		if (scope.start > index) break;
+		if (index < scope.end && scope.name) name = scope.name;
 	}
-	return enclosing;
+	return name;
+}
+
+/**
+ * The source text of each function argument passed to `callee(…)`, braces
+ * included.
+ *
+ * For the checks that state something about the *body* of a callback — every
+ * `$effect` in Editor.svelte reads `editorReady` before it touches `editor`.
+ * Slicing those out with `/\$effect\(\(\) => \{([\s\S]*?)\n\t\}\);/` was a
+ * demonstrated hole: an effect written on one line has no `\n\t});` of its own,
+ * so the lazy match ran on to the *next* effect's closing brace and returned
+ * both effects as one body — whose text contains the `editorReady` the first
+ * half was missing. Verified: a planted
+ * `$effect(() => { if (editor) editor.layout(); });` passed that check, and the
+ * `effects.length >= 5` guard did not notice because the merge kept the count at
+ * six.
+ */
+export function callbackBodies(text: string, callee: string): string[] {
+	const { root, shift } = parsedSource(text);
+	const bodies: string[] = [];
+
+	walkAst(root, (node) => {
+		if (node.type !== 'CallExpression' || !isRecord(node.callee)) return;
+		const target = offsetsOf(node.callee);
+		if (!target || text.slice(target.start + shift, target.end + shift) !== callee) return;
+
+		for (const argument of Array.isArray(node.arguments) ? node.arguments : []) {
+			if (!isRecord(argument) || typeof argument.type !== 'string') continue;
+			if (!FUNCTION_TYPES.has(argument.type) || !isRecord(argument.body)) continue;
+			const body = offsetsOf(argument.body);
+			if (body) bodies.push(text.slice(body.start + shift, body.end + shift));
+		}
+	});
+
+	return bodies;
 }
 
 /** Byte offsets of every `name(` call in `text`, skipping import statements. */

@@ -2,14 +2,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { offsetOf, sliceBetween } from './sourceTree.js';
+
 const viewer = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
 
 function keydownSaveBranch(): string {
-	const start = viewer.indexOf("if (cmdOrCtrl && key === 's') {");
-	assert.notEqual(start, -1, 'the Ctrl/Cmd+S keydown branch should exist');
-	const end = viewer.indexOf("if (cmdOrCtrl && e.shiftKey && key === 't')", start);
-	assert.notEqual(end, -1, 'expected a following branch to bound the slice');
-	return viewer.slice(start, end);
+	return sliceBetween(viewer, "if (cmdOrCtrl && key === 's') {", "if (cmdOrCtrl && e.shiftKey && key === 't')");
 }
 
 // Reported in #168 by @dayeggpi: with a document that was never saved,
@@ -42,7 +40,7 @@ test('the browser save dialog is always suppressed', () => {
 	// preventDefault has to run for every mode, including the no-op case,
 	// or reading mode would surface the webview's own Save Page dialog.
 	const branch = keydownSaveBranch();
-	const beforeGuard = branch.slice(0, branch.indexOf('const saveTarget'));
+	const beforeGuard = branch.slice(0, offsetOf(branch, 'const saveTarget'));
 	assert.match(beforeGuard, /e\.preventDefault\(\);/);
 });
 

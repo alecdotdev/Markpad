@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import type { Tab } from '../src/lib/stores/tabs.svelte.js';
 import { buildTransferredTab, snapshotTab, validateTransferPayload } from '../src/lib/utils/tabTransfer.js';
-import { sliceBetween } from './sourceTree.js';
+import { offsetOf, sliceBetween } from './sourceTree.js';
 
 // Every read path decodes leniently (#371): a file in a legacy encoding
 // (GBK, Big5, Shift-JIS, EUC-KR, CP1251 ...) opens as U+FFFD mojibake instead
@@ -51,9 +51,8 @@ test('a preview cut inside a multi-byte character is not called lossy', () => {
 	// is routinely cut mid-character. Reporting that as lossy would lock every
 	// large CJK/emoji document out of saving — a guard worse than the bug.
 	const preview = sliceBetween(rust, 'fn build_markdown_preview', '#[tauri::command]');
-	const trim = preview.indexOf('utf8_truncation_boundary');
-	assert.notEqual(trim, -1, 'the split tail must be dropped before decoding');
-	assert.ok(trim < preview.indexOf('decode_utf8_lossy'), 'trim first, then judge fidelity');
+	const trim = offsetOf(preview, 'utf8_truncation_boundary');
+	assert.ok(trim < offsetOf(preview, 'decode_utf8_lossy'), 'the split tail is dropped before fidelity is judged');
 });
 
 test('the tab carries the fidelity of its buffer', () => {
@@ -105,10 +104,8 @@ test('the editable-pane shortcut reports fidelity too', () => {
 
 test('the flag is set before the buffer can reach a writer', () => {
 	const body = loadMarkdown();
-	const set = body.indexOf('setTabDecodedLossy(activeId, lossy)');
-	const firstAwait = body.indexOf('options.renderMarkdown(content');
-	assert.notEqual(set, -1, 'the preview branch must set the flag');
-	assert.notEqual(firstAwait, -1);
+	const set = offsetOf(body, 'setTabDecodedLossy(activeId, lossy)');
+	const firstAwait = offsetOf(body, 'options.renderMarkdown(content');
 	assert.ok(set < firstAwait, 'the flag must be set before the first await that follows the load');
 });
 
@@ -123,11 +120,10 @@ test('window restore cannot launder the flag away', () => {
 
 test('saveContent refuses to write a lossy buffer over its own file', () => {
 	const body = saveContent();
-	const refusal = body.indexOf('refuseIfLossilyDecoded');
-	assert.notEqual(refusal, -1, 'saveContent must consult the guard');
+	const refusal = offsetOf(body, 'refuseIfLossilyDecoded');
 	assert.match(body.slice(refusal, refusal + 120), /return false;/);
 	assert.ok(
-		refusal < body.indexOf("invoke('save_file_content'"),
+		refusal < offsetOf(body, "invoke('save_file_content'"),
 		'the guard must run before save_file_content is invoked',
 	);
 });
@@ -165,10 +161,9 @@ test('Save As onto the same file is still a destructive overwrite', () => {
 	// same bytes. The guard is therefore handed the target's resolved identity
 	// as well as its path. See pathIdentityCaseFolding.test.ts, which drives
 	// that refusal for real instead of reading for it.
-	const refusal = body.indexOf('refuseIfLossilyDecoded(tab, selected');
-	assert.notEqual(refusal, -1, 'picking the source file again must be refused');
+	const refusal = offsetOf(body, 'refuseIfLossilyDecoded(tab, selected');
 	assert.ok(
-		refusal < body.indexOf("invoke('save_file_content'"),
+		refusal < offsetOf(body, "invoke('save_file_content'"),
 		'the guard must run before save_file_content is invoked',
 	);
 });

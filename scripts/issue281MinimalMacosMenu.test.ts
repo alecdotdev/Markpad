@@ -2,15 +2,17 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { sliceBetween } from './sourceTree.js';
+
 const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf8');
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 
 test('macOS native menu keeps only application-level actions', () => {
-	const menuStart = tauriLib.indexOf('#[cfg(target_os = "macos")]\n            {\n                use tauri::menu');
-	assert.notEqual(menuStart, -1, 'macOS native menu setup must exist');
-
-	const menuEnd = tauriLib.indexOf('\n            let config_dir', menuStart);
-	const menuSetup = tauriLib.slice(menuStart, menuEnd);
+	const menuSetup = sliceBetween(
+		tauriLib,
+		'#[cfg(target_os = "macos")]\n            {\n                use tauri::menu',
+		'\n            let config_dir',
+	);
 
 	assert.match(menuSetup, /MenuItemBuilder::with_id\("menu-app-settings", "Settings…"\)\s*\.accelerator\("CmdOrCtrl\+,"\)/);
 	assert.match(menuSetup, /MenuItemBuilder::with_id\("check-updates", "Check for Updates…"\)/);

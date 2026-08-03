@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { sliceFrom } from './sourceTree.js';
+
 // Fold state is keyed by `h.id || textContent`. comrak emits the
 // deduplicated heading id on an empty inner <a class="anchor">, not on the
 // heading element, so without promotion every fold consumer falls back to
@@ -11,7 +13,7 @@ import test from 'node:test';
 test('processMarkdownHtml promotes the anchor id onto the heading element', () => {
 	const source = readFileSync('src/lib/utils/markdown.ts', 'utf8');
 
-	const headingLoop = source.slice(source.indexOf('querySelectorAll("h1, h2, h3, h4, h5, h6")'));
+	const headingLoop = sliceFrom(source, 'querySelectorAll("h1, h2, h3, h4, h5, h6")');
 	assert.match(headingLoop, /querySelector\("a\.anchor"\)/, 'heading loop looks up the comrak anchor');
 	assert.match(headingLoop, /h\.id = \w+\.id/, 'anchor id is promoted onto the heading');
 	assert.match(headingLoop, /removeAttribute\("id"\)/, 'anchor id is removed so document ids stay unique');

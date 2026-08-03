@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { offsetOf } from './sourceTree.js';
+
 const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
 const runtime = readFileSync('src-tauri/src/window_runtime.rs', 'utf8');
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
@@ -29,10 +31,10 @@ test('the title bar exposes a named color chip and pin control', () => {
 });
 
 test('the Home menu groups window organization below export actions', () => {
-	const exportIndex = titleBar.indexOf("t('menu.exportPdf', currentLanguage)");
-	const tagIndex = titleBar.indexOf("t('menu.setWindowTag', currentLanguage)");
-	const mergeIndex = titleBar.indexOf("t('menu.mergeAllWindows', currentLanguage)");
-	const exitIndex = titleBar.indexOf("t('menu.exit', currentLanguage)");
+	const exportIndex = offsetOf(titleBar, "t('menu.exportPdf', currentLanguage)");
+	const tagIndex = offsetOf(titleBar, "t('menu.setWindowTag', currentLanguage)");
+	const mergeIndex = offsetOf(titleBar, "t('menu.mergeAllWindows', currentLanguage)");
+	const exitIndex = offsetOf(titleBar, "t('menu.exit', currentLanguage)");
 
 	assert.ok(exportIndex < tagIndex);
 	assert.ok(tagIndex < mergeIndex);

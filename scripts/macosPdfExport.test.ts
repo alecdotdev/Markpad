@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { sliceBetween } from './sourceTree.js';
+
 test('all Markpad webviews may invoke Tauri native printing', () => {
 	const capability = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf8')) as {
 		windows: string[];
@@ -26,12 +28,8 @@ test('both PDF commands the exporter invokes are registered with Tauri', () => {
 	const exporter = readFileSync('src/lib/utils/export.ts', 'utf8');
 	const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf8');
 
-	const handlerStart = tauriLib.indexOf('tauri::generate_handler![');
-	assert.notEqual(handlerStart, -1, 'lib.rs must keep a generate_handler! list');
-	const handlerEnd = tauriLib.indexOf(']', handlerStart);
 	const registered = new Set(
-		tauriLib
-			.slice(handlerStart, handlerEnd)
+		sliceBetween(tauriLib, 'tauri::generate_handler![', ']')
 			.split(',')
 			.map((entry) => entry.trim().replace(/^.*::/, '')),
 	);

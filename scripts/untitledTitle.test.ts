@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { sliceBetween } from './sourceTree.js';
+
 import { nextUntitledTitle } from '../src/lib/utils/untitledTitle.js';
 
 // Untitled tabs get distinct numbered titles ("Untitled 1", "Untitled 2", …)
@@ -40,6 +42,6 @@ test('new tabs are created with numbered untitled titles', () => {
 	const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
 	assert.match(tabs, /nextUntitledTitle\(/);
 	// both creation paths go through the helper
-	const addNewTab = tabs.slice(tabs.indexOf('addNewTab()'), tabs.indexOf('addHomeTab()'));
+	const addNewTab = sliceBetween(tabs, 'addNewTab()', 'addHomeTab()');
 	assert.match(addNewTab, /nextUntitledTitle\(/);
 });

@@ -2,15 +2,16 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { offsetOf, sliceBetween, sliceFrom } from './sourceTree.js';
+
 const styles = readFileSync('src/styles.css', 'utf8');
 const findBar = readFileSync('src/lib/components/FindBar.svelte', 'utf8');
 
 /** The `@media print` block only — not everything that follows it in the file. */
 function extractPrintBlock(source: string): string {
-	const start = source.indexOf('@media print {');
-	assert.notEqual(start, -1, 'src/styles.css must keep an @media print block');
+	const start = offsetOf(source, '@media print {');
 	let depth = 0;
-	for (let i = source.indexOf('{', start); i < source.length; i += 1) {
+	for (let i = offsetOf(source, '{', start); i < source.length; i += 1) {
 		if (source[i] === '{') depth += 1;
 		else if (source[i] === '}') {
 			depth -= 1;
@@ -70,9 +71,9 @@ test('the neutralising rule outranks the component styles it overrides', () => {
 	// specificity, and stylesheet order between a component style and
 	// styles.css is not guaranteed, so `!important` is what decides.
 	const body = printRuleBody('.markdown-body mark.markpad-find-match');
-	const findBarRule = findBar.slice(findBar.indexOf(':global(.markdown-body mark.markpad-find-match)'));
+	const findBarRule = sliceBetween(findBar, ':global(.markdown-body mark.markpad-find-match)', '</style>');
 
-	assert.doesNotMatch(findBarRule.slice(0, findBarRule.indexOf('</style>')), /!important/);
+	assert.doesNotMatch(findBarRule, /!important/);
 	for (const property of ['background-color', 'box-shadow']) {
 		assert.match(body, new RegExp(`(?<![\\w-])${property}:[^;]*!important;`));
 	}

@@ -2,14 +2,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { offsetOf } from './sourceTree.js';
+
 const styles = readFileSync('src/styles.css', 'utf8');
 
 /** The `@media print` block only — not everything that follows it in the file. */
 function extractPrintBlock(source: string): string {
-	const start = source.indexOf('@media print {');
-	assert.notEqual(start, -1, 'src/styles.css must keep an @media print block');
+	const start = offsetOf(source, '@media print {');
 	let depth = 0;
-	for (let i = source.indexOf('{', start); i < source.length; i += 1) {
+	for (let i = offsetOf(source, '{', start); i < source.length; i += 1) {
 		if (source[i] === '{') depth += 1;
 		else if (source[i] === '}') {
 			depth -= 1;

@@ -2,13 +2,24 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { callbackBodies } from './sourceTree.js';
+
+// The effect is identified by what it does — it is the one that reads
+// `onscrollsync` — not by where its text starts and stops.
+//
+// It used to be sliced between `'&& onscrollsync)'` and `'\n\t$effect(() => {'`,
+// and both halves of that were the same kind of fragile. The start anchor had
+// already drifted once, silently: the original marker spelled the whole guard
+// condition, the effect gained an `editorReady &&` term when Monaco moved behind
+// a dynamic import, and the slice became empty rather than failing — which is
+// what the shortened anchor and its `notEqual(-1)` were added for. The end
+// anchor never got that guard, and it depends on the *next* effect being
+// tab-indented and spelled `$effect(() => {`; write it any other way and this
+// file silently starts asserting about the rest of the component.
 const editor = readFileSync('src/lib/components/Editor.svelte', 'utf8');
-// Anchor on the tail of the guard, not the whole condition: the effect gained an
-// `editorReady &&` term when Monaco moved behind a dynamic import, and an
-// exact-match marker silently sliced an empty string instead of failing loudly.
-const syncStart = editor.indexOf('&& onscrollsync)');
-assert.notEqual(syncStart, -1, 'expected to find the scroll-sync effect guard');
-const syncEffect = editor.slice(syncStart, editor.indexOf('\n\t$effect(() => {', syncStart + 1));
+const syncEffects = callbackBodies(editor, '$effect').filter((body) => body.includes('onscrollsync'));
+assert.equal(syncEffects.length, 1, `expected exactly one $effect reading onscrollsync (got ${syncEffects.length})`);
+const syncEffect = syncEffects[0];
 
 test('typing does not initiate split scroll synchronization', () => {
 	assert.match(syncEffect, /editor\.onDidScrollChange/);

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { offsetOf, sliceBetween } from './sourceTree.js';
+
 const markdown = readFileSync('src/lib/utils/markdown.ts', 'utf8');
 const markdownViewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 const tauriConfig = readFileSync('src-tauri/tauri.conf.json', 'utf8');
@@ -24,12 +26,15 @@ test('the app no longer permits YouTube frames', () => {
 });
 
 test('linked YouTube thumbnails are not intercepted by image zoom', () => {
-	const linkHandlerStart = markdownViewer.indexOf('async function handleLinkClick(e: MouseEvent)');
-	const linkHandler = markdownViewer.slice(linkHandlerStart, markdownViewer.indexOf('\n\tasync function toggleTaskCheckbox', linkHandlerStart));
-	const anchorGuard = linkHandler.indexOf("const a = target.closest('a');");
-	const imageZoom = linkHandler.indexOf("const img = target.closest('img');");
+	const linkHandler = sliceBetween(
+		markdownViewer,
+		'async function handleLinkClick(e: MouseEvent)',
+		'\n\tasync function toggleTaskCheckbox',
+	);
+	const anchorGuard = offsetOf(linkHandler, "const a = target.closest('a');");
+	const imageZoom = offsetOf(linkHandler, "const img = target.closest('img');");
 
-	assert.ok(anchorGuard !== -1 && imageZoom !== -1 && anchorGuard < imageZoom);
+	assert.ok(anchorGuard < imageZoom, 'the anchor branch claims the click before image zoom sees it');
 	assert.match(
 		linkHandler,
 		/if \(a\) \{[\s\S]*?if \(relativeMarkdownTarget\) \{[\s\S]*?return;[\s\S]*?\}\n\s*return;\n\s*\}\n\n\s*\/\/ media zoom handling/,

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { normalizeAssetPath } from '../src/lib/utils/exportHtml.js';
+import { offsetOf, sliceBetween } from './sourceTree.js';
 
 /*
  * "Save image as" could never save a remote image, and on Windows it could not
@@ -28,13 +29,7 @@ import { normalizeAssetPath } from '../src/lib/utils/exportHtml.js';
  */
 
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
-const body = (() => {
-	const from = viewer.indexOf('async function saveImageAs');
-	assert.notEqual(from, -1);
-	const to = viewer.indexOf('async function saveDiagramAs', from);
-	assert.notEqual(to, -1);
-	return viewer.slice(from, to);
-})();
+const body = sliceBetween(viewer, 'async function saveImageAs', 'async function saveDiagramAs');
 
 test('a Windows asset URL names the same file as the asset: form', () => {
 	// The property the old `startsWith('asset:')` test lacked. Running it here
@@ -80,9 +75,8 @@ test('a local image is copied on the Rust side', () => {
 	assert.match(body, /invoke\('copy_file', \{ src: realPath, dest \}\)/);
 	// And the save dialog is only offered for a file that can actually be
 	// written; the remote case bails out before it.
-	const bail = body.indexOf("addToast('Saving a remote image is not supported yet'");
-	const dialog = body.indexOf('await save(');
-	assert.notEqual(bail, -1, 'the unsupported case must say so');
+	const bail = offsetOf(body, "addToast('Saving a remote image is not supported yet'");
+	const dialog = offsetOf(body, 'await save(');
 	assert.ok(bail < dialog, 'do not ask for a destination that cannot be written');
 });
 

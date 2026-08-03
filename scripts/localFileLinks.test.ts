@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { resolveLocalFileLinkPath } from '../src/lib/utils/localFileLinks.js';
+import { offsetOf, sliceBetween } from './sourceTree.js';
 
 /*
  * `[data](./data.csv)` did nothing on macOS and Linux, and opened a dead page
@@ -90,19 +91,11 @@ test('a markdown link still resolves to a path, so branch order is what keeps it
 // --- wiring ------------------------------------------------------------------
 
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
-const handler = (() => {
-	const from = viewer.indexOf('async function handleDocumentClick');
-	assert.notEqual(from, -1);
-	const to = viewer.indexOf('let zoomLevel', from);
-	assert.notEqual(to, -1);
-	return viewer.slice(from, to);
-})();
+const handler = sliceBetween(viewer, 'async function handleDocumentClick', 'let zoomLevel');
 
 test('markdown targets are still claimed before the local-file branch', () => {
-	const markdown = handler.indexOf('getRelativeMarkdownTarget(rawHref)');
-	const local = handler.indexOf('resolveLocalFileLinkPath(rawHref, currentFile)');
-	assert.notEqual(markdown, -1);
-	assert.notEqual(local, -1);
+	const markdown = offsetOf(handler, 'getRelativeMarkdownTarget(rawHref)');
+	const local = offsetOf(handler, 'resolveLocalFileLinkPath(rawHref, currentFile)');
 	assert.ok(markdown < local, '`./other.md` must open in a tab, not in an external editor');
 });
 
@@ -111,9 +104,8 @@ test('a local file is handed to the OS as a path, not as a URL', () => {
 	// The raw attribute, not `anchor.href`: the latter is the origin-resolved
 	// URL that caused the bug.
 	assert.match(handler, /resolveLocalFileLinkPath\(rawHref, currentFile\)/);
-	const local = handler.indexOf('resolveLocalFileLinkPath');
-	const url = handler.indexOf('await openUrl(anchor.href)');
-	assert.notEqual(url, -1, 'genuine web links must still go to the browser');
+	const local = offsetOf(handler, 'resolveLocalFileLinkPath');
+	const url = offsetOf(handler, 'await openUrl(anchor.href)');
 	assert.ok(local < url, 'a local file must be caught before the URL fallback');
 });
 
@@ -135,13 +127,11 @@ test('neither OS call can leave an unhandled rejection behind', () => {
 	// try/catch, that rejection was the whole visible symptom on macOS: nothing
 	// happened, and nothing said why.
 	for (const call of ['await openPath(localFilePath)', 'await openUrl(anchor.href)']) {
-		const at = handler.indexOf(call);
-		assert.notEqual(at, -1, call);
+		const at = offsetOf(handler, call);
 		const before = handler.slice(0, at);
 		const tryAt = before.lastIndexOf('try {');
-		const catchAfter = handler.indexOf('} catch (error) {', at);
 		assert.notEqual(tryAt, -1, `${call} must be inside a try block`);
-		assert.notEqual(catchAfter, -1, `${call} must have a catch`);
+		offsetOf(handler, '} catch (error) {', at); // must have a catch after it
 		assert.ok(before.slice(tryAt).split('} catch').length === 1, `${call} must be inside the nearest try`);
 	}
 	assert.equal(handler.match(/addToast\(`Failed to open/g)?.length, 2, 'both failures are reported');

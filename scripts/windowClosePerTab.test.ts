@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { offsetOf, sliceBetween, sliceFrom } from './sourceTree.js';
+
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 const documentSessionPath = 'src/lib/sessions/documentSession.svelte.ts';
 const documentSession = existsSync(documentSessionPath) ? readFileSync(documentSessionPath, 'utf8') : '';
@@ -13,9 +15,7 @@ const documentSession = existsSync(documentSessionPath) ? readFileSync(documentS
 // stays open with the remaining tabs.
 
 function closeHandler(): string {
-	const start = viewer.indexOf('appWindow.onCloseRequested');
-	assert.ok(start !== -1, 'close handler registration not found');
-	return viewer.slice(start, viewer.indexOf('onDragDropEvent', start));
+	return sliceBetween(viewer, 'appWindow.onCloseRequested', 'onDragDropEvent');
 }
 
 test('the aggregate unsaved-files modal is gone from the close handler', () => {
@@ -42,18 +42,17 @@ test('cancelling the per-tab dialog stops the walk and keeps the window open', (
 
 test('the close is prevented synchronously before the per-tab walk', () => {
 	const handler = closeHandler();
-	const branchStart = handler.indexOf('if (dirtyTabs.length > 0) {');
-	assert.ok(branchStart !== -1, 'dirty branch not found');
-	const prevent = handler.indexOf('event.preventDefault()', branchStart);
-	const walk = handler.indexOf('canCloseTab(dirty.id)', branchStart);
-	assert.ok(prevent !== -1 && walk !== -1 && prevent < walk);
+	const branchStart = offsetOf(handler, 'if (dirtyTabs.length > 0) {');
+	const prevent = offsetOf(handler, 'event.preventDefault()', branchStart);
+	const walk = offsetOf(handler, 'canCloseTab(dirty.id)', branchStart);
+	assert.ok(prevent < walk, 'the close is prevented before the walk starts');
 });
 
 test('the window closes only after every dirty tab is resolved', () => {
 	const handler = closeHandler();
-	const walk = handler.indexOf('canCloseTab(dirty.id)');
-	const close = handler.indexOf('appWindow.close()', walk);
-	assert.ok(walk !== -1 && close !== -1 && walk < close);
+	const walk = offsetOf(handler, 'canCloseTab(dirty.id)');
+	const close = offsetOf(handler, 'appWindow.close()', walk);
+	assert.ok(walk < close, 'the window closes after the walk, not during it');
 });
 
 test('a second close request cannot start a competing walk', () => {
@@ -75,13 +74,12 @@ test('the walk proceeds in strict tab-strip order', () => {
 });
 
 test('the untitled save dialog prefills the numbered tab title', () => {
-	const fn = documentSession.slice(documentSession.indexOf('async function saveContent'));
-	const scope = fn.slice(0, fn.indexOf('async function saveContentAs'));
+	const scope = sliceBetween(documentSession, 'async function saveContent', 'async function saveContentAs');
 	assert.match(scope, /defaultPath: tab\.title/);
 });
 
 test('save-as keeps snapshot-based dirty tracking in documentSession', () => {
-	const fn = documentSession.slice(documentSession.indexOf('async function saveContentAs'));
+	const fn = sliceFrom(documentSession, 'async function saveContentAs');
 	assert.match(fn, /const snapshot = tab\.rawContent;/);
 	assert.match(fn, /tab\.isDirty = tab\.rawContent !== snapshot;/);
 });

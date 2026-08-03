@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { callbackBodies, sliceBetween } from './sourceTree.js';
+
 /*
  * `settings.svelte.ts` is a runes module, so it cannot be imported the way the
  * other suites import plain utils. Node's test runner gives every file its own
@@ -399,8 +401,7 @@ test('spin buttons clamp with the same rules as typing', () => {
 test('numeric setting inputs are one-way bound and commit through the clamp', () => {
 	const numericInputIds = ['editor-font-size', 'editor-max-width', 'preview-font-size', 'code-font-size'];
 	for (const id of numericInputIds) {
-		const block = componentSource.slice(componentSource.indexOf(`id="${id}"`));
-		const input = block.slice(0, block.indexOf('/>'));
+		const input = sliceBetween(componentSource, `id="${id}"`, '/>');
 		assert.doesNotMatch(input, /bind:value/, `${id} still uses a two-way number binding`);
 		assert.match(input, /oninput=\{\(e\) => handleNumberInput\(/, `${id} does not validate input`);
 		assert.match(input, /onchange=\{\(e\) => commitNumberInput\(/, `${id} does not clamp on change`);
@@ -481,9 +482,13 @@ test('a stored language is validated against the catalogue', () => {
  */
 
 test('the open effect neither reads the app version nor re-enters itself', () => {
-	const effectStart = componentSource.indexOf('$effect(() => {\n\t\tif (show) {');
-	assert.ok(effectStart > 0, 'settings open effect not found');
-	const effectBody = componentSource.slice(effectStart, componentSource.indexOf('\n\t});', effectStart));
+	// The open effect is identified by what it reads, not by its indentation and
+	// closing brace: the previous anchors were `'$effect(() => {\n\t\tif (show) {'`
+	// and `'\n\t});'`, so reformatting the component silently moved this
+	// assertion onto a different span of source.
+	const openEffects = callbackBodies(componentSource, '$effect').filter((body) => /\bshow\b/.test(body));
+	assert.equal(openEffects.length, 1, `expected exactly one $effect gated on show (got ${openEffects.length})`);
+	const effectBody = openEffects[0];
 
 	// Reading a state it also writes is what made the effect re-run and
 	// re-capture the focus target from inside the dialog.

@@ -4,6 +4,8 @@ import test from 'node:test';
 
 import { compile } from 'svelte/compiler';
 
+import { offsetOf, sliceBetween, sliceFrom } from './sourceTree.js';
+
 /*
  * Export PDF from plain edit mode produced a blank page, for two independent
  * reasons. This file covers both.
@@ -317,9 +319,8 @@ test('the reveal does not depend on which sheet the browser applies last', () =>
 	// is not guaranteed. The resolver above already places the component last,
 	// which is the losing arrangement for the print rules; assert that the
 	// winning declaration is `!important` so order cannot decide it either way.
-	const printBlock = styles.slice(styles.indexOf('@media print'));
-	const override = printBlock.slice(printBlock.indexOf('#app .pane.viewer-pane'));
-	const rule = override.slice(0, override.indexOf('}'));
+	const printBlock = sliceFrom(styles, '@media print');
+	const rule = sliceBetween(printBlock, '#app .pane.viewer-pane', '}');
 	for (const property of ['width', 'flex', 'opacity']) {
 		assert.match(rule, new RegExp(`${property}:[^;]*!important`), `${property} must be !important`);
 	}
@@ -333,14 +334,6 @@ test('the reveal does not depend on which sheet the browser applies last', () =>
 // the resulting DOM is complete — that is what the awaited `renderRichContent`
 // is for, and only a real browser can confirm it.
 
-const slice = (source: string, start: string, end: string) => {
-	const from = source.indexOf(start);
-	assert.notEqual(from, -1, `expected to find ${start}`);
-	const to = source.indexOf(end, from + start.length);
-	assert.notEqual(to, -1, `expected to find ${end} after ${start}`);
-	return source.slice(from, to);
-};
-
 test('the preview is only kept live while it is on screen', () => {
 	// The premise of the second half. If this condition ever widens to cover
 	// plain edit mode the export-time render below becomes a no-op rather than
@@ -349,17 +342,16 @@ test('the preview is only kept live while it is on screen', () => {
 });
 
 test('exporting a PDF renders the buffer before the DOM is printed', () => {
-	const body_ = slice(viewer, 'async function exportAsPdf', 'function handleNewFile');
-	const sync = body_.indexOf('await syncPreviewForPrint()');
-	assert.notEqual(sync, -1, 'the export must refresh the preview first');
+	const body_ = sliceBetween(viewer, 'async function exportAsPdf', 'function handleNewFile');
+	const sync = offsetOf(body_, 'await syncPreviewForPrint()');
 	// Before the diagram pass, which reads the nodes that render produces, and
 	// before the print itself.
-	assert.ok(sync < body_.indexOf('renderDiagramsForPrint'), 'refresh before re-theming the diagrams');
-	assert.ok(sync < body_.indexOf('_exportPdf('), 'refresh before printing');
+	assert.ok(sync < offsetOf(body_, 'renderDiagramsForPrint'), 'refresh before re-theming the diagrams');
+	assert.ok(sync < offsetOf(body_, '_exportPdf('), 'refresh before printing');
 });
 
 test('the refresh is skipped when the DOM already matches the buffer', () => {
-	const body_ = slice(viewer, 'async function syncPreviewForPrint', 'async function exportAsPdf');
+	const body_ = sliceBetween(viewer, 'async function syncPreviewForPrint', 'async function exportAsPdf');
 	// Reading mode is rendered by loadMarkdown from this same buffer, and
 	// re-rendering it would discard the scroll, fold and find state on screen.
 	assert.match(body_, /if \(!tab \|\| !\(tab\.isEditing \|\| tab\.isSplit\)\) return;/);
@@ -367,7 +359,7 @@ test('the refresh is skipped when the DOM already matches the buffer', () => {
 });
 
 test('the refresh actually lands before the print', () => {
-	const body_ = slice(viewer, 'async function syncPreviewForPrint', 'async function exportAsPdf');
+	const body_ = sliceBetween(viewer, 'async function syncPreviewForPrint', 'async function exportAsPdf');
 	// What matters here is WHAT is rendered — this tab's buffer and this tab's
 	// path, not the disk — and that it is awaited before the content is
 	// swapped in. The trailing arguments are deliberately not pinned: fold
@@ -382,7 +374,7 @@ test('the refresh actually lands before the print', () => {
 });
 
 test('a failed refresh does not pass off a stale export as a fresh one', () => {
-	const body_ = slice(viewer, 'async function syncPreviewForPrint', 'async function exportAsPdf');
+	const body_ = sliceBetween(viewer, 'async function syncPreviewForPrint', 'async function exportAsPdf');
 	assert.match(body_, /catch \(error\)/);
 	assert.match(body_, /addToast\(/);
 });

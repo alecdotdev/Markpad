@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { readSourceFiles, sliceBetween } from './sourceTree.js';
+import { offsetOf, readSourceFiles, sliceBetween } from './sourceTree.js';
 
 // Runes and the Tauri bridge, shimmed the way truncatedBufferGuard.test.ts
 // shims them: the stores are runes modules, and Node's test runner gives every
@@ -174,22 +174,19 @@ test('the unchecked read command is gone, and nothing calls it', () => {
 });
 
 test('entering the editor reads the fidelity and stores it', () => {
-	const toggle = viewer.slice(viewer.indexOf('async function toggleEdit'), viewer.indexOf('async function saveContent'));
+	const toggle = sliceBetween(viewer, 'async function toggleEdit', 'async function saveContent');
 	assert.match(toggle, /\[content, lossy\] = \(await invoke\('read_file_content_checked', \{ path: tab\.path \}\)\)/);
-	const read = toggle.indexOf('read_file_content_checked');
-	const flag = toggle.indexOf('setTabDecodedLossy(tab.id, lossy)');
-	const store = toggle.indexOf('setTabRawContent(tab.id, content)');
-	assert.notEqual(flag, -1, 'the verdict must reach the tab');
+	const read = offsetOf(toggle, 'read_file_content_checked');
+	const flag = offsetOf(toggle, 'setTabDecodedLossy(tab.id, lossy)');
+	const store = offsetOf(toggle, 'setTabRawContent(tab.id, content)');
 	assert.ok(read < flag && flag < store, 'flag the tab before the buffer is published');
 });
 
 test('entering split view reads the fidelity and stores it', () => {
-	const split = viewer.slice(viewer.indexOf('async function toggleSplitView'));
-	const enter = split.slice(0, split.indexOf('} else {'));
+	const enter = sliceBetween(viewer, 'async function toggleSplitView', '} else {');
 	assert.match(enter, /\[content, lossy\] = \(await invoke\('read_file_content_checked', \{ path: tab\.path \}\)\)/);
-	const flag = enter.indexOf('setTabDecodedLossy(tab.id, lossy)');
-	const store = enter.indexOf('setTabRawContent(tab.id, content)');
-	assert.notEqual(flag, -1, 'the verdict must reach the tab');
+	const flag = offsetOf(enter, 'setTabDecodedLossy(tab.id, lossy)');
+	const store = offsetOf(enter, 'setTabRawContent(tab.id, content)');
 	assert.ok(flag < store, 'flag the tab before the buffer is published');
 });
 
@@ -212,13 +209,10 @@ test('the session can tell a refusal from a failure', () => {
 });
 
 test('a refused save does not add a generic toast to its own explanation', () => {
-	const effect = viewer.slice(viewer.indexOf('Auto-save effect.'));
-	const body = effect.slice(0, effect.indexOf('for (const id of ['));
-	const check = body.indexOf('if (documentSession.isLossySaveRefused(s.id)) return;');
-	const toast = body.indexOf("t('toast.autoSaveFailed'");
-	assert.notEqual(check, -1, 'the refusal must be recognised');
-	assert.notEqual(toast, -1);
-	assert.ok(check < toast, 'and recognised before the generic toast is raised');
+	const body = sliceBetween(viewer, 'Auto-save effect.', 'for (const id of [');
+	const check = offsetOf(body, 'if (documentSession.isLossySaveRefused(s.id)) return;');
+	const toast = offsetOf(body, "t('toast.autoSaveFailed'");
+	assert.ok(check < toast, 'the refusal must be recognised before the generic toast is raised');
 });
 
 test('a tab that can only be refused stops re-arming the timer', () => {
@@ -226,8 +220,7 @@ test('a tab that can only be refused stops re-arming the timer', () => {
 	// again every 1.5s for as long as the user kept typing — each time
 	// producing the console warning, the wasted round trip, and (before the
 	// test above) the toast.
-	const effect = viewer.slice(viewer.indexOf('Auto-save effect.'));
-	const body = effect.slice(0, effect.indexOf('for (const id of ['));
+	const body = sliceBetween(viewer, 'Auto-save effect.', 'for (const id of [');
 	assert.match(body, /decodedLossily: tab\.hasReplacementChars/);
 	assert.match(body, /const eligible = [^;]*!\(s\.decodedLossily && documentSession\.isLossySaveRefused\(s\.id\)\)/);
 	// The FIRST attempt must still happen: it is what produces the explanation.

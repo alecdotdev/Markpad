@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { sliceBetween } from './sourceTree.js';
+
 // Editor.svelte translates the settings store into Monaco options and
 // keybindings. Every regression locked here came from that translation layer
 // being wired to the wrong shape: a string option read as a boolean, a
@@ -13,14 +15,6 @@ const settingsStore = readFileSync('src/lib/stores/settings.svelte.ts', 'utf8');
 
 function count(source: string, pattern: RegExp): number {
 	return source.match(pattern)?.length ?? 0;
-}
-
-function sliceBlock(source: string, startMarker: string, endMarker: string): string {
-	const start = source.indexOf(startMarker);
-	assert.notEqual(start, -1, `expected to find ${startMarker}`);
-	const end = source.indexOf(endMarker, start + startMarker.length);
-	assert.notEqual(end, -1, `expected to find ${endMarker} after ${startMarker}`);
-	return source.slice(start, end);
 }
 
 test('renderLineHighlight is a Monaco string enum, not a boolean flag', () => {
@@ -54,7 +48,7 @@ test('editor options are applied by a single updateOptions effect', () => {
 	// without the zoom factor — so the winner depended on effect ordering.
 	assert.equal(count(editor, /editor\.updateOptions\(\{/g), 1, 'exactly one updateOptions call site');
 
-	const block = sliceBlock(editor, 'editor.updateOptions({', '});');
+	const block = sliceBetween(editor, 'editor.updateOptions({', '});');
 	assert.match(block, /wordWrapColumn: settings\.editorMaxWidth/, 'wordWrapColumn survived the merge');
 	assert.match(block, /fontSize: settings\.editorFontSize \* \(zoomLevel \/ 100\)/, 'zoom-aware font size is the surviving one');
 	for (const option of [
@@ -110,7 +104,7 @@ test('platform detection reads settings.osType and never writes it', () => {
 	// the keybindings are registered once, at mount, rather than re-registered
 	// when settings.osType resolves. Full argument: the comment on
 	// isMacPlatform() in Editor.svelte.
-	const helper = sliceBlock(editor, 'function isMacPlatform', '\n\t}');
+	const helper = sliceBetween(editor, 'function isMacPlatform', '\n\t}');
 	assert.match(helper, /settings\.osType !== 'unknown'/, 'prefers the resolved Tauri os type');
 	assert.match(helper, /settings\.osType === 'macos'/);
 	assert.match(helper, /navigator\.platform/, 'falls back while osType is still resolving');
@@ -139,7 +133,7 @@ test('custom copy keeps Monaco\'s whole-line copy on an empty selection', () => 
 	// (editor.emptySelectionClipboard) and Sublime Text behave the same. Since
 	// custom-copy overrides the native copy action, bailing out on an empty
 	// selection deleted the behaviour outright.
-	const copyAction = sliceBlock(editor, 'id: "custom-copy"', 'id: "toggle-minimap"');
+	const copyAction = sliceBetween(editor, 'id: "custom-copy"', 'id: "toggle-minimap"');
 
 	assert.doesNotMatch(
 		copyAction,

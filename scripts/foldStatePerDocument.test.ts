@@ -27,6 +27,7 @@ import test from 'node:test';
 import ts from 'typescript';
 
 import { installShimDom, parseHtml, type ShimElement } from './renderProtocolDom.ts';
+import { offsetOf } from './sourceTree.js';
 
 // ---------------------------------------------------------------- environment
 
@@ -98,7 +99,7 @@ function pluckFunction(source: string, name: string, required = true): string {
 	for (const marker of [`async function ${name}(`, `function ${name}(`]) {
 		const start = source.indexOf(marker);
 		if (start === -1) continue;
-		const open = source.indexOf('{', source.indexOf(')', start));
+		const open = offsetOf(source, '{', offsetOf(source, ')', start));
 		return source.slice(start, matchBrace(source, open) + 1);
 	}
 	assert.ok(!required, `expected the component to define ${name}`);
@@ -243,9 +244,8 @@ function buildViewer(): Viewer {
 /** The real `visibleItems` out of Toc.svelte, over a caller-supplied fold set. */
 function buildTocFilter() {
 	const marker = 'let visibleItems = $derived.by(() => ';
-	const start = toc.indexOf(marker);
-	assert.notEqual(start, -1, 'expected Toc.svelte to derive visibleItems');
-	const open = toc.indexOf('{', start + marker.length);
+	const start = offsetOf(toc, marker);
+	const open = offsetOf(toc, '{', start + marker.length);
 	const body = toc.slice(open, matchBrace(toc, open) + 1);
 	const js = ts.transpileModule(body, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 	return new Function('items', 'collapsedHeaders', `"use strict";\n${js}`) as (

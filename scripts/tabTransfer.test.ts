@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { sliceBetween } from './sourceTree.js';
+
 import type { Tab } from '../src/lib/stores/tabs.svelte.js';
 import {
 	buildTransferredTab,
@@ -208,9 +210,7 @@ test('file-backed arrivals keep their title', () => {
 // checked statically; all decision logic above is exercised directly.
 test('insertTransferredTab is a thin wrapper: build, push, activate, return the id', () => {
 	const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
-	const start = tabs.indexOf('insertTransferredTab(');
-	assert.ok(start !== -1, 'insertTransferredTab not found');
-	const fn = tabs.slice(start, tabs.indexOf('closeTab(', start));
+	const fn = sliceBetween(tabs, 'insertTransferredTab(', 'closeTab(');
 
 	assert.match(fn, /buildTransferredTab\(/);
 	// untitled re-numbering uses this window's titles and localized base
@@ -224,7 +224,7 @@ test('insertTransferredTab is a thin wrapper: build, push, activate, return the 
 
 test('serializeState still persists window shape only (untouched by transfer)', () => {
 	const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
-	const fn = tabs.slice(tabs.indexOf('serializeState()'), tabs.indexOf('restoreState('));
+	const fn = sliceBetween(tabs, 'serializeState()', 'restoreState(');
 	assert.doesNotMatch(fn, /rawContent/);
 	assert.doesNotMatch(fn, /TransferableTab/);
 });
@@ -234,7 +234,7 @@ test('source removal waits for destination completion', () => {
 	const session = readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8');
 
 	assert.match(broker, /pub fn complete_detached_tab/);
-	const claim = broker.slice(broker.indexOf('pub fn claim_detached_tab'), broker.indexOf('pub fn complete_detached_tab'));
+	const claim = sliceBetween(broker, 'pub fn claim_detached_tab', 'pub fn complete_detached_tab');
 	assert.doesNotMatch(claim, /tab-transfer-claimed/);
 	assert.match(session, /invoke\('complete_detached_tab', \{ token \}\)/);
 });

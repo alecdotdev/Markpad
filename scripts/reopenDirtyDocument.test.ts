@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { sliceBetween } from './sourceTree.js';
+
 // Opening a file that is ALREADY open in a tab with unsaved edits must not
 // re-read it from disk. `setTabRawContent` replaces rawContent AND
 // originalContent, so the edits would not merely be overwritten — the tab
@@ -144,8 +146,7 @@ test('following a link into a new tab shows the tab that already holds the file'
 });
 
 test('the call shape this guards is still the one MarkdownViewer uses', () => {
-	const body = viewer.slice(viewer.indexOf('async function openMarkdownTargetInNewTab'));
-	const fn = body.slice(0, body.indexOf('\n\tasync function', 1));
+	const fn = sliceBetween(viewer, 'async function openMarkdownTargetInNewTab', '\n\tasync function');
 	assert.match(fn, /tabManager\.addTab\(/);
 	assert.match(fn, /loadMarkdown\([^)]*\{[^}]*skipTabManagement: true/);
 });
@@ -226,8 +227,7 @@ test('an edited tab following a link to a DIFFERENT file still loads it', async 
 // passing this flag is a caller claiming the user chose to lose work.
 for (const name of ['resolveExternalChangeByReloading', 'reloadFromDisk']) {
 	test(`${name} declares that it is discarding the buffer`, () => {
-		const body = viewer.slice(viewer.indexOf(`async function ${name}`));
-		const fn = body.slice(0, body.indexOf('\n\t}') + 3);
+		const fn = sliceBetween(viewer, `async function ${name}`, '\n\t}');
 		assert.match(fn, /loadMarkdown\(/);
 		assert.match(fn, /discardUnsavedBuffer: true/);
 	});

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { sliceBetween } from './sourceTree.js';
+
 // Live Mode watches the open file and reloads it when something else writes
 // it — git checkout, a cloud sync, a second Markpad window. The reload path
 // replaces rawContent AND originalContent, so a buffer with unsaved edits is
@@ -135,8 +137,7 @@ test('our own writes still suppress the reload', async () => {
 // --- wiring that cannot be executed outside a Svelte runtime ---
 
 test('the watcher listener routes every event through the guarded resolution', () => {
-	const listener = viewer.slice(viewer.indexOf("listen('file-changed'"));
-	const body = listener.slice(0, listener.indexOf('}),'));
+	const body = sliceBetween(viewer, "listen('file-changed'", '}),');
 	assert.match(body, /resolveExternalChange/);
 	// The old body called loadMarkdown(currentFile) directly.
 	assert.doesNotMatch(body, /loadMarkdown\(currentFile\)/);
@@ -152,8 +153,7 @@ test('the debounced auto-save is held back while a conflict is unanswered', () =
 	// Otherwise the 1.5s timer fires while the bar is still asking "reload or
 	// keep mine": the user's edits survive, but the external change is gone
 	// from disk before either answer can be given.
-	const effect = viewer.slice(viewer.indexOf('Auto-save effect.'));
-	const body = effect.slice(0, effect.indexOf('for (const id of ['));
+	const body = sliceBetween(viewer, 'Auto-save effect.', 'for (const id of [');
 	assert.match(body, /hasPendingConflict: externalChangeConflicts\[tab\.id\] === true/);
 	assert.match(body, /const eligible = [^;]*!s\.hasPendingConflict/);
 });
@@ -161,15 +161,13 @@ test('the debounced auto-save is held back while a conflict is unanswered', () =
 test('an explicit save answers the conflict and takes the bar down', () => {
 	// Pressing Cmd+S is a decision. Leaving the bar up afterwards would ask a
 	// question the user already answered.
-	const wrapper = viewer.slice(viewer.indexOf('async function saveContent(tabId?: string)'));
-	const body = wrapper.slice(0, wrapper.indexOf('async function saveContentAs'));
+	const body = sliceBetween(viewer, 'async function saveContent(tabId?: string)', 'async function saveContentAs');
 	assert.match(body, /clearExternalChangeConflict/);
 });
 
 test('turning Live Mode on installs the watcher without reloading', () => {
 	// Enabling a watcher is not a request to discard the buffer, and this was
 	// the one loadMarkdown call in the app with no canCloseTab in front of it.
-	const toggle = viewer.slice(viewer.indexOf('function toggleLiveMode'));
-	const body = toggle.slice(0, toggle.indexOf('\n\t}') + 3);
+	const body = sliceBetween(viewer, 'function toggleLiveMode', '\n\t}');
 	assert.doesNotMatch(body, /loadMarkdown/);
 });

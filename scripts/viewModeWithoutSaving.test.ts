@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+
+import { offsetOf, sliceBetween, sliceFrom } from './sourceTree.js';
 import ts from 'typescript';
 
 // Issue #168, second report by @dayeggpi: "allow user to switch to rendered
@@ -65,7 +67,7 @@ function pluck(name: string, required = true): string {
 		assert.ok(!required, `expected MarkdownViewer.svelte to define ${name}`);
 		return '';
 	}
-	let i = viewer.indexOf('{', viewer.indexOf(')', start));
+	let i = offsetOf(viewer, '{', offsetOf(viewer, ')', start));
 	let depth = 0;
 	for (; i < viewer.length; i++) {
 		const c = viewer[i];
@@ -423,12 +425,12 @@ test('closing the window still reviews unsaved tabs', () => {
 	// `appExit` and the window close handler are untouched by this change; the
 	// confirmation there is load-bearing because the buffer dies with the
 	// window. Source-level, because they are wired to Tauri window events.
-	const exit = viewer.slice(viewer.indexOf('async function appExit()'), viewer.indexOf('async function toggleEdit'));
+	const exit = sliceBetween(viewer, 'async function appExit()', 'async function toggleEdit');
 	assert.match(exit, /tabManager\.tabs\.some\(\(t\) => t\.isDirty \|\| \(t\.path === '' && t\.rawContent\.trim\(\) !== ''\)\)/);
 	assert.match(exit, /modal\.areYouSureYouWantToExit/);
 
-	const closeHandler = viewer.slice(viewer.indexOf('appWindow.onCloseRequested'));
-	assert.match(closeHandler.slice(0, closeHandler.indexOf('onDragDropEvent')), /await canCloseTab\(dirty\.id\)/);
+	const closeHandler = sliceBetween(viewer, 'appWindow.onCloseRequested', 'onDragDropEvent');
+	assert.match(closeHandler, /await canCloseTab\(dirty\.id\)/);
 });
 
 test('the view toggles no longer re-read the file to leave an editable pane', () => {
@@ -436,12 +438,12 @@ test('the view toggles no longer re-read the file to leave an editable pane', ()
 	// the disk again. `renderTabPreviewFromRaw` is the shared "render THIS
 	// tab's buffer under its own path" helper (it also serves the PDF export).
 	const toggleEdit = pluck('toggleEdit');
-	const leaveEditMode = toggleEdit.slice(0, toggleEdit.indexOf('// Switch to edit'));
+	const leaveEditMode = toggleEdit.slice(0, offsetOf(toggleEdit, '// Switch to edit'));
 	assert.doesNotMatch(leaveEditMode, /loadMarkdown/);
 	assert.doesNotMatch(leaveEditMode, /askCustom/);
 
 	const toggleSplit = pluck('toggleSplitView');
-	const closeSplit = toggleSplit.slice(toggleSplit.indexOf('setSplitEnabled(tab.id, false)'));
+	const closeSplit = sliceFrom(toggleSplit, 'setSplitEnabled(tab.id, false)');
 	assert.doesNotMatch(closeSplit, /loadMarkdown/);
 	assert.doesNotMatch(toggleSplit, /askCustom/);
 });

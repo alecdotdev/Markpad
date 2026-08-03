@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { offsetOf, sliceBetween } from './sourceTree.js';
+
 const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 const session = readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8');
@@ -12,16 +14,13 @@ const documentSession = readFileSync('src/lib/sessions/documentSession.svelte.ts
 // always lives on disk — the snapshot never carries rawContent, so unsaved
 // changes are handled exclusively by the per-tab close dialogs.
 
-function slice(source: string, from: string, to: string): string {
-	const start = source.indexOf(from);
-	assert.ok(start !== -1, `${from} not found`);
-	const end = source.indexOf(to, start);
-	assert.ok(end !== -1, `${to} not found after ${from}`);
-	return source.slice(start, end);
+/** The `onCloseRequested` registration, up to the next window listener. */
+function closeHandler(): string {
+	return sliceBetween(viewer, 'appWindow.onCloseRequested', 'onDragDropEvent');
 }
 
 test('serializeState writes window state only', () => {
-	const fn = slice(tabs, 'serializeState()', 'restoreState(');
+	const fn = sliceBetween(tabs, 'serializeState()', 'restoreState(');
 	assert.match(fn, /version: 2/);
 	// untitled tabs have no disk backing; they are resolved at close, never
 	// persisted — and neither is the home tab, whose path is the sentinel
@@ -36,7 +35,7 @@ test('serializeState writes window state only', () => {
 });
 
 test('restoreState rebuilds clean tabs and drops legacy untitled entries', () => {
-	const fn = slice(tabs, 'restoreState(', 'addTab(');
+	const fn = sliceBetween(tabs, 'restoreState(', 'addTab(');
 	// path is the identity of a restored tab; entries without a real file path
 	// are skipped, including 'HOME' entries left by older builds
 	assert.match(fn, /!hasRealFilePath\(saved\.path\)\) continue;/);
@@ -48,7 +47,7 @@ test('restoreState rebuilds clean tabs and drops legacy untitled entries', () =>
 });
 
 test('startup restore reads content from disk, not from the snapshot', () => {
-	const restore = slice(session, 'async function restore', 'async function claimTransferredTab');
+	const restore = sliceBetween(session, 'async function restore', 'async function claimTransferredTab');
 	assert.match(restore, /read_file_content/);
 	// a file that cannot be read keeps its tab and its place in the snapshot —
 	// dropping it here also dropped it from the snapshot written moments later
@@ -61,18 +60,15 @@ test('startup restore reads content from disk, not from the snapshot', () => {
 });
 
 test('the discard choice reverts the tab to its last saved content', () => {
-	const fn = slice(documentSession, 'async function canCloseTab', 'return { loadMarkdown');
+	const fn = sliceBetween(documentSession, 'async function canCloseTab', 'return { loadMarkdown');
 	assert.match(fn, /tab\.rawContent = tab\.originalContent;/);
 	assert.match(fn, /tab\.isDirty = false;/);
 });
 
 test('the close flow resolves dirty tabs before serializing window state', () => {
-	const handlerStart = viewer.indexOf('appWindow.onCloseRequested');
-	const handler = viewer.slice(handlerStart, viewer.indexOf('onDragDropEvent', handlerStart));
-	const walk = handler.indexOf('canCloseTab(dirty.id)');
-	const persist = handler.indexOf('persistWindowState()');
-	assert.ok(walk !== -1, 'per-tab walk not found');
-	assert.ok(persist !== -1, 'window-state serialization not found');
+	const handler = closeHandler();
+	const walk = offsetOf(handler, 'canCloseTab(dirty.id)');
+	const persist = offsetOf(handler, 'persistWindowState()');
 	assert.ok(walk < persist, 'dirty tabs must be resolved before the snapshot is written');
 });
 
@@ -84,8 +80,7 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 	// process and loses a flush race when the last window's close ends the
 	// process); both localStorage keys are removed on write, so a downgraded
 	// build starts a fresh session instead of misreading anything.
-	const persistStart = session.indexOf('async function persistState');
-	const scope = session.slice(persistStart, session.indexOf('async function restore', persistStart));
+	const scope = sliceBetween(session, 'async function persistState', 'async function restore');
 	assert.match(scope, /invoke\('save_window_state'/);
 	assert.doesNotMatch(scope, /setItem\(/);
 	assert.match(scope, /removeItem\(options\.windowStateKey\)/);
@@ -104,28 +99,24 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 	// The shared helper clears the Rust snapshot and both localStorage keys.
 	// Only explicit exit uses it: a restore that goes wrong must never delete
 	// the record of which documents were open (interruptedSessionRestore.test.ts).
-	const discardStart = session.indexOf('async function discardPersistedState');
-	const discardScope = session.slice(discardStart, session.indexOf('\n\t}\n\n\tfunction readProgress', discardStart));
+	const discardScope = sliceBetween(session, 'async function discardPersistedState', '\n\t}\n\n\tfunction readProgress');
 	assert.match(discardScope, /clear_window_state/);
 	assert.match(discardScope, /removeItem\(options\.windowStateKey\)/);
 	assert.match(discardScope, /removeItem\(options\.legacyStateKey\)/);
 	// Explicit exit delegates to the same cleanup path.
-	const exitFn = viewer.slice(viewer.indexOf('async function appExit'));
-	const exitScope = exitFn.slice(0, exitFn.indexOf('\n\t}'));
+	const exitScope = sliceBetween(viewer, 'async function appExit', '\n\t}');
 	assert.match(exitScope, /await discardPersistedWindowState\(\)/);
 });
 
 test('with restore enabled resolved titled tabs stay open for the snapshot', () => {
-	const handlerStart = viewer.indexOf('appWindow.onCloseRequested');
-	const handler = viewer.slice(handlerStart, viewer.indexOf('onDragDropEvent', handlerStart));
+	const handler = closeHandler();
 	// tabs are closed one-by-one only when restore is off (or untitled)
 	assert.match(handler, /restoreStateOnReopen \|\| dirty\.path === ''/);
 });
 
 test('auto-save fast path silently saves titled tabs before the walk', () => {
-	const handlerStart = viewer.indexOf('appWindow.onCloseRequested');
-	const handler = viewer.slice(handlerStart, viewer.indexOf('onDragDropEvent', handlerStart));
-	const fastPath = handler.indexOf('settings.autoSave && !settings.confirmBeforeSave');
-	const walk = handler.indexOf('canCloseTab(dirty.id)');
-	assert.ok(fastPath !== -1 && walk !== -1 && fastPath < walk);
+	const handler = closeHandler();
+	const fastPath = offsetOf(handler, 'settings.autoSave && !settings.confirmBeforeSave');
+	const walk = offsetOf(handler, 'canCloseTab(dirty.id)');
+	assert.ok(fastPath < walk, 'the silent save runs before the per-tab walk');
 });
