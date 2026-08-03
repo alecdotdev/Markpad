@@ -510,1859 +510,6 @@ fn validate_vsix_archive_limits<R: std::io::Read + std::io::Seek>(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn temp_path(tag: &str) -> PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("markpad-{tag}-{nonce}"))
-    }
-
-    /// A directory to work in, so the case/normalization probes below cannot
-    /// collide with anything else in the temp dir.
-    fn temp_dir(tag: &str) -> PathBuf {
-        let dir = temp_path(tag);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    /// Does the volume `dir` lives on fold case? The tests below assert
-    /// different things depending on the answer, because the point of
-    /// `canonical_identity` is that it reports what the FILESYSTEM does rather
-    /// than what the platform usually does — a case-sensitive volume on macOS
-    /// and a case-insensitive volume on Linux both exist and both must work.
-    fn folds_case(dir: &Path) -> bool {
-        let upper = dir.join("CaseProbe.md");
-        fs::write(&upper, b"probe").unwrap();
-        let found = fs::metadata(dir.join("caseprobe.md")).is_ok();
-        fs::remove_file(&upper).unwrap();
-        found
-    }
-
-    #[test]
-    fn canonical_identity_reports_what_the_filesystem_does_about_case() {
-        let dir = temp_dir("canon-case");
-        let real = dir.join("Alpha.md");
-        fs::write(&real, b"body").unwrap();
-
-        let by_real = canonical_identity(&real).unwrap();
-        let lowered = dir.join("alpha.md");
-        // What the frontend consumes is whether these two come out EQUAL, so
-        // that is what gets asserted — not whether the lookup happened to
-        // succeed. Asking `is_err()` here tested the mechanism instead of the
-        // property, and got it wrong: on a case-sensitive volume the lowercase
-        // spelling names no file, but `canonical_identity` still answers for it
-        // through the parent-directory fallback that Save As depends on.
-        let by_lowered = canonical_identity(&lowered).ok();
-
-        // Either way, the identity is the name the DIRECTORY holds rather than
-        // the spelling that was asked for — otherwise the answer would depend
-        // on which spelling happened to be opened first.
-        assert_eq!(by_real.file_name().unwrap(), "Alpha.md");
-
-        if folds_case(&dir) {
-            // The two spellings name ONE file: opening both must not give two
-            // tabs, and saving through one must not be treated as a save to a
-            // different file. Both reduce to the same identity string, which
-            // is what lets the frontend keep comparing with `===`.
-            assert_eq!(
-                by_lowered.as_ref(),
-                Some(&by_real),
-                "one file must have one identity whichever way it is spelled",
-            );
-        } else {
-            // On a case-sensitive volume these are two different files and must
-            // keep being two. A `to_lowercase()` scheme would merge them here
-            // and quietly close a tab holding a genuinely different document —
-            // which is VS Code's open bug #123660, and the thing this whole
-            // approach exists to avoid.
-            assert_ne!(
-                by_lowered.as_ref(),
-                Some(&by_real),
-                "two files must keep two identities",
-            );
-        }
-
-        fs::remove_file(&real).unwrap();
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn canonical_identity_folds_unicode_normalization_when_the_volume_does() {
-        // APFS is normalization-INSENSITIVE as well as case-insensitive: a
-        // file written as NFC opens under its NFD spelling and vice versa.
-        // Case folding cannot reach this — the two strings differ in code
-        // points, not in case — so it is the clearest evidence that the
-        // question has to go to the filesystem.
-        //
-        // The two axes are independent, and all four combinations are real:
-        // default APFS folds both, case-sensitive APFS folds only
-        // normalization, NTFS folds only case, ext4 folds neither. So this
-        // probes normalization on its own rather than inferring it from the
-        // case answer or from the platform.
-        let dir = temp_dir("canon-nfd");
-        let nfc = dir.join("caf\u{e9}.md"); // café
-        let nfd = dir.join("cafe\u{301}.md"); // cafe + combining acute
-        fs::write(&nfc, b"body").unwrap();
-
-        let by_nfc = canonical_identity(&nfc).unwrap();
-        let by_nfd = canonical_identity(&nfd).ok();
-
-        if fs::metadata(&nfd).is_ok() {
-            assert_eq!(
-                by_nfd.as_ref(),
-                Some(&by_nfc),
-                "one file must have one identity whichever way it is spelled",
-            );
-        } else {
-            // A volume that keeps them apart really does have two files here,
-            // so the identities must stay apart too. As above, the assertion is
-            // on the identities and not on whether the lookup succeeded: the
-            // NFD spelling names nothing, but the parent-directory fallback
-            // still answers for it.
-            assert_ne!(
-                by_nfd.as_ref(),
-                Some(&by_nfc),
-                "two files must keep two identities",
-            );
-        }
-
-        fs::remove_file(&nfc).unwrap();
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn canonical_identity_resolves_a_symlink_to_its_target() {
-        // A link and its target are one file for every purpose Markpad has:
-        // `atomic_write` follows the link when it writes, so two tabs on the
-        // two names would be two auto-save timers on one document.
-        let dir = temp_dir("canon-link");
-        let target = dir.join("archive.md");
-        let link = dir.join("today.md");
-        fs::write(&target, b"body").unwrap();
-        std::os::unix::fs::symlink(&target, &link).unwrap();
-
-        assert_eq!(
-            canonical_identity(&link).unwrap(),
-            canonical_identity(&target).unwrap(),
-        );
-
-        fs::remove_file(&link).unwrap();
-        fs::remove_file(&target).unwrap();
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn canonical_identity_still_answers_for_a_file_that_does_not_exist_yet() {
-        // Save As names a file that is not there yet, so `realpath` fails on
-        // it. The directory is still resolvable, and that is the part that
-        // carries the symlinks and the `..` segments.
-        let dir = temp_dir("canon-new");
-        let nested = dir.join("sub");
-        fs::create_dir_all(&nested).unwrap();
-
-        let indirect = nested.join("..").join("sub").join("fresh.md");
-        assert_eq!(
-            canonical_identity(&indirect).unwrap(),
-            canonical_identity(&nested).unwrap().join("fresh.md"),
-        );
-
-        // A missing DIRECTORY has no identity to report; the caller keeps the
-        // literal path, which is what it would have used anyway.
-        assert!(canonical_identity(&dir.join("nope").join("x.md")).is_err());
-
-        // The fallback must never manufacture the identity of a file that DOES
-        // exist — that would merge a Save As target into an unrelated open
-        // document. This is the property both branches above lean on whenever a
-        // volume distinguishes two spellings: the spelling that names nothing
-        // still gets an identity, and it has to be a different one.
-        //
-        // It runs on every platform and every volume, which matters because the
-        // two axes cannot all be reproduced on one machine: macOS folds Unicode
-        // normalization on every filesystem it mounts, so the "normalization
-        // distinguishes these" branch of the test above is only ever taken on
-        // Linux and Windows. This asserts the same underlying property here.
-        let existing = nested.join("taken.md");
-        fs::write(&existing, b"body").unwrap();
-        assert_ne!(
-            canonical_identity(&nested.join("not-taken.md")).unwrap(),
-            canonical_identity(&existing).unwrap(),
-            "a name that resolves to nothing must not borrow another file's identity",
-        );
-
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn verbatim_prefix_is_stripped_so_paths_stay_displayable() {
-        // `canonicalize` returns `\\?\C:\...` on Windows. That string reaches
-        // the tab bar, the window title and the recent-files list, and several
-        // Win32 APIs reject it, so it never leaves this module.
-        assert_eq!(
-            strip_verbatim_prefix(PathBuf::from(r"\\?\C:\notes\a.md")),
-            PathBuf::from(r"C:\notes\a.md"),
-        );
-        assert_eq!(
-            strip_verbatim_prefix(PathBuf::from(r"\\?\UNC\server\share\a.md")),
-            PathBuf::from(r"\\server\share\a.md"),
-        );
-        // Untouched everywhere else.
-        assert_eq!(
-            strip_verbatim_prefix(PathBuf::from("/notes/a.md")),
-            PathBuf::from("/notes/a.md"),
-        );
-    }
-
-    #[test]
-    fn atomic_write_refuses_a_read_only_target() {
-        // Replacing an inode by rename only needs write permission on the
-        // parent directory, so without an explicit check a `chmod 444` file
-        // would be rewritten on Unix and its read-only bit put back, while
-        // Windows' MoveFileExW refuses the same operation.
-        let path = temp_path("readonly");
-        fs::write(&path, b"original").unwrap();
-        let mut perms = fs::metadata(&path).unwrap().permissions();
-        perms.set_readonly(true);
-        fs::set_permissions(&path, perms).unwrap();
-
-        let error = atomic_write(&path, b"replacement")
-            .expect_err("a read-only target must be refused, not silently replaced");
-        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
-        assert_eq!(fs::read(&path).unwrap(), b"original");
-
-        // Deleting needs write permission on the directory rather than the
-        // file, so Unix needs no permission restore here; Windows refuses to
-        // delete a file that still carries the read-only attribute.
-        #[cfg(windows)]
-        {
-            let mut perms = fs::metadata(&path).unwrap().permissions();
-            #[allow(clippy::permissions_set_readonly_false)]
-            perms.set_readonly(false);
-            fs::set_permissions(&path, perms).unwrap();
-        }
-        fs::remove_file(&path).unwrap();
-    }
-
-    #[test]
-    fn atomic_write_replaces_the_target_and_leaves_no_temp_file() {
-        let dir = temp_path("atomic-dir");
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("session.json");
-        fs::write(&path, b"{\"old\":true}").unwrap();
-
-        atomic_write(&path, b"{\"new\":true}").unwrap();
-
-        assert_eq!(fs::read(&path).unwrap(), b"{\"new\":true}");
-        let leftovers: Vec<String> = fs::read_dir(&dir)
-            .unwrap()
-            .flatten()
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.contains("markpad-tmp"))
-            .collect();
-        assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
-
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn every_read_path_decodes_legacy_encodings_leniently() {
-        // "中文" in GBK. `read_to_string` rejects the whole document on the
-        // first invalid byte, so the same file used to open or fail purely by
-        // size: the truncated-preview branch has always decoded leniently.
-        let gbk = [0xD6u8, 0xD0, 0xCE, 0xC4];
-        assert!(String::from_utf8(gbk.to_vec()).is_err());
-
-        let path = temp_path("gbk.txt");
-        fs::write(&path, gbk).unwrap();
-        assert!(
-            fs::read_to_string(&path).is_err(),
-            "strict decoding is expected to reject these bytes",
-        );
-
-        let decoded = read_to_string_lossy(path.to_str().unwrap())
-            .expect("lenient decoding must open the file instead of failing");
-        assert!(decoded.content.contains('\u{FFFD}'), "got: {:?}", decoded.content);
-
-        fs::remove_file(path).unwrap();
-    }
-
-    // --- Decode fidelity ------------------------------------------------
-    //
-    // Opening these files leniently is deliberate (above). What must never
-    // follow is writing the result back: U+FFFD is not reversible, so an
-    // auto-save 1.5s after the first keystroke would destroy a document that
-    // was merely in another encoding. Every read path therefore reports
-    // whether its decode was destructive, and the frontend refuses that write
-    // (documentSession.saveContent). These pin the reporting half.
-    const GBK_ZHONGWEN: &[u8] = &[0xD6, 0xD0, 0xCE, 0xC4];
-
-    #[test]
-    fn gbk_bytes_are_reported_as_a_lossy_decode() {
-        let decoded = decode_utf8_lossy(GBK_ZHONGWEN.to_vec());
-        assert!(decoded.lossy, "GBK bytes cannot decode faithfully as UTF-8");
-        assert!(
-            decoded.content.contains('\u{FFFD}'),
-            "expected replacement characters, got {:?}",
-            decoded.content,
-        );
-    }
-
-    #[test]
-    fn valid_utf8_is_reported_as_faithful() {
-        let decoded = decode_utf8_lossy("中文".as_bytes().to_vec());
-        assert!(!decoded.lossy);
-        assert_eq!(decoded.content, "中文");
-    }
-
-    #[test]
-    fn read_file_content_checked_reports_a_lossy_file() {
-        // The tripwire that used to assert `read_file_content` REFUSES these
-        // bytes. #371 made every read path lenient, so refusing is no longer
-        // the protection — reporting is. A caller that fills an editable
-        // buffer must use this command and carry the flag onto the tab.
-        let path = temp_path("gbk-checked.md");
-        fs::write(&path, GBK_ZHONGWEN).unwrap();
-
-        let decoded = read_to_string_lossy(path.to_str().unwrap()).unwrap();
-        fs::remove_file(&path).unwrap();
-
-        assert!(
-            decoded.lossy,
-            "read_file_content_checked returned mojibake without reporting it",
-        );
-        assert!(decoded.content.contains('\u{FFFD}'));
-    }
-
-    #[test]
-    fn a_small_non_utf8_file_is_flagged_by_the_preview_too() {
-        // The ≤max_bytes branch. Before #371 it decoded strictly and could
-        // only fail, so it needed no flag; now it opens the same mojibake the
-        // truncated branch always did, and needs the same guard.
-        let path = temp_path("gbk-small.md");
-        let mut bytes = b"# ".to_vec();
-        bytes.extend_from_slice(GBK_ZHONGWEN);
-        fs::write(&path, &bytes).unwrap();
-
-        let preview = build_markdown_preview(&path, 50_000).unwrap();
-        fs::remove_file(&path).unwrap();
-
-        assert!(preview.is_full, "this file fits in the preview budget");
-        assert!(preview.lossy, "the save guard has nothing to go on without this");
-        assert!(preview.content.contains('\u{FFFD}'));
-    }
-
-    #[test]
-    fn an_oversized_non_utf8_preview_is_flagged() {
-        let path = temp_path("gbk-preview.md");
-        let mut bytes = b"# ".to_vec();
-        bytes.extend_from_slice(GBK_ZHONGWEN);
-        bytes.extend_from_slice(b"\nplus enough text to exceed the preview budget\n");
-        fs::write(&path, &bytes).unwrap();
-
-        let preview = build_markdown_preview(&path, 8).unwrap();
-        fs::remove_file(&path).unwrap();
-
-        assert!(!preview.is_full);
-        assert!(preview.lossy);
-        assert!(preview.content.contains('\u{FFFD}'));
-    }
-
-    #[test]
-    fn an_oversized_utf8_preview_is_not_flagged() {
-        // The preview budget lands inside a multi-byte character. Reporting
-        // that as lossy would lock every large CJK or emoji document out of
-        // saving — a guard worse than the bug it protects against.
-        let path = temp_path("utf8-preview.md");
-        fs::write(&path, "中文标题很长".as_bytes()).unwrap();
-
-        let preview = build_markdown_preview(&path, 4).unwrap();
-        fs::remove_file(&path).unwrap();
-
-        assert!(!preview.is_full);
-        assert!(!preview.lossy, "unexpected flag on {:?}", preview.content);
-        assert_eq!(preview.content, "中");
-    }
-
-    #[test]
-    fn truncation_boundary_drops_only_a_split_trailing_character() {
-        assert_eq!(utf8_truncation_boundary(&[]), 0);
-        assert_eq!(utf8_truncation_boundary(b"ab"), 2);
-
-        let three_byte = "中".as_bytes();
-        assert_eq!(utf8_truncation_boundary(three_byte), 3);
-        assert_eq!(utf8_truncation_boundary(&three_byte[..2]), 0);
-        assert_eq!(utf8_truncation_boundary(&three_byte[..1]), 0);
-
-        let four_byte = "🙂".as_bytes();
-        assert_eq!(utf8_truncation_boundary(four_byte), 4);
-        assert_eq!(utf8_truncation_boundary(&four_byte[..3]), 0);
-
-        // Only the tail is affected; earlier bytes are kept.
-        let mixed = "ab中".as_bytes();
-        assert_eq!(utf8_truncation_boundary(&mixed[..4]), 2);
-
-        // A buffer that is not UTF-8 at all must still yield a full-length
-        // preview; at most the last three bytes can ever be dropped.
-        let gbk = [0xD6u8, 0xD0, 0xCE, 0xC4];
-        assert!(utf8_truncation_boundary(&gbk) >= gbk.len() - 3);
-    }
-
-    #[test]
-    fn zip_entry_reads_stop_at_the_limit_even_when_the_header_understates_size() {
-        let payload = vec![b'a'; 64];
-        assert_eq!(
-            read_zip_entry_to_string(payload.as_slice(), 64).unwrap().len(),
-            64,
-        );
-        assert!(
-            read_zip_entry_to_string(payload.as_slice(), 32).is_err(),
-            "an entry larger than the ceiling must be rejected, not buffered",
-        );
-    }
-
-    #[test]
-    fn export_data_url_uses_mime_from_extension_case_insensitively() {
-        assert_eq!(mime_type_for_export_path(Path::new("diagram.PNG")), "image/png");
-        assert_eq!(mime_type_for_export_path(Path::new("photo.JpEg")), "image/jpeg");
-        assert_eq!(mime_type_for_export_path(Path::new("vector.svg")), "image/svg+xml");
-        assert_eq!(mime_type_for_export_path(Path::new("unknown.bin")), "application/octet-stream");
-    }
-
-    #[test]
-    fn export_data_url_encodes_bytes_with_mime() {
-        assert_eq!(
-            file_bytes_to_data_url("image/png", b"Markpad"),
-            "data:image/png;base64,TWFya3BhZA==",
-        );
-    }
-
-    #[test]
-    fn task_list_checkbox_is_emitted_at_the_start_of_its_list_item() {
-        // The attribute order here is comrak's, captured, not a requirement:
-        // 0.18 wrote `disabled="" checked=""` and 0.54 writes them the other
-        // way round. What this pins is that `data-task-checkbox` is present on
-        // *both* items and that the marker sits at the start of the `<li>`.
-        // `TASK_ITEM_RE` deliberately no longer depends on the order, so a
-        // future reordering fails here — loudly — instead of quietly
-        // un-marking one of the two.
-        let html = convert_markdown("- [ ] open task\n- [x] completed task\n");
-        assert!(
-            html.contains("<li data-sourcepos=\"1:1-1:15\"><input type=\"checkbox\" data-task-checkbox=\"\" disabled=\"\" /> open task</li>"),
-            "unexpected task-list HTML: {html}",
-        );
-        assert!(
-            html.contains("<li data-sourcepos=\"2:1-2:20\"><input type=\"checkbox\" data-task-checkbox=\"\" checked=\"\" disabled=\"\" /> completed task</li>"),
-            "unexpected task-list HTML: {html}",
-        );
-    }
-
-    #[test]
-    fn raw_html_checkboxes_are_not_marked_as_tasks() {
-        let html = convert_markdown("- <input type=\"checkbox\" /> raw control\n");
-        assert!(
-            !html.contains("data-task-checkbox"),
-            "raw HTML control was incorrectly marked as a task: {html}",
-        );
-    }
-
-    #[test]
-    fn nested_and_quoted_task_checkboxes_are_marked() {
-        let html = convert_markdown("- [ ] parent\n  - [x] nested\n\n> - [ ] quoted\n");
-        assert_eq!(
-            html.matches("data-task-checkbox").count(),
-            3,
-            "unexpected task-list HTML: {html}",
-        );
-    }
-
-    #[test]
-    fn markdown_protocol_preserves_task_markers_for_many_source_lines() {
-        let markdown = (1..=64)
-            .map(|line| match line % 3 {
-                0 => format!("> - [ ] quoted task {line}"),
-                1 => format!("- [ ] task {line}"),
-                _ => format!("  - [x] nested task {line}"),
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let html = convert_markdown(&markdown);
-        assert_eq!(html.matches("data-task-checkbox").count(), 64, "{html}");
-        assert!(html.contains("data-sourcepos=\"64:1-64:"), "{html}");
-    }
-
-    #[test]
-    fn multiline_wikilinks_do_not_shift_task_source_positions() {
-        let html = convert_markdown("[[#first\nsecond|alias]]\n- [ ] task\n");
-        assert!(
-            html.contains("data-task-checkbox"),
-            "task source position was shifted by a multiline wikilink: {html}",
-        );
-    }
-
-    #[test]
-    fn embed_protection_survives_longer_backtick_runs_earlier_in_the_doc() {
-        // A 4-backtick inline sample desynchronized the old regex pairing and
-        // exposed every later code span to rewriting.
-        let input = "```` ```mermaid ```` fence sample\n\ncode: `![[not-an-embed.md]]`\n";
-        let out = process_internal_embeds(input);
-        assert!(out.contains("`![[not-an-embed.md]]`"), "got: {out}");
-        assert!(!out.contains("<img"), "got: {out}");
-    }
-
-    #[test]
-    fn embeds_inside_tilde_fences_are_protected() {
-        // The old pattern only knew ``` fences; ~~~ was not protected at all.
-        let input = "~~~\n![[inside.md]]\n~~~\n\n![[outside.md]]\n";
-        let out = process_internal_embeds(input);
-        assert!(out.contains("![[inside.md]]"), "got: {out}");
-        assert!(out.contains("<img src=\"outside.md\""), "got: {out}");
-    }
-
-    #[test]
-    fn fence_closes_only_on_a_run_at_least_as_long() {
-        let input = "````\n```\n![[still-code.md]]\n````\n![[after.md]]\n";
-        let out = process_internal_embeds(input);
-        assert!(out.contains("![[still-code.md]]"), "got: {out}");
-        assert!(out.contains("<img src=\"after.md\""), "got: {out}");
-    }
-
-    #[test]
-    fn unclosed_fence_protects_to_end_of_input() {
-        let input = "```\n![[never-closed.md]]\n";
-        let out = process_internal_embeds(input);
-        assert!(out.contains("![[never-closed.md]]"), "got: {out}");
-    }
-
-    #[test]
-    fn double_backtick_span_pairs_only_with_double_backticks() {
-        // `` a ` b `` is ONE span; the inner single backtick does not close it.
-        let input = "`` a ` ![[in-span.md]] `` then ![[outside.md]]\n";
-        let out = process_internal_embeds(input);
-        assert!(out.contains("![[in-span.md]]"), "got: {out}");
-        assert!(out.contains("<img src=\"outside.md\""), "got: {out}");
-    }
-
-    #[test]
-    fn embeds_outside_code_are_still_rewritten_with_sizes() {
-        let out = process_internal_embeds("![[pic.png|300x200]]\n");
-        assert!(out.contains("width=\"300\""), "got: {out}");
-        assert!(out.contains("height=\"200\""), "got: {out}");
-    }
-
-    #[test]
-    fn highlight_protection_survives_quadruple_backtick_inline_code() {
-        let input = "```` ``` ```` intro\n\n`==not highlighted==` but ==this is==\n";
-        let out = process_wikilinks(input);
-        assert!(out.contains("`==not highlighted==`"), "got: {out}");
-        assert!(out.contains("<mark>this is</mark>"), "got: {out}");
-    }
-
-    #[test]
-    fn wikilinks_and_inline_footnotes_in_code_spans_stay_literal() {
-        let input = "`[[#heading]]` and `^[not a footnote]` but [[#real|jump]]\n";
-        let out = process_wikilinks(input);
-        assert!(out.contains("`[[#heading]]`"), "got: {out}");
-        assert!(out.contains("`^[not a footnote]`"), "got: {out}");
-        assert!(out.contains("[jump](#real)"), "got: {out}");
-    }
-
-    /// A document that has BOTH kinds of code region, with the inline span at
-    /// a lower offset than the fence.
-    ///
-    /// `in_code_region` is a binary search, so `code_region_ranges` has to
-    /// emit its regions in document order. The two kinds are found by
-    /// different parts of the scan — fences by the line walk, inline spans by
-    /// `push_inline_code_spans` over the text between fences — and a build
-    /// order that appends all of one kind after all of the other leaves the
-    /// vector unsorted for exactly this shape of document. The binary search
-    /// then walks straight past the fence and every marker inside it is
-    /// reported as ordinary prose (#375 / #389 all over again).
-    ///
-    /// Every marker below is checked, not just one. `process_wikilinks` runs
-    /// a separate pass per marker kind and each probes `in_code_region` at its
-    /// own offset, so a probe that happens to land inside the region does not
-    /// say anything about the probes beside it.
-    const FENCE_AFTER_INLINE_CODE: &str = concat!(
-        "Prose with `a code span` in it.\n",
-        "\n",
-        "```text\n",
-        "![[embed.md]]\n",
-        "[[wikilink]]\n",
-        "==highlight==\n",
-        "^[footnote]\n",
-        "```\n",
-    );
-
-    #[test]
-    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_embeds() {
-        let out = process_internal_embeds(FENCE_AFTER_INLINE_CODE);
-        assert!(
-            out.contains("![[embed.md]]") && !out.contains("<img"),
-            "an embed inside the fence was rewritten — code regions reached \
-             `in_code_region` out of document order: {out}",
-        );
-    }
-
-    #[test]
-    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_wikilinks() {
-        let out = process_wikilinks(FENCE_AFTER_INLINE_CODE);
-        for marker in ["[[wikilink]]", "==highlight==", "^[footnote]"] {
-            assert!(
-                out.contains(marker),
-                "`{marker}` inside the fence was rewritten — code regions \
-                 reached `in_code_region` out of document order: {out}",
-            );
-        }
-        // The inline span itself is still protected, and still a span.
-        assert!(out.contains("`a code span`"), "got: {out}");
-    }
-
-    #[test]
-    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_autolinks() {
-        // The third consumer. A bare URL inside a fence must stay text;
-        // comrak's own autolinker never sees a code block.
-        let input = "Prose with `a code span` in it.\n\n```text\n(https://example.com/x)y\n```\n";
-        let out = process_parenthesized_autolinks(input);
-        assert!(
-            !out.contains("]("),
-            "a URL inside the fence was linkified: {out}",
-        );
-    }
-
-    #[test]
-    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_math() {
-        // The fourth consumer. `mask_math_spans` hides math from CommonMark's
-        // inline rules; dollars inside a fence are not math and masking them
-        // rewrites the code block the user typed.
-        let input = "Prose with `a code span` in it.\n\n```text\n$x_1$ and $y_2$\n```\n";
-        let masked = mask_math_spans(input);
-        assert_eq!(
-            masked.text, input,
-            "dollars inside the fence were masked as math",
-        );
-    }
-
-    #[test]
-    fn multibyte_content_inside_a_fence_does_not_panic() {
-        let input = "```text\n中文开头的一行\n```\n\n![[outside.png]]\n";
-        let result = std::panic::catch_unwind(|| process_internal_embeds(input));
-
-        let out = result.expect("fenced multibyte content must not panic");
-        assert!(out.contains("中文开头的一行"), "got: {out}");
-        assert!(out.contains("<img src=\"outside.png\""), "got: {out}");
-    }
-
-    #[test]
-    fn autolink_inside_parentheses_stops_before_adjacent_text() {
-        let input = "See (https://www.speedtest.net/awards/united_states/)for more information.";
-        let html = convert_markdown(input);
-
-        assert!(
-            html.contains("href=\"https://www.speedtest.net/awards/united_states/\""),
-            "got: {html}"
-        );
-        assert!(html.contains(")for more information."), "got: {html}");
-        assert!(
-            !html.contains("href=\"https://www.speedtest.net/awards/united_states/)for\""),
-            "got: {html}"
-        );
-    }
-
-    #[test]
-    fn path_components_reject_traversal_separators_and_absolute_paths() {
-        for invalid in ["", ".", "..", "../theme", "folder/theme", "folder\\theme", "/tmp/theme"] {
-            assert!(safe_path_component(invalid, "test").is_err(), "{invalid}");
-        }
-        assert_eq!(safe_path_component("SynthWave '84", "test").unwrap(), "SynthWave '84");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn image_directory_rejects_symlink_escape() {
-        use std::os::unix::fs::symlink;
-
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("markpad-path-root-{nonce}"));
-        let outside = std::env::temp_dir().join(format!("markpad-path-outside-{nonce}"));
-        fs::create_dir_all(&root).unwrap();
-        fs::create_dir_all(&outside).unwrap();
-        symlink(&outside, root.join("images")).unwrap();
-
-        assert!(resolve_image_directory(root.to_str().unwrap(), "images").is_err());
-
-        fs::remove_dir_all(root).unwrap();
-        fs::remove_dir_all(outside).unwrap();
-    }
-
-    #[test]
-    fn theme_slug_collapses_punctuation_runs() {
-        assert_eq!(theme_slug("SynthWave '84"), "synthwave-84");
-    }
-
-    #[test]
-    fn display_math_keeps_multiple_braced_subscripts_out_of_markdown_emphasis() {
-        let html = convert_markdown("$$\\bar{b}_{1} + \\bar{b}_{2}$$\n");
-        assert!(
-            html.contains("$$\\bar{b}_{1} + \\bar{b}_{2}$$"),
-            "unexpected parser output: {html}",
-        );
-        assert!(!html.contains("<em"), "unexpected parser output: {html}");
-    }
-
-    // -----------------------------------------------------------------
-    // Math delimiters
-    //
-    // comrak runs CommonMark inline rules inside math delimiters, so KaTeX
-    // never sees what the user typed. The three cases below are the
-    // reported symptoms of that one cause; the block after them is the
-    // other half of the bargain, because a rule that mistakes prose for
-    // math breaks far more documents than the bug it fixes.
-    // -----------------------------------------------------------------
-
-    /// The rendered text with the markup taken back out, i.e. roughly what
-    /// `textContent` hands to KaTeX in the frontend.
-    fn rendered_math_source(html: &str) -> String {
-        let mut out = String::new();
-        let mut rest = html;
-        while let Some(at) = rest.find('<') {
-            out.push_str(&rest[..at]);
-            match rest[at..].find('>') {
-                Some(end) => rest = &rest[at + end + 1..],
-                None => {
-                    rest = "";
-                    break;
-                }
-            }
-        }
-        out.push_str(rest);
-        out.replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&amp;", "&")
-    }
-
-    #[test]
-    fn issue_174_inline_math_keeps_both_braced_subscripts() {
-        // `$\bar{b}_{1} + \bar{b}_{2}$` — the two `_` are both left- and
-        // right-flanking, so CommonMark pairs them into an `<em>` and KaTeX
-        // receives `$\bar{b}<em>{1} + \bar{b}</em>{2}$`. That is the whole of
-        // "only the first subscript can use braces", and why a space before
-        // the first `_` appeared to fix it.
-        let html = convert_markdown("Let $\\bar{b}_{1} + \\bar{b}_{2}$ be the estimates.\n");
-        assert!(!html.contains("<em"), "math was parsed as emphasis: {html}");
-        assert!(
-            html.contains("$\\bar{b}_{1} + \\bar{b}_{2}$"),
-            "the formula did not survive: {html}",
-        );
-    }
-
-    #[test]
-    fn issue_197_display_math_keeps_the_row_separators_of_an_aligned_block() {
-        // `\\` is a CommonMark escape for a literal `\`, so every row
-        // separator of the block is eaten and KaTeX renders "Only One
-        // Long-Long Line" that overflows horizontally.
-        let markdown =
-            "$$\n\\begin{aligned}\na &= b \\\\\nc &= d \\\\\ne &= f\n\\end{aligned}\n$$\n";
-        let html = convert_markdown(markdown);
-        let source = rendered_math_source(&html);
-        assert_eq!(
-            source.matches("\\\\").count(),
-            2,
-            "the row separators were eaten as CommonMark escapes: {html}",
-        );
-        assert!(
-            source.contains("a &= b \\\\"),
-            "the row separators were eaten as CommonMark escapes: {html}",
-        );
-    }
-
-    #[test]
-    fn issue_177_math_keeps_escaped_percent_signs() {
-        // `\%` loses its backslash to CommonMark, and the bare `%` then
-        // starts a TeX comment: KaTeX reports "Unexpected end of input in a
-        // macro argument".
-        let html = convert_markdown("$$\\mathbf{Accuracy: 100\\%}$$\n");
-        assert!(
-            html.contains("\\mathbf{Accuracy: 100\\%}"),
-            "the escaped percent sign was eaten: {html}",
-        );
-    }
-
-    #[test]
-    fn math_delimiters_survive_every_other_commonmark_inline_rule() {
-        // The point of masking the span rather than one character class:
-        // emphasis, escapes and code marks are all TeX here.
-        let html = convert_markdown("$$a*b*c \\_ \\{ \\& ~y~ [z](w)$$\n");
-        assert!(!html.contains("<em"), "got: {html}");
-        assert!(!html.contains("<del"), "got: {html}");
-        assert!(!html.contains("<a "), "got: {html}");
-        assert!(
-            rendered_math_source(&html).contains("$$a*b*c \\_ \\{ \\& ~y~ [z](w)$$"),
-            "got: {html}",
-        );
-    }
-
-    #[test]
-    fn a_multiline_display_math_block_keeps_one_line_per_source_line() {
-        // The mask is per line, so the block still occupies six lines and
-        // the frontend still sees one `<br />` per row.
-        let markdown = "$$\n\\begin{aligned}\nx &= 1\n\\end{aligned}\n$$\n\n- [ ] task\n";
-        let html = convert_markdown(markdown);
-        assert_eq!(html.matches("<br").count(), 4, "got: {html}");
-        assert!(
-            html.contains("data-sourcepos=\"7:1-7:10\""),
-            "the task moved off line 7: {html}",
-        );
-    }
-
-    #[test]
-    fn a_crlf_display_math_block_keeps_its_line_endings() {
-        let html = convert_markdown("$$\r\na_1 \\\\\r\nb_2\r\n$$\r\n");
-        assert!(!html.contains("<em"), "got: {html}");
-        assert!(
-            rendered_math_source(&html).contains("a_1 \\\\"),
-            "got: {html}",
-        );
-    }
-
-    // --- the other half: prose that must NOT become math ----------------
-
-    #[test]
-    fn two_prices_in_one_sentence_are_not_a_math_span() {
-        // The failure mode that matters most. `$100 and $200` pairs under any
-        // naive "next `$` closes it" rule and would silently swallow the
-        // Markdown of every document that mentions two prices.
-        let html = convert_markdown("It cost $100 and $200 today.\n");
-        assert!(
-            html.contains("It cost $100 and $200 today."),
-            "a price was treated as math: {html}",
-        );
-    }
-
-    #[test]
-    fn ordinary_dollar_amounts_are_not_math_spans() {
-        for markdown in [
-            "The price is $5.\n",
-            "Between $5 and $10.\n",
-            "$100$200 back to back.\n",
-            "A lone $ sign.\n",
-            "Trailing dollar $\n",
-            "Costs $ 5 with a space.\n",
-            "$5\n$6\n",
-        ] {
-            let html = convert_markdown(markdown);
-            assert_eq!(
-                rendered_math_source(&html).trim(),
-                markdown.trim(),
-                "input {markdown:?} was rewritten: {html}",
-            );
-        }
-    }
-
-    #[test]
-    fn an_escaped_dollar_never_opens_a_math_span() {
-        let html = convert_markdown("Pay \\$100 for $x$ items.\n");
-        assert!(
-            html.contains("Pay \\$100 for $x$ items."),
-            "the escaped dollar opened a span: {html}",
-        );
-    }
-
-    #[test]
-    fn an_escaped_dollar_reaches_the_frontend_still_escaped() {
-        // comrak resolves `\$` to `$`, after which nothing downstream can tell
-        // "the reader wants a dollar sign" from "the reader wants a formula" —
-        // and the frontend, which is the side that decides, renders the second.
-        // So the escape is masked like math is and handed over intact; the
-        // frontend resolves it in `convertInlineMathDelimiters`.
-        let html = convert_markdown("Literal \\$\\$x\\$\\$ here.\n");
-        assert!(
-            html.contains("Literal \\$\\$x\\$\\$ here."),
-            "the escape was resolved before the frontend could honour it: {html}",
-        );
-    }
-
-    #[test]
-    fn an_escaped_backslash_keeps_the_dollar_behind_it_live() {
-        // `\\$` is an escaped backslash and then an ordinary `$`. Masking only
-        // the last backslash would hand the frontend `\$` and lose the
-        // distinction the whole mask exists to preserve.
-        let html = convert_markdown("A backslash \\\\$ here.\n");
-        assert!(
-            html.contains("A backslash \\\\$ here."),
-            "the backslash run was split: {html}",
-        );
-    }
-
-    #[test]
-    fn an_escaped_dollar_inside_a_formula_stays_part_of_the_formula() {
-        // Inside math, `\$` is TeX for a dollar sign. The math span already
-        // shields it, and claiming it separately would cut the span in two.
-        let html = convert_markdown("$a \\$ b$\n");
-        assert_eq!(rendered_math_source(&html).trim(), "$a \\$ b$");
-    }
-
-    #[test]
-    fn an_escaped_dollar_in_a_link_destination_is_resolved_not_forwarded() {
-        // Nothing unescapes an `href` on the way to the reader, so the
-        // backslash would simply become part of the URL.
-        let html = convert_markdown("[t](http://example.com/\\$5)\n");
-        assert!(
-            html.contains("href=\"http://example.com/$5\""),
-            "the escape leaked into the link destination: {html}",
-        );
-    }
-
-    #[test]
-    fn an_escaped_dollar_inside_code_is_left_to_commonmark() {
-        // A backslash is not an escape character inside code, so `\$` is two
-        // literal characters there and comrak already gets it right.
-        let html = convert_markdown("Use `\\$x\\$` here.\n");
-        assert!(
-            html.contains(">\\$x\\$</code>"),
-            "the mask reached into a code span: {html}",
-        );
-    }
-
-    #[test]
-    fn dollars_inside_code_never_open_a_math_span() {
-        // A single `$$` inside a fence used to flip the delimiter parity of
-        // the entire document, because the old protection just split on `$$`.
-        let markdown = "```sh\necho $$\n```\n\nA *word* and $$x_1$$ after.\n\n`$a$` stays code.\n";
-        let html = convert_markdown(markdown);
-        assert!(html.contains("<em"), "the fence ate the emphasis: {html}");
-        assert!(
-            html.contains("$$x_1$$"),
-            "the math after the fence lost its protection: {html}",
-        );
-        assert!(
-            html.contains(">$a$</code>"),
-            "an inline code span was treated as math: {html}",
-        );
-    }
-
-    #[test]
-    fn a_math_span_never_reaches_across_an_inline_code_span() {
-        // The frontend cannot pair delimiters across a `<code>` element —
-        // `processInlineMath` rejects the whole subtree — so neither may the
-        // backend: masking here would silently eat the code span.
-        let html = convert_markdown("$a `x` b$ and *emphasis*.\n");
-        assert!(html.contains(">x</code>"), "got: {html}");
-        assert!(html.contains("<em"), "got: {html}");
-    }
-
-    #[test]
-    fn a_math_span_never_reaches_across_a_line_break() {
-        // `hardbreaks` puts each source line in its own text node, so an
-        // unpaired `$` must not reach the next line and blank out its
-        // Markdown.
-        let html = convert_markdown("Costs $5 today\nand *this* is emphasis $\n");
-        assert!(html.contains("<em"), "got: {html}");
-    }
-
-    #[test]
-    fn an_unpaired_display_delimiter_does_not_swallow_the_document() {
-        let markdown = "$$ unpaired\n\nA *word*.\n\nAnother paragraph with $$ too.\n";
-        let html = convert_markdown(markdown);
-        assert!(html.contains("<em"), "the stray `$$` ran away: {html}");
-    }
-
-    #[test]
-    fn a_document_containing_the_mask_prefix_still_round_trips() {
-        // Uniqueness is by construction, not by luck: the prefix grows until
-        // the document does not contain it.
-        let markdown = format!("{MATH_MASK_PREFIX}0{MATH_MASK_SUFFIX} and $x_1$ here.\n");
-        let html = convert_markdown(&markdown);
-        assert!(
-            html.contains(&format!("{MATH_MASK_PREFIX}0{MATH_MASK_SUFFIX}")),
-            "the document's own text was eaten: {html}",
-        );
-        assert!(html.contains("$x_1$"), "the math was lost: {html}");
-        assert!(!html.contains("<em"), "got: {html}");
-    }
-
-    #[test]
-    fn a_masked_span_is_escaped_the_way_comrak_escapes_text() {
-        let html = convert_markdown("$a < b & c > d \"e\"$\n");
-        assert!(
-            html.contains("$a &lt; b &amp; c &gt; d &quot;e&quot;$"),
-            "the restored span was not escaped: {html}",
-        );
-    }
-
-    // -----------------------------------------------------------------
-    // The cross-language math-delimiter contract
-    //
-    // Everything above proves the backend hides the right spans from
-    // comrak. It cannot prove the thing correctness actually rests on:
-    // that the set the backend hides equals the set the *frontend*
-    // renders. Those are two implementations of one rule in two
-    // languages, and until now only one of them was pinned — loosening
-    // `findInlineMathEnd` in markdown.ts would have left every test in
-    // this file green.
-    //
-    //   backend ⊂ frontend → comrak mangles the formula before KaTeX
-    //                        sees it; that is #174, #177 and #197.
-    //   backend ⊃ frontend → the text is held back from Markdown and
-    //                        then rendered by nobody: the reader gets
-    //                        dead text that is neither prose nor a
-    //                        formula.
-    //
-    // So both sides are asserted against one shared, hand-authored
-    // table: scripts/mathDelimiterCorpus.json. The other half lives in
-    // scripts/mathDelimiterContract.test.ts and runs the real frontend.
-    // Change one side's rule and exactly one of the two goes red.
-    // -----------------------------------------------------------------
-
-    #[derive(serde::Deserialize)]
-    struct MathContractSpan {
-        kind: String,
-        source: String,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct MathContractCase {
-        name: String,
-        markdown: String,
-        html: String,
-        math: Vec<MathContractSpan>,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct MathContractCorpus {
-        cases: Vec<MathContractCase>,
-    }
-
-    fn math_contract_corpus() -> MathContractCorpus {
-        serde_json::from_str(include_str!("../../scripts/mathDelimiterCorpus.json"))
-            .expect("scripts/mathDelimiterCorpus.json must stay valid JSON")
-    }
-
-    /// What the backend decided, in the corpus's vocabulary.
-    fn recognised_math(markdown: &str) -> Vec<(String, String)> {
-        let regions = code_region_ranges(markdown);
-        find_math_spans(markdown, &regions)
-            .into_iter()
-            .map(|(start, end)| {
-                let span = &markdown[start..end];
-                match span
-                    .strip_prefix("$$")
-                    .and_then(|inner| inner.strip_suffix("$$"))
-                {
-                    // `extractDisplayMathBlock` trims; mirror it exactly.
-                    Some(inner) => ("display".to_owned(), inner.trim().to_owned()),
-                    None => ("inline".to_owned(), span[1..span.len() - 1].to_owned()),
-                }
-            })
-            .collect()
-    }
-
-    #[test]
-    fn the_backend_recognises_exactly_the_math_the_contract_lists() {
-        for case in math_contract_corpus().cases {
-            let expected: Vec<(String, String)> = case
-                .math
-                .iter()
-                .map(|span| (span.kind.clone(), span.source.clone()))
-                .collect();
-            assert_eq!(
-                recognised_math(&case.markdown),
-                expected,
-                "{}: the backend and the contract disagree about what is math\n  input: {:?}",
-                case.name,
-                case.markdown,
-            );
-        }
-    }
-
-    #[test]
-    fn the_math_contract_corpus_is_a_live_capture() {
-        // Keeps the `html` the frontend test consumes honest: it is what
-        // this renderer produces today, not what it produced once.
-        for case in math_contract_corpus().cases {
-            assert_eq!(
-                convert_markdown(&case.markdown),
-                case.html,
-                "{}: scripts/mathDelimiterCorpus.json no longer matches this \
-                 renderer — replace its `html` with the value on the left, and \
-                 leave `markdown` and `math` alone",
-                case.name,
-            );
-        }
-    }
-
-    #[test]
-    fn math_in_a_heading_keeps_the_anchor_a_wikilink_can_reach() {
-        // comrak derives the heading id from the *rendered* text, so the mask
-        // would otherwise become the anchor and silently break every
-        // `[[#heading]]` pointing at a heading that contains a formula.
-        let heading = "A heading with $x_1$";
-        let html = convert_markdown(&format!("# {heading}\n"));
-        assert!(html.contains("$x_1$"), "the math was lost: {html}");
-        assert_eq!(
-            heading_anchor_id(heading),
-            "a-heading-with-x_1",
-            "the wikilink side changed",
-        );
-        assert!(
-            html.contains("id=\"a-heading-with-x_1\""),
-            "the mask leaked into the anchor: {html}",
-        );
-    }
-
-    #[test]
-    fn math_in_a_link_destination_keeps_the_link_working() {
-        // The token has to survive `escape_href` too, which is why it is
-        // plain ASCII rather than a private-use character.
-        let html = convert_markdown("[t](http://example.com/$a$)\n");
-        assert!(
-            html.contains("href=\"http://example.com/$a$\""),
-            "the link destination was mangled: {html}",
-        );
-    }
-
-    #[test]
-    fn a_stray_backtick_does_not_swallow_later_paragraphs() {
-        // CommonMark parses inline elements per block and a blank line ends a
-        // block, so the loose backtick in the first paragraph cannot pair with
-        // the opening backtick of `run()` two paragraphs down.
-        let input =
-            "Use the ` character to start code.\n\n![[photo.png]]\n\nThen `run()` finishes.\n";
-
-        let out = process_internal_embeds(input);
-        assert!(out.contains("<img src=\"photo.png\""), "got: {out}");
-        assert!(out.contains("`run()`"), "got: {out}");
-    }
-
-    #[test]
-    fn a_stray_backtick_does_not_swallow_later_highlights_or_wikilinks() {
-        let input = "Use the ` character.\n\n==important== and [[#Some Heading|jump]]\n\nThen `run()` finishes.\n";
-
-        let out = process_wikilinks(input);
-        assert!(out.contains("<mark>important</mark>"), "got: {out}");
-        assert!(out.contains("(#some-heading)"), "got: {out}");
-    }
-
-    #[test]
-    fn inline_code_spans_still_pair_across_lines_inside_one_paragraph() {
-        // A code span may legitimately span several lines of the same block;
-        // the blank-line reset must not break that.
-        let input = "start `code\n![[inside.png]]` end\n";
-        let out = process_internal_embeds(input);
-        assert!(out.contains("![[inside.png]]"), "got: {out}");
-        assert!(!out.contains("<img"), "got: {out}");
-    }
-
-    #[test]
-    fn embed_attributes_are_html_escaped() {
-        // The viewer sanitizes with DOMPurify, but the HTML export path writes
-        // this markup straight to disk, so the quote has to die here.
-        let out = process_internal_embeds("![[a\" onerror=\"alert(1)]]\n");
-        assert!(!out.contains("onerror=\""), "attribute injection: {out}");
-        assert!(out.contains("&quot;"), "got: {out}");
-
-        let sized = process_internal_embeds("![[p.png|300\" onload=\"x]]\n");
-        assert!(!sized.contains("onload=\""), "attribute injection: {sized}");
-
-        let single = process_internal_embeds("![[p.png|64\" onload=\"y]]\n");
-        assert!(!single.contains("onload=\""), "attribute injection: {single}");
-    }
-
-    #[test]
-    fn embed_attribute_escaping_keeps_ordinary_paths_readable() {
-        let out = process_internal_embeds("![[my photo.png]]\n");
-        assert!(out.contains("src=\"my%20photo.png\""), "got: {out}");
-        assert!(out.contains("alt=\"my photo.png\""), "got: {out}");
-    }
-
-    #[test]
-    fn wikilink_anchors_match_the_ids_comrak_actually_renders() {
-        // Asserted against comrak's real output rather than a copy of its
-        // rules: if a comrak upgrade changes anchorization, this fails instead
-        // of silently producing wikilinks that jump nowhere.
-        for heading in [
-            "1. 概述",
-            "Ticks aren't in",
-            "Hello, World!",
-            "Setup & Teardown",
-            "under_score here",
-        ] {
-            let html = convert_markdown(&format!("## {heading}\n"));
-            let rendered_id = html
-                .split("id=\"")
-                .nth(1)
-                .and_then(|rest| rest.split('"').next())
-                .unwrap_or_else(|| panic!("no heading id rendered: {html}"));
-            assert_eq!(
-                heading_anchor_id(heading),
-                rendered_id,
-                "anchor for {heading:?} drifted from comrak: {html}",
-            );
-        }
-    }
-
-    #[test]
-    fn wikilink_targets_survive_punctuation_in_the_heading() {
-        // "1. 概述" used to become "1.-概述" while comrak rendered "1-概述",
-        // so the link resolved to nothing.
-        assert_eq!(heading_anchor_id("1. 概述"), "1-概述");
-
-        let out = process_wikilinks("[[#1. 概述|Overview]]\n");
-        assert!(out.contains("[Overview](#1-概述)"), "got: {out}");
-    }
-
-    #[test]
-    fn multiline_wikilinks_are_left_literal() {
-        // A heading id can never contain a newline, so such a target cannot
-        // resolve; rewriting it would also collapse two source lines into one
-        // and shift every task checkbox below it.
-        let out = process_wikilinks("[[#first\nsecond|alias]]\n");
-        assert!(out.contains("[[#first\nsecond|alias]]"), "got: {out}");
-    }
-
-    // ---- [[file#heading]] wikilinks -------------------------------------
-    //
-    // What these tests do NOT cover, and why:
-    //  * Bare note links, "[[Notes]]" with no heading. Deliberately out of
-    //    scope — see `wikilinks_without_a_heading_are_deliberately_left_literal`.
-    //  * Whether the target file exists. Resolution is the frontend's job
-    //    (`resolveMarkdownTargetPath` in src/lib/utils/markdownLinks.ts); the
-    //    Rust side never touches the filesystem here, so a link to a missing
-    //    note is emitted like any other and simply fails to open.
-    //  * Obsidian's nested-heading paths (`[[file#H1#H2]]`). Everything after
-    //    the first `#` is taken as one heading name, so such a target
-    //    anchorizes to the two names run together and will not resolve. That
-    //    matches the existing behaviour of the same-document form.
-    //  * Duplicate headings. comrak appends `-1`, `-2`, … to the second and
-    //    later headings with the same text; a wikilink can only ever address
-    //    the first one (see the doc comment on `heading_anchor_id`).
-    //  * The actual click-through. The href *shape* the frontend accepts is
-    //    pinned from the TypeScript side in scripts/wikilinkFileTargets.test.ts.
-
-    #[test]
-    fn copy_reference_output_becomes_a_real_link() {
-        // `[[Notes#Setup]]` is exactly what the app's own "Copy Reference"
-        // menu item writes to the clipboard (MarkdownViewer.svelte); it used
-        // to render as literal text because the pattern required `#` to
-        // follow `[[` immediately.
-        let out = process_wikilinks("[[Notes#Setup]]\n");
-        assert!(out.contains("[Notes > Setup](Notes.md#setup)"), "got: {out}");
-    }
-
-    #[test]
-    fn file_wikilink_href_carries_a_markdown_extension_the_frontend_recognizes() {
-        // getMarkdownLinkTarget() only claims a link whose path has a known
-        // markdown extension, so a note name written without one — the way
-        // Copy Reference writes it — has to gain one here or the click falls
-        // through to the external-URL opener.
-        let out = process_wikilinks("[[docs/Guide#Setup]]\n");
-        assert!(out.contains("(docs/Guide.md#setup)"), "got: {out}");
-    }
-
-    #[test]
-    fn file_wikilink_keeps_an_extension_it_was_already_given() {
-        let out = process_wikilinks("[[Notes.md#Setup]]\n");
-        assert!(out.contains("(Notes.md#setup)"), "got: {out}");
-        assert!(!out.contains("Notes.md.md"), "got: {out}");
-
-        let txt = process_wikilinks("[[log.txt#Errors]]\n");
-        assert!(txt.contains("(log.txt#errors)"), "got: {txt}");
-        assert!(!txt.contains("log.txt.md"), "got: {txt}");
-    }
-
-    #[test]
-    fn wikilinks_without_a_heading_are_deliberately_left_literal() {
-        // Obsidian's bare note link "[[Notes]]" is out of scope: this change
-        // fixes Copy Reference, whose every call site emits a "#". Claiming
-        // every "[[…]]" would also swallow bracketed citation numbering and
-        // pre-empt CommonMark reference links, neither of which is a wikilink.
-        // See the PR description.
-        for input in [
-            "[[Notes]]\n",
-            "[[1]] Author, Title.\n",
-            "[[TODO]] revisit this.\n",
-            "[[foo]] and [[foo|bar]]\n",
-            "[[docs/Guide|Guide]]\n",
-        ] {
-            assert_eq!(process_wikilinks(input), input, "should be literal");
-        }
-
-        // A "#" in the alias half does not make it a heading link either.
-        let aliased = "[[Notes|see #1]]\n";
-        assert_eq!(process_wikilinks(aliased), aliased);
-
-        // A reference definition must keep resolving the CommonMark way.
-        let html = convert_markdown("[[foo]] here.\n\n[foo]: https://example.com\n");
-        assert!(html.contains("href=\"https://example.com\""), "got: {html}");
-        assert!(!html.contains("foo.md"), "got: {html}");
-    }
-
-    #[test]
-    fn file_wikilink_alias_and_subfolder_and_punctuated_heading() {
-        let out = process_wikilinks("[[docs/Guide#1. 概述|Overview]]\n");
-        assert!(out.contains("[Overview](docs/Guide.md#1-概述)"), "got: {out}");
-    }
-
-    #[test]
-    fn file_wikilink_percent_encodes_what_would_break_the_destination() {
-        // A space would end the destination and the rest would be read as a
-        // title; parentheses would close it early. decodeLinkPath() on the
-        // frontend undoes all of this.
-        let out = process_wikilinks("[[My Notes (v2)#Setup]]\n");
-        assert!(out.contains("(My%20Notes%20%28v2%29.md#setup)"), "got: {out}");
-        assert!(out.contains("[My Notes (v2) > Setup]"), "got: {out}");
-    }
-
-    #[test]
-    fn file_wikilink_block_reference_targets_the_block_id_anchor() {
-        // `^abc123` at the end of a line becomes <a id="abc123">, and comrak's
-        // anchorizer drops the caret, so both sides agree on "abc123".
-        let out = process_wikilinks("[[Notes#^abc123]]\n");
-        assert!(out.contains("(Notes.md#abc123)"), "got: {out}");
-    }
-
-    #[test]
-    fn wikilinks_to_files_the_viewer_cannot_open_stay_literal() {
-        // A non-markdown target would not be claimed by getMarkdownLinkTarget,
-        // so the click would reach openUrl() with a relative path resolved
-        // against the webview origin. Leaving it as text is the honest result.
-        for input in ["[[report.pdf#Intro]]\n", "[[diagram.svg#part]]\n"] {
-            let out = process_wikilinks(input);
-            assert_eq!(out, input, "got: {out}");
-        }
-    }
-
-    #[test]
-    fn same_document_wikilinks_are_unchanged_by_the_file_form() {
-        let out = process_wikilinks("[[#Some Heading|jump]]\n");
-        assert!(out.contains("[jump](#some-heading)"), "got: {out}");
-
-        let bare = process_wikilinks("[[#Setup]]\n");
-        assert!(bare.contains("[Setup](#setup)"), "got: {bare}");
-    }
-
-    #[test]
-    fn file_wikilinks_in_code_spans_and_fences_stay_literal() {
-        let span = process_wikilinks("`[[Notes#Setup]]` but [[Notes#Setup]]\n");
-        assert!(span.contains("`[[Notes#Setup]]`"), "got: {span}");
-        assert!(span.contains("(Notes.md#setup)"), "got: {span}");
-
-        let fence = process_wikilinks("```\n[[Notes#Setup]]\n```\n");
-        assert!(fence.contains("```\n[[Notes#Setup]]\n```"), "got: {fence}");
-    }
-
-    #[test]
-    fn embeds_are_not_also_treated_as_file_wikilinks() {
-        // process_internal_embeds runs first and consumes `![[…]]`; the guard
-        // matters for the standalone call and for an embed it declined.
-        let out = process_wikilinks("![[photo.png]]\n");
-        assert!(out.contains("![[photo.png]]"), "got: {out}");
-
-        let html = convert_markdown("![[photo.png]]\n");
-        assert!(html.contains("<img src=\"photo.png\""), "got: {html}");
-    }
-
-    #[test]
-    fn bracketed_link_text_is_still_a_commonmark_link() {
-        // "[[1]](https://example.com)" is a CommonMark link whose text is
-        // "[1]" — a common citation spelling in READMEs. Requiring a "#"
-        // already protects that spelling, so the first case here would pass
-        // without the trailing-"(" guard; the second would not, which is why
-        // the guard stays.
-        for input in [
-            "See [[1]](https://example.com) for details.\n",
-            "See [[1#x]](https://example.com) for details.\n",
-            "[[Notes#Setup]](https://example.com)\n",
-        ] {
-            assert_eq!(process_wikilinks(input), input, "should be literal");
-            let html = convert_markdown(input);
-            assert!(html.contains("href=\"https://example.com\""), "got: {html}");
-        }
-    }
-
-    #[test]
-    fn file_wikilink_survives_the_full_render_pipeline() {
-        let html = convert_markdown("[[Notes#Setup]]\n");
-        assert!(html.contains("href=\"Notes.md#setup\""), "got: {html}");
-    }
-
-    #[test]
-    fn attribute_escaping_covers_the_html_metacharacters() {
-        assert_eq!(
-            escape_html_attribute("a\"b'c&d<e>f"),
-            "a&quot;b&#39;c&amp;d&lt;e&gt;f",
-        );
-        assert_eq!(escape_html_attribute("plain.png"), "plain.png");
-    }
-
-    /// Creates `<root>/src<i>/<name>` holding `body` and returns its path.
-    fn drop_source(root: &Path, index: usize, name: &str, body: &[u8]) -> PathBuf {
-        let dir = root.join(format!("src{index}"));
-        fs::create_dir_all(&dir).unwrap();
-        let file = dir.join(name);
-        fs::write(&file, body).unwrap();
-        file
-    }
-
-    fn drop_into_img(src: &Path, doc_dir: &Path) -> String {
-        copy_file_to_img_blocking(src.to_str().unwrap(), doc_dir.to_str().unwrap(), "img").unwrap()
-    }
-
-    #[test]
-    fn repeated_drops_of_the_same_name_never_overwrite_an_earlier_copy() {
-        // Three same-named images from different folders, dropped in the same
-        // second. The conflict name used to be a *second-resolution* timestamp
-        // that was never re-checked for existence, so drops #2 and #3 computed
-        // the identical name and #3 silently replaced the bytes behind a link
-        // the document had already been given.
-        let root = temp_path("imgcopy-repeat");
-        let doc_dir = root.join("doc");
-        fs::create_dir_all(&doc_dir).unwrap();
-        let bodies: [&[u8]; 3] = [b"first", b"second", b"third"];
-        let sources: Vec<PathBuf> = bodies
-            .iter()
-            .enumerate()
-            .map(|(i, body)| drop_source(&root, i, "a.png", body))
-            .collect();
-
-        let written: Vec<String> = sources.iter().map(|src| drop_into_img(src, &doc_dir)).collect();
-
-        let distinct: std::collections::HashSet<&String> = written.iter().collect();
-        assert_eq!(distinct.len(), written.len(), "two drops shared a name: {written:?}");
-        for (rel, body) in written.iter().zip(bodies.iter()) {
-            assert_eq!(
-                fs::read(doc_dir.join(rel)).unwrap(),
-                *body,
-                "{rel} no longer holds the image that was dropped for it",
-            );
-        }
-
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn a_conflicting_dotfile_name_does_not_grow_a_trailing_dot() {
-        // ".png" is a dotfile, not an extension: the frontend's drop filter
-        // reads the name with `split('.').pop()` and sees "png", so it lets it
-        // through, while Rust's `Path::extension()` returns None. The old
-        // format string appended the separator unconditionally, so the conflict
-        // name ended in a dot. Windows strips a trailing dot when creating the
-        // file, so the link written into the document named a file that does
-        // not exist on disk; mac/Linux keep the dot and the link resolves.
-        let root = temp_path("imgcopy-dotfile");
-        let doc_dir = root.join("doc");
-        fs::create_dir_all(&doc_dir).unwrap();
-        let first = drop_source(&root, 0, ".png", b"first");
-        let second = drop_source(&root, 1, ".png", b"second");
-
-        drop_into_img(&first, &doc_dir);
-        let rel = drop_into_img(&second, &doc_dir);
-
-        assert!(!rel.ends_with('.'), "conflict name ends in a dot: {rel}");
-        assert_eq!(fs::read(doc_dir.join(&rel)).unwrap(), b"second");
-
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn concurrent_drops_of_the_same_name_each_get_their_own_file() {
-        // Two windows dropping the same image at the same moment: an
-        // `exists()` test followed by a separate copy leaves a window in which
-        // both callers see the name as free and one copy lands on top of the
-        // other.
-        const DROPS: usize = 8;
-        let root = temp_path("imgcopy-concurrent");
-        let doc_dir = root.join("doc");
-        fs::create_dir_all(&doc_dir).unwrap();
-        let sources: Vec<(PathBuf, Vec<u8>)> = (0..DROPS)
-            .map(|i| {
-                let body = format!("image-{i}").into_bytes();
-                (drop_source(&root, i, "a.png", &body), body)
-            })
-            .collect();
-
-        let written: Vec<(String, Vec<u8>)> = std::thread::scope(|scope| {
-            let handles: Vec<_> = sources
-                .iter()
-                .map(|(src, body)| {
-                    let doc_dir = doc_dir.clone();
-                    scope.spawn(move || (drop_into_img(src, &doc_dir), body.clone()))
-                })
-                .collect();
-            handles.into_iter().map(|h| h.join().unwrap()).collect()
-        });
-
-        let distinct: std::collections::HashSet<&String> = written.iter().map(|(rel, _)| rel).collect();
-        assert_eq!(distinct.len(), DROPS, "concurrent drops shared a name: {written:?}");
-        for (rel, body) in &written {
-            assert_eq!(
-                &fs::read(doc_dir.join(rel)).unwrap(),
-                body,
-                "{rel} no longer holds the image that was dropped for it",
-            );
-        }
-
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    // ---------------------------------------------------------------------
-    // The line-number contract of `convert_markdown`
-    //
-    // `convert_markdown` preprocesses the raw buffer, renders the *result*
-    // with `sourcepos = true`, and hands those line numbers to the frontend.
-    // The frontend then writes task-checkbox toggles back into the *raw*
-    // buffer at that line number. So every preprocessing step has to map
-    // input line N to output line N; a step that quietly eats or inserts a
-    // line makes the reading-mode checkbox rewrite a different line of the
-    // user's document (issue #352).
-    //
-    // A step MAY append after the last input line — the inline-footnote step
-    // parks its `[^ifn-N]: …` definitions there, which cannot shift the
-    // number of any line that already existed. It must never insert or drop
-    // a line inside the document.
-    //
-    // ⚠️ EVERY preprocessing step of `convert_markdown` MUST be registered in
-    // `line_preserving_transforms()` below. It is not optional and it is not
-    // best-effort: `every_convert_markdown_preprocessing_step_is_registered`
-    // re-reads this source file, extracts the calls `convert_markdown`
-    // actually makes, and fails if one of them is missing from the list.
-    // Adding a fifth transform without registering it turns that test red.
-    // ---------------------------------------------------------------------
-
-    type LineTransform = fn(&str) -> String;
-
-    /// The registry the contract test walks. Add every new preprocessing step.
-    fn line_preserving_transforms() -> Vec<(&'static str, LineTransform)> {
-        vec![
-            (
-                "process_parenthesized_autolinks",
-                (|s| process_parenthesized_autolinks(s).into_owned()) as LineTransform,
-            ),
-            (
-                "process_internal_embeds",
-                (|s| process_internal_embeds(s).into_owned()) as LineTransform,
-            ),
-            (
-                "process_wikilinks",
-                (|s| process_wikilinks(s).into_owned()) as LineTransform,
-            ),
-            (
-                "mask_math_spans",
-                (|s| mask_math_spans(s).text) as LineTransform,
-            ),
-        ]
-    }
-
-    /// Documents exercising every syntax the preprocessing steps claim, plus
-    /// the malformed spellings of each one — a lone `![[`, an unterminated
-    /// `^[`, a wikilink split over two lines — because those are exactly the
-    /// inputs where a lazy or newline-crossing pattern runs away.
-    const LINE_CONTRACT_CORPUS: &[&str] = &[
-        // A stray embed opener with a real embed further down.
-        "Prose with ![[ a stray opener.\n\n- [ ] task one\n\nLater an image ![[real.png]] here.\n",
-        // An inline footnote whose text wraps onto a second line.
-        "Some claim^[See the long explanation\nthat wraps to a second line] and more.\n\n- [ ] task\n",
-        // A block id sitting on its own line, Obsidian's block-reference form.
-        "A quotable paragraph.\n^blockid\n\n- [ ] task\n",
-        // A block id at the end of its own line.
-        "A quotable paragraph. ^blockid\n\n- [ ] task\n",
-        // Every well-formed spelling at once.
-        "![[pic.png|300x200]] [[#Setup|jump]] [[Notes#Setup]] ==mark== text^[note]\n\n- [ ] task\n",
-        // A wikilink split over two lines (already guarded, kept as a pin).
-        "[[#first\nsecond|alias]]\n- [ ] task\n",
-        // Code fences and spans, which every step must leave alone.
-        "```\n![[inside.md]]\n^[inside]\n==inside==\n```\n\n`==x==` ![[out.png]]\n",
-        // Unclosed fence, longer fences, tilde fences.
-        "~~~\n![[a.md]]\n\n````\n```\n![[b.md]]\n````\n\n```\n![[never-closed.md]]\n",
-        // Parenthesized autolink with nested parentheses.
-        "See (https://example.com/a(b)c)text here\n\n- [ ] task\n",
-        // Display math with underscores.
-        "$$\na_b\nc_d\n$$\n\nx^[note] and $$y_1$$\n\n- [ ] task\n",
-        // Headings, quotes, tables, nested and quoted tasks.
-        "# Head\n\n> quote ^qid\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n- [ ] task\n  - [x] nested\n\n> - [ ] quoted\n",
-        // Unbalanced brackets and carets in prose.
-        "A ^[ dangling footnote opener and a [[ dangling wikilink\n\n- [ ] task\n",
-        // Multibyte content — offsets are bytes, line numbers are not.
-        "中文段落 ![[图片.png]] ^[脚注]\n\n- [ ] 任务\n",
-        // Blank lines, CRLF, and no trailing newline.
-        "one\r\ntwo ![[x.png]]\r\n\r\n- [ ] task",
-    ];
-
-    const LINE_CONTRACT_SENTINEL: &str = "MPLINECONTRACTSENTINEL";
-
-    fn sentinel_line(text: &str) -> Option<usize> {
-        text.lines()
-            .position(|line| line.contains(LINE_CONTRACT_SENTINEL))
-    }
-
-    /// Asserts that `transform` keeps a marker line at the same line number.
-    ///
-    /// The marker is appended to every line-prefix of `input`, not just to
-    /// the whole document: a step that drops one line and inserts another
-    /// would leave the total unchanged, but no prefix boundary between the
-    /// two survives. Checking the sentinel rather than the raw line count is
-    /// what lets the inline-footnote step append its definitions afterwards.
-    fn assert_transform_preserves_line_numbers(
-        name: &str,
-        transform: LineTransform,
-        input: &str,
-    ) {
-        let lines: Vec<&str> = input.split_inclusive('\n').collect();
-        for take in 0..=lines.len() {
-            let mut probe = lines[..take].concat();
-            if !probe.is_empty() && !probe.ends_with('\n') {
-                probe.push('\n');
-            }
-            probe.push_str(LINE_CONTRACT_SENTINEL);
-            probe.push('\n');
-
-            let expected = sentinel_line(&probe).expect("the probe carries the sentinel");
-            let output = transform(&probe);
-            let actual = sentinel_line(&output).unwrap_or_else(|| {
-                panic!(
-                    "{name} swallowed the sentinel line entirely\n  input:  {probe:?}\n  output: {output:?}"
-                )
-            });
-            assert_eq!(
-                expected, actual,
-                "{name} moved line {expected} to line {actual}\n  input:  {probe:?}\n  output: {output:?}",
-            );
-        }
-    }
-
-    #[test]
-    fn every_preprocessing_step_preserves_source_line_numbers() {
-        for (name, transform) in line_preserving_transforms() {
-            for input in LINE_CONTRACT_CORPUS {
-                assert_transform_preserves_line_numbers(name, transform, input);
-            }
-        }
-    }
-
-    #[test]
-    fn the_whole_preprocessing_pipeline_preserves_source_line_numbers() {
-        // Individually line-preserving steps could still compose badly: one
-        // step's output is the next one's input, so a rewrite that creates a
-        // new `^[` or `![[` opener would only show up here.
-        let pipeline: LineTransform = |content| {
-            let autolinks = process_parenthesized_autolinks(content);
-            let embeds = process_internal_embeds(&autolinks);
-            let links = process_wikilinks(&embeds);
-            mask_math_spans(&links).text
-        };
-        for input in LINE_CONTRACT_CORPUS {
-            assert_transform_preserves_line_numbers("the preprocessing pipeline", pipeline, input);
-        }
-    }
-
-    /// The body of `convert_markdown`, read back out of this source file.
-    ///
-    /// The needle is assembled at runtime so that it does not match this
-    /// file's own source text. Line endings are normalised first: git checks
-    /// this file out with CRLF wherever `core.autocrlf` is on — the default
-    /// on Windows, and what the Windows CI runner does — and the `\n`-anchored
-    /// needles are about the shape of the source, not about how the working
-    /// tree happens to store it.
-    fn convert_markdown_body() -> String {
-        let source = include_str!("lib.rs").replace("\r\n", "\n");
-        let needle = format!("\nfn {}(content: &str) -> String {{", "convert_markdown");
-        let start = source
-            .find(&needle)
-            .expect("convert_markdown must keep its `&str -> String` signature");
-        let rest = &source[start + needle.len()..];
-        rest[..rest
-            .find("\n}\n")
-            .expect("convert_markdown must be terminated")]
-            .to_string()
-    }
-
-    #[test]
-    fn convert_markdown_hands_the_fail_safe_the_raw_buffer() {
-        // `annotate_task_checkboxes` is a fail-safe only while what reaches it
-        // is the buffer the command was called with. The hazard is not the
-        // call — it is the *name*: adding a step the obvious way,
-        //
-        //     let content = process_new_thing(content);
-        //
-        // near the top rebinds the parameter, and the unchanged call at the
-        // bottom starts handing over preprocessed text. Nothing about that
-        // edit looks wrong and no behavioural test can see it, because the two
-        // sides it is supposed to cross-check now agree by definition.
-        //
-        // "This string is the one the caller passed in" is provenance, not a
-        // type, so the compiler cannot be made to check it. What can be made
-        // structural is the shadowing: `convert_markdown` copies its input to
-        // `raw_buffer` before anything else runs, which turns the shadowing
-        // edit above into a harmless one. This test pins the three properties
-        // that copy depends on.
-        let body = convert_markdown_body();
-
-        let capture = "let raw_buffer = content;";
-        let first_let = body
-            .find("\n    let ")
-            .map(|i| i + "\n    ".len())
-            .expect("convert_markdown must bind something");
-        assert!(
-            body[first_let..].starts_with(capture),
-            "the raw buffer must be captured before the first preprocessing \
-             step, or the step can shadow `content` above it:\n{body}",
-        );
-        assert_eq!(
-            body.matches(capture).count(),
-            1,
-            "`raw_buffer` is bound more than once — a second binding is the \
-             same hole under a new name:\n{body}",
-        );
-        assert!(
-            Regex::new(r"annotate_task_checkboxes\([^;]*,\s*raw_buffer\s*\)")
-                .unwrap()
-                .is_match(&body),
-            "the fail-safe is no longer handed `raw_buffer`; whatever it now \
-             receives can agree with the HTML by construction:\n{body}",
-        );
-    }
-
-    #[test]
-    fn every_convert_markdown_preprocessing_step_is_registered() {
-        // Re-reads this file so that a fifth preprocessing step cannot be
-        // added to `convert_markdown` without also being put under the line
-        // contract. The needle is assembled at runtime so that it does not
-        // match this test's own source text.
-        //
-        // Line endings are normalised first. Git checks this file out with
-        // CRLF wherever `core.autocrlf` is on — the default on Windows, and
-        // what the Windows CI runner does — and the `\n`-anchored needles
-        // below are about the shape of the source, not about how the working
-        // tree happens to store it.
-        let source = include_str!("lib.rs").replace("\r\n", "\n");
-        let needle = format!("\nfn {}(content: &str) -> String {{", "convert_markdown");
-        let start = source
-            .find(&needle)
-            .expect("convert_markdown must keep its `&str -> String` signature");
-        let rest = &source[start + needle.len()..];
-        let body = &rest[..rest.find("\n}\n").expect("convert_markdown must be terminated")];
-
-        // Bare `name(` calls: `.method(` and `Type::assoc(` are excluded by
-        // the leading character class.
-        let call = Regex::new(r"(?:^|[^A-Za-z0-9_:.])([a-z_][a-z0-9_]*)\s*\(").unwrap();
-        // Calls in `convert_markdown` that are not preprocessing steps.
-        // `annotate_task_checkboxes` runs on the rendered HTML, after
-        // sourcepos numbers exist; it is the fail-safe for this contract
-        // rather than a participant in it. `restore_math_spans` also runs on
-        // the rendered HTML — it is the second half of `mask_math_spans`,
-        // which *is* registered, and it never sees the source buffer.
-        let not_a_transform = [
-            "markdown_to_html",
-            "annotate_task_checkboxes",
-            "restore_math_spans",
-        ];
-
-        let mut found: Vec<String> = call
-            .captures_iter(body)
-            .map(|caps| caps[1].to_string())
-            .filter(|name| !not_a_transform.contains(&name.as_str()))
-            .collect();
-        found.sort();
-        found.dedup();
-
-        let mut registered: Vec<String> = line_preserving_transforms()
-            .into_iter()
-            .map(|(name, _)| name.to_string())
-            .collect();
-        registered.sort();
-
-        assert_eq!(
-            found, registered,
-            "convert_markdown's preprocessing steps and the line-contract \
-             registry have drifted apart — register every new step in \
-             line_preserving_transforms() (or, if the call is not a \
-             preprocessing step, add it to not_a_transform and say why)",
-        );
-    }
-
-    #[test]
-    fn a_stray_embed_opener_leaves_the_document_and_its_tasks_intact() {
-        let markdown =
-            "Prose with ![[ a stray opener.\n\n- [ ] task one\n\nLater an image ![[real.png]] here.\n";
-        let html = convert_markdown(markdown);
-        assert!(
-            html.contains("task one"),
-            "the stray opener swallowed the prose: {html}",
-        );
-        assert!(
-            html.contains("data-task-checkbox"),
-            "the stray opener shifted the task source position: {html}",
-        );
-        // A real embed further down still renders.
-        assert!(html.contains("<img src=\"real.png\""), "got: {html}");
-    }
-
-    #[test]
-    fn a_multiline_inline_footnote_does_not_shift_task_source_positions() {
-        let html = convert_markdown(
-            "Some claim^[See the long explanation\nthat wraps to a second line] and more.\n\n- [ ] task\n",
-        );
-        assert!(
-            html.contains("data-task-checkbox"),
-            "the multiline inline footnote shifted the task source position: {html}",
-        );
-    }
-
-    #[test]
-    fn a_block_id_on_its_own_line_does_not_shift_task_source_positions() {
-        let markdown = "A quotable paragraph.\n^blockid\n\n- [ ] task\n";
-        let html = convert_markdown(markdown);
-        assert!(
-            html.contains("id=\"blockid\""),
-            "the block id anchor disappeared: {html}",
-        );
-        assert!(
-            html.contains("data-task-checkbox"),
-            "the block id shifted the task source position: {html}",
-        );
-    }
-
-    #[test]
-    fn task_checkboxes_stay_inert_when_the_html_and_the_buffer_disagree() {
-        // The fail-safe in `annotate_task_checkboxes`. Feed it HTML whose
-        // sourcepos numbers came from one document and the raw buffer of a
-        // different one — the shape a broken line contract produces. Line 3
-        // of the buffer is a fence, so annotating would let a click write a
-        // "- [x]" marker into a code block (issue #352).
-        let rendered =
-            convert_markdown("intro paragraph\n\n- [ ] task\n").replace(" data-task-checkbox=\"\"", "");
-        assert!(
-            rendered.contains("data-sourcepos=\"3:1-3:10\"><input type=\"checkbox\""),
-            "expected an unannotated task input on line 3: {rendered}",
-        );
-
-        let mismatched = annotate_task_checkboxes(
-            rendered.clone(),
-            "- [ ] real task\n\n```\nnot a task\n```\n",
-        );
-        assert!(
-            !mismatched.contains("data-task-checkbox"),
-            "the fail-safe let a checkbox through onto a line that is not a task: {mismatched}",
-        );
-
-        // Control: the same HTML against the buffer it was rendered from.
-        let matching = annotate_task_checkboxes(rendered, "intro paragraph\n\n- [ ] task\n");
-        assert!(
-            matching.contains("data-task-checkbox"),
-            "the fail-safe rejected a genuine task line: {matching}",
-        );
-    }
-}
-
 mod setup;
 mod tab_transfer;
 mod window_runtime;
@@ -4735,4 +2882,1861 @@ pub fn run() {
                 }
             }
         });
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(tag: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("markpad-{tag}-{nonce}"))
+    }
+
+    /// A directory to work in, so the case/normalization probes below cannot
+    /// collide with anything else in the temp dir.
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = temp_path(tag);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Does the volume `dir` lives on fold case? The tests below assert
+    /// different things depending on the answer, because the point of
+    /// `canonical_identity` is that it reports what the FILESYSTEM does rather
+    /// than what the platform usually does — a case-sensitive volume on macOS
+    /// and a case-insensitive volume on Linux both exist and both must work.
+    fn folds_case(dir: &Path) -> bool {
+        let upper = dir.join("CaseProbe.md");
+        fs::write(&upper, b"probe").unwrap();
+        let found = fs::metadata(dir.join("caseprobe.md")).is_ok();
+        fs::remove_file(&upper).unwrap();
+        found
+    }
+
+    #[test]
+    fn canonical_identity_reports_what_the_filesystem_does_about_case() {
+        let dir = temp_dir("canon-case");
+        let real = dir.join("Alpha.md");
+        fs::write(&real, b"body").unwrap();
+
+        let by_real = canonical_identity(&real).unwrap();
+        let lowered = dir.join("alpha.md");
+        // What the frontend consumes is whether these two come out EQUAL, so
+        // that is what gets asserted — not whether the lookup happened to
+        // succeed. Asking `is_err()` here tested the mechanism instead of the
+        // property, and got it wrong: on a case-sensitive volume the lowercase
+        // spelling names no file, but `canonical_identity` still answers for it
+        // through the parent-directory fallback that Save As depends on.
+        let by_lowered = canonical_identity(&lowered).ok();
+
+        // Either way, the identity is the name the DIRECTORY holds rather than
+        // the spelling that was asked for — otherwise the answer would depend
+        // on which spelling happened to be opened first.
+        assert_eq!(by_real.file_name().unwrap(), "Alpha.md");
+
+        if folds_case(&dir) {
+            // The two spellings name ONE file: opening both must not give two
+            // tabs, and saving through one must not be treated as a save to a
+            // different file. Both reduce to the same identity string, which
+            // is what lets the frontend keep comparing with `===`.
+            assert_eq!(
+                by_lowered.as_ref(),
+                Some(&by_real),
+                "one file must have one identity whichever way it is spelled",
+            );
+        } else {
+            // On a case-sensitive volume these are two different files and must
+            // keep being two. A `to_lowercase()` scheme would merge them here
+            // and quietly close a tab holding a genuinely different document —
+            // which is VS Code's open bug #123660, and the thing this whole
+            // approach exists to avoid.
+            assert_ne!(
+                by_lowered.as_ref(),
+                Some(&by_real),
+                "two files must keep two identities",
+            );
+        }
+
+        fs::remove_file(&real).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn canonical_identity_folds_unicode_normalization_when_the_volume_does() {
+        // APFS is normalization-INSENSITIVE as well as case-insensitive: a
+        // file written as NFC opens under its NFD spelling and vice versa.
+        // Case folding cannot reach this — the two strings differ in code
+        // points, not in case — so it is the clearest evidence that the
+        // question has to go to the filesystem.
+        //
+        // The two axes are independent, and all four combinations are real:
+        // default APFS folds both, case-sensitive APFS folds only
+        // normalization, NTFS folds only case, ext4 folds neither. So this
+        // probes normalization on its own rather than inferring it from the
+        // case answer or from the platform.
+        let dir = temp_dir("canon-nfd");
+        let nfc = dir.join("caf\u{e9}.md"); // café
+        let nfd = dir.join("cafe\u{301}.md"); // cafe + combining acute
+        fs::write(&nfc, b"body").unwrap();
+
+        let by_nfc = canonical_identity(&nfc).unwrap();
+        let by_nfd = canonical_identity(&nfd).ok();
+
+        if fs::metadata(&nfd).is_ok() {
+            assert_eq!(
+                by_nfd.as_ref(),
+                Some(&by_nfc),
+                "one file must have one identity whichever way it is spelled",
+            );
+        } else {
+            // A volume that keeps them apart really does have two files here,
+            // so the identities must stay apart too. As above, the assertion is
+            // on the identities and not on whether the lookup succeeded: the
+            // NFD spelling names nothing, but the parent-directory fallback
+            // still answers for it.
+            assert_ne!(
+                by_nfd.as_ref(),
+                Some(&by_nfc),
+                "two files must keep two identities",
+            );
+        }
+
+        fs::remove_file(&nfc).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_identity_resolves_a_symlink_to_its_target() {
+        // A link and its target are one file for every purpose Markpad has:
+        // `atomic_write` follows the link when it writes, so two tabs on the
+        // two names would be two auto-save timers on one document.
+        let dir = temp_dir("canon-link");
+        let target = dir.join("archive.md");
+        let link = dir.join("today.md");
+        fs::write(&target, b"body").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        assert_eq!(
+            canonical_identity(&link).unwrap(),
+            canonical_identity(&target).unwrap(),
+        );
+
+        fs::remove_file(&link).unwrap();
+        fs::remove_file(&target).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn canonical_identity_still_answers_for_a_file_that_does_not_exist_yet() {
+        // Save As names a file that is not there yet, so `realpath` fails on
+        // it. The directory is still resolvable, and that is the part that
+        // carries the symlinks and the `..` segments.
+        let dir = temp_dir("canon-new");
+        let nested = dir.join("sub");
+        fs::create_dir_all(&nested).unwrap();
+
+        let indirect = nested.join("..").join("sub").join("fresh.md");
+        assert_eq!(
+            canonical_identity(&indirect).unwrap(),
+            canonical_identity(&nested).unwrap().join("fresh.md"),
+        );
+
+        // A missing DIRECTORY has no identity to report; the caller keeps the
+        // literal path, which is what it would have used anyway.
+        assert!(canonical_identity(&dir.join("nope").join("x.md")).is_err());
+
+        // The fallback must never manufacture the identity of a file that DOES
+        // exist — that would merge a Save As target into an unrelated open
+        // document. This is the property both branches above lean on whenever a
+        // volume distinguishes two spellings: the spelling that names nothing
+        // still gets an identity, and it has to be a different one.
+        //
+        // It runs on every platform and every volume, which matters because the
+        // two axes cannot all be reproduced on one machine: macOS folds Unicode
+        // normalization on every filesystem it mounts, so the "normalization
+        // distinguishes these" branch of the test above is only ever taken on
+        // Linux and Windows. This asserts the same underlying property here.
+        let existing = nested.join("taken.md");
+        fs::write(&existing, b"body").unwrap();
+        assert_ne!(
+            canonical_identity(&nested.join("not-taken.md")).unwrap(),
+            canonical_identity(&existing).unwrap(),
+            "a name that resolves to nothing must not borrow another file's identity",
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn verbatim_prefix_is_stripped_so_paths_stay_displayable() {
+        // `canonicalize` returns `\\?\C:\...` on Windows. That string reaches
+        // the tab bar, the window title and the recent-files list, and several
+        // Win32 APIs reject it, so it never leaves this module.
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"\\?\C:\notes\a.md")),
+            PathBuf::from(r"C:\notes\a.md"),
+        );
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"\\?\UNC\server\share\a.md")),
+            PathBuf::from(r"\\server\share\a.md"),
+        );
+        // Untouched everywhere else.
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from("/notes/a.md")),
+            PathBuf::from("/notes/a.md"),
+        );
+    }
+
+    #[test]
+    fn atomic_write_refuses_a_read_only_target() {
+        // Replacing an inode by rename only needs write permission on the
+        // parent directory, so without an explicit check a `chmod 444` file
+        // would be rewritten on Unix and its read-only bit put back, while
+        // Windows' MoveFileExW refuses the same operation.
+        let path = temp_path("readonly");
+        fs::write(&path, b"original").unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&path, perms).unwrap();
+
+        let error = atomic_write(&path, b"replacement")
+            .expect_err("a read-only target must be refused, not silently replaced");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+
+        // Deleting needs write permission on the directory rather than the
+        // file, so Unix needs no permission restore here; Windows refuses to
+        // delete a file that still carries the read-only attribute.
+        #[cfg(windows)]
+        {
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+            fs::set_permissions(&path, perms).unwrap();
+        }
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn atomic_write_replaces_the_target_and_leaves_no_temp_file() {
+        let dir = temp_path("atomic-dir");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.json");
+        fs::write(&path, b"{\"old\":true}").unwrap();
+
+        atomic_write(&path, b"{\"new\":true}").unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"{\"new\":true}");
+        let leftovers: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("markpad-tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn every_read_path_decodes_legacy_encodings_leniently() {
+        // "中文" in GBK. `read_to_string` rejects the whole document on the
+        // first invalid byte, so the same file used to open or fail purely by
+        // size: the truncated-preview branch has always decoded leniently.
+        let gbk = [0xD6u8, 0xD0, 0xCE, 0xC4];
+        assert!(String::from_utf8(gbk.to_vec()).is_err());
+
+        let path = temp_path("gbk.txt");
+        fs::write(&path, gbk).unwrap();
+        assert!(
+            fs::read_to_string(&path).is_err(),
+            "strict decoding is expected to reject these bytes",
+        );
+
+        let decoded = read_to_string_lossy(path.to_str().unwrap())
+            .expect("lenient decoding must open the file instead of failing");
+        assert!(decoded.content.contains('\u{FFFD}'), "got: {:?}", decoded.content);
+
+        fs::remove_file(path).unwrap();
+    }
+
+    // --- Decode fidelity ------------------------------------------------
+    //
+    // Opening these files leniently is deliberate (above). What must never
+    // follow is writing the result back: U+FFFD is not reversible, so an
+    // auto-save 1.5s after the first keystroke would destroy a document that
+    // was merely in another encoding. Every read path therefore reports
+    // whether its decode was destructive, and the frontend refuses that write
+    // (documentSession.saveContent). These pin the reporting half.
+    const GBK_ZHONGWEN: &[u8] = &[0xD6, 0xD0, 0xCE, 0xC4];
+
+    #[test]
+    fn gbk_bytes_are_reported_as_a_lossy_decode() {
+        let decoded = decode_utf8_lossy(GBK_ZHONGWEN.to_vec());
+        assert!(decoded.lossy, "GBK bytes cannot decode faithfully as UTF-8");
+        assert!(
+            decoded.content.contains('\u{FFFD}'),
+            "expected replacement characters, got {:?}",
+            decoded.content,
+        );
+    }
+
+    #[test]
+    fn valid_utf8_is_reported_as_faithful() {
+        let decoded = decode_utf8_lossy("中文".as_bytes().to_vec());
+        assert!(!decoded.lossy);
+        assert_eq!(decoded.content, "中文");
+    }
+
+    #[test]
+    fn read_file_content_checked_reports_a_lossy_file() {
+        // The tripwire that used to assert `read_file_content` REFUSES these
+        // bytes. #371 made every read path lenient, so refusing is no longer
+        // the protection — reporting is. A caller that fills an editable
+        // buffer must use this command and carry the flag onto the tab.
+        let path = temp_path("gbk-checked.md");
+        fs::write(&path, GBK_ZHONGWEN).unwrap();
+
+        let decoded = read_to_string_lossy(path.to_str().unwrap()).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(
+            decoded.lossy,
+            "read_file_content_checked returned mojibake without reporting it",
+        );
+        assert!(decoded.content.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn a_small_non_utf8_file_is_flagged_by_the_preview_too() {
+        // The ≤max_bytes branch. Before #371 it decoded strictly and could
+        // only fail, so it needed no flag; now it opens the same mojibake the
+        // truncated branch always did, and needs the same guard.
+        let path = temp_path("gbk-small.md");
+        let mut bytes = b"# ".to_vec();
+        bytes.extend_from_slice(GBK_ZHONGWEN);
+        fs::write(&path, &bytes).unwrap();
+
+        let preview = build_markdown_preview(&path, 50_000).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(preview.is_full, "this file fits in the preview budget");
+        assert!(preview.lossy, "the save guard has nothing to go on without this");
+        assert!(preview.content.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn an_oversized_non_utf8_preview_is_flagged() {
+        let path = temp_path("gbk-preview.md");
+        let mut bytes = b"# ".to_vec();
+        bytes.extend_from_slice(GBK_ZHONGWEN);
+        bytes.extend_from_slice(b"\nplus enough text to exceed the preview budget\n");
+        fs::write(&path, &bytes).unwrap();
+
+        let preview = build_markdown_preview(&path, 8).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(!preview.is_full);
+        assert!(preview.lossy);
+        assert!(preview.content.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn an_oversized_utf8_preview_is_not_flagged() {
+        // The preview budget lands inside a multi-byte character. Reporting
+        // that as lossy would lock every large CJK or emoji document out of
+        // saving — a guard worse than the bug it protects against.
+        let path = temp_path("utf8-preview.md");
+        fs::write(&path, "中文标题很长".as_bytes()).unwrap();
+
+        let preview = build_markdown_preview(&path, 4).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(!preview.is_full);
+        assert!(!preview.lossy, "unexpected flag on {:?}", preview.content);
+        assert_eq!(preview.content, "中");
+    }
+
+    #[test]
+    fn truncation_boundary_drops_only_a_split_trailing_character() {
+        assert_eq!(utf8_truncation_boundary(&[]), 0);
+        assert_eq!(utf8_truncation_boundary(b"ab"), 2);
+
+        let three_byte = "中".as_bytes();
+        assert_eq!(utf8_truncation_boundary(three_byte), 3);
+        assert_eq!(utf8_truncation_boundary(&three_byte[..2]), 0);
+        assert_eq!(utf8_truncation_boundary(&three_byte[..1]), 0);
+
+        let four_byte = "🙂".as_bytes();
+        assert_eq!(utf8_truncation_boundary(four_byte), 4);
+        assert_eq!(utf8_truncation_boundary(&four_byte[..3]), 0);
+
+        // Only the tail is affected; earlier bytes are kept.
+        let mixed = "ab中".as_bytes();
+        assert_eq!(utf8_truncation_boundary(&mixed[..4]), 2);
+
+        // A buffer that is not UTF-8 at all must still yield a full-length
+        // preview; at most the last three bytes can ever be dropped.
+        let gbk = [0xD6u8, 0xD0, 0xCE, 0xC4];
+        assert!(utf8_truncation_boundary(&gbk) >= gbk.len() - 3);
+    }
+
+    #[test]
+    fn zip_entry_reads_stop_at_the_limit_even_when_the_header_understates_size() {
+        let payload = vec![b'a'; 64];
+        assert_eq!(
+            read_zip_entry_to_string(payload.as_slice(), 64).unwrap().len(),
+            64,
+        );
+        assert!(
+            read_zip_entry_to_string(payload.as_slice(), 32).is_err(),
+            "an entry larger than the ceiling must be rejected, not buffered",
+        );
+    }
+
+    #[test]
+    fn export_data_url_uses_mime_from_extension_case_insensitively() {
+        assert_eq!(mime_type_for_export_path(Path::new("diagram.PNG")), "image/png");
+        assert_eq!(mime_type_for_export_path(Path::new("photo.JpEg")), "image/jpeg");
+        assert_eq!(mime_type_for_export_path(Path::new("vector.svg")), "image/svg+xml");
+        assert_eq!(mime_type_for_export_path(Path::new("unknown.bin")), "application/octet-stream");
+    }
+
+    #[test]
+    fn export_data_url_encodes_bytes_with_mime() {
+        assert_eq!(
+            file_bytes_to_data_url("image/png", b"Markpad"),
+            "data:image/png;base64,TWFya3BhZA==",
+        );
+    }
+
+    #[test]
+    fn task_list_checkbox_is_emitted_at_the_start_of_its_list_item() {
+        // The attribute order here is comrak's, captured, not a requirement:
+        // 0.18 wrote `disabled="" checked=""` and 0.54 writes them the other
+        // way round. What this pins is that `data-task-checkbox` is present on
+        // *both* items and that the marker sits at the start of the `<li>`.
+        // `TASK_ITEM_RE` deliberately no longer depends on the order, so a
+        // future reordering fails here — loudly — instead of quietly
+        // un-marking one of the two.
+        let html = convert_markdown("- [ ] open task\n- [x] completed task\n");
+        assert!(
+            html.contains("<li data-sourcepos=\"1:1-1:15\"><input type=\"checkbox\" data-task-checkbox=\"\" disabled=\"\" /> open task</li>"),
+            "unexpected task-list HTML: {html}",
+        );
+        assert!(
+            html.contains("<li data-sourcepos=\"2:1-2:20\"><input type=\"checkbox\" data-task-checkbox=\"\" checked=\"\" disabled=\"\" /> completed task</li>"),
+            "unexpected task-list HTML: {html}",
+        );
+    }
+
+    #[test]
+    fn raw_html_checkboxes_are_not_marked_as_tasks() {
+        let html = convert_markdown("- <input type=\"checkbox\" /> raw control\n");
+        assert!(
+            !html.contains("data-task-checkbox"),
+            "raw HTML control was incorrectly marked as a task: {html}",
+        );
+    }
+
+    #[test]
+    fn nested_and_quoted_task_checkboxes_are_marked() {
+        let html = convert_markdown("- [ ] parent\n  - [x] nested\n\n> - [ ] quoted\n");
+        assert_eq!(
+            html.matches("data-task-checkbox").count(),
+            3,
+            "unexpected task-list HTML: {html}",
+        );
+    }
+
+    #[test]
+    fn markdown_protocol_preserves_task_markers_for_many_source_lines() {
+        let markdown = (1..=64)
+            .map(|line| match line % 3 {
+                0 => format!("> - [ ] quoted task {line}"),
+                1 => format!("- [ ] task {line}"),
+                _ => format!("  - [x] nested task {line}"),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let html = convert_markdown(&markdown);
+        assert_eq!(html.matches("data-task-checkbox").count(), 64, "{html}");
+        assert!(html.contains("data-sourcepos=\"64:1-64:"), "{html}");
+    }
+
+    #[test]
+    fn multiline_wikilinks_do_not_shift_task_source_positions() {
+        let html = convert_markdown("[[#first\nsecond|alias]]\n- [ ] task\n");
+        assert!(
+            html.contains("data-task-checkbox"),
+            "task source position was shifted by a multiline wikilink: {html}",
+        );
+    }
+
+    #[test]
+    fn embed_protection_survives_longer_backtick_runs_earlier_in_the_doc() {
+        // A 4-backtick inline sample desynchronized the old regex pairing and
+        // exposed every later code span to rewriting.
+        let input = "```` ```mermaid ```` fence sample\n\ncode: `![[not-an-embed.md]]`\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("`![[not-an-embed.md]]`"), "got: {out}");
+        assert!(!out.contains("<img"), "got: {out}");
+    }
+
+    #[test]
+    fn embeds_inside_tilde_fences_are_protected() {
+        // The old pattern only knew ``` fences; ~~~ was not protected at all.
+        let input = "~~~\n![[inside.md]]\n~~~\n\n![[outside.md]]\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("![[inside.md]]"), "got: {out}");
+        assert!(out.contains("<img src=\"outside.md\""), "got: {out}");
+    }
+
+    #[test]
+    fn fence_closes_only_on_a_run_at_least_as_long() {
+        let input = "````\n```\n![[still-code.md]]\n````\n![[after.md]]\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("![[still-code.md]]"), "got: {out}");
+        assert!(out.contains("<img src=\"after.md\""), "got: {out}");
+    }
+
+    #[test]
+    fn unclosed_fence_protects_to_end_of_input() {
+        let input = "```\n![[never-closed.md]]\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("![[never-closed.md]]"), "got: {out}");
+    }
+
+    #[test]
+    fn double_backtick_span_pairs_only_with_double_backticks() {
+        // `` a ` b `` is ONE span; the inner single backtick does not close it.
+        let input = "`` a ` ![[in-span.md]] `` then ![[outside.md]]\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("![[in-span.md]]"), "got: {out}");
+        assert!(out.contains("<img src=\"outside.md\""), "got: {out}");
+    }
+
+    #[test]
+    fn embeds_outside_code_are_still_rewritten_with_sizes() {
+        let out = process_internal_embeds("![[pic.png|300x200]]\n");
+        assert!(out.contains("width=\"300\""), "got: {out}");
+        assert!(out.contains("height=\"200\""), "got: {out}");
+    }
+
+    #[test]
+    fn highlight_protection_survives_quadruple_backtick_inline_code() {
+        let input = "```` ``` ```` intro\n\n`==not highlighted==` but ==this is==\n";
+        let out = process_wikilinks(input);
+        assert!(out.contains("`==not highlighted==`"), "got: {out}");
+        assert!(out.contains("<mark>this is</mark>"), "got: {out}");
+    }
+
+    #[test]
+    fn wikilinks_and_inline_footnotes_in_code_spans_stay_literal() {
+        let input = "`[[#heading]]` and `^[not a footnote]` but [[#real|jump]]\n";
+        let out = process_wikilinks(input);
+        assert!(out.contains("`[[#heading]]`"), "got: {out}");
+        assert!(out.contains("`^[not a footnote]`"), "got: {out}");
+        assert!(out.contains("[jump](#real)"), "got: {out}");
+    }
+
+    /// A document that has BOTH kinds of code region, with the inline span at
+    /// a lower offset than the fence.
+    ///
+    /// `in_code_region` is a binary search, so `code_region_ranges` has to
+    /// emit its regions in document order. The two kinds are found by
+    /// different parts of the scan — fences by the line walk, inline spans by
+    /// `push_inline_code_spans` over the text between fences — and a build
+    /// order that appends all of one kind after all of the other leaves the
+    /// vector unsorted for exactly this shape of document. The binary search
+    /// then walks straight past the fence and every marker inside it is
+    /// reported as ordinary prose (#375 / #389 all over again).
+    ///
+    /// Every marker below is checked, not just one. `process_wikilinks` runs
+    /// a separate pass per marker kind and each probes `in_code_region` at its
+    /// own offset, so a probe that happens to land inside the region does not
+    /// say anything about the probes beside it.
+    const FENCE_AFTER_INLINE_CODE: &str = concat!(
+        "Prose with `a code span` in it.\n",
+        "\n",
+        "```text\n",
+        "![[embed.md]]\n",
+        "[[wikilink]]\n",
+        "==highlight==\n",
+        "^[footnote]\n",
+        "```\n",
+    );
+
+    #[test]
+    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_embeds() {
+        let out = process_internal_embeds(FENCE_AFTER_INLINE_CODE);
+        assert!(
+            out.contains("![[embed.md]]") && !out.contains("<img"),
+            "an embed inside the fence was rewritten — code regions reached \
+             `in_code_region` out of document order: {out}",
+        );
+    }
+
+    #[test]
+    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_wikilinks() {
+        let out = process_wikilinks(FENCE_AFTER_INLINE_CODE);
+        for marker in ["[[wikilink]]", "==highlight==", "^[footnote]"] {
+            assert!(
+                out.contains(marker),
+                "`{marker}` inside the fence was rewritten — code regions \
+                 reached `in_code_region` out of document order: {out}",
+            );
+        }
+        // The inline span itself is still protected, and still a span.
+        assert!(out.contains("`a code span`"), "got: {out}");
+    }
+
+    #[test]
+    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_autolinks() {
+        // The third consumer. A bare URL inside a fence must stay text;
+        // comrak's own autolinker never sees a code block.
+        let input = "Prose with `a code span` in it.\n\n```text\n(https://example.com/x)y\n```\n";
+        let out = process_parenthesized_autolinks(input);
+        assert!(
+            !out.contains("]("),
+            "a URL inside the fence was linkified: {out}",
+        );
+    }
+
+    #[test]
+    fn an_inline_span_before_a_fence_does_not_expose_the_fence_to_math() {
+        // The fourth consumer. `mask_math_spans` hides math from CommonMark's
+        // inline rules; dollars inside a fence are not math and masking them
+        // rewrites the code block the user typed.
+        let input = "Prose with `a code span` in it.\n\n```text\n$x_1$ and $y_2$\n```\n";
+        let masked = mask_math_spans(input);
+        assert_eq!(
+            masked.text, input,
+            "dollars inside the fence were masked as math",
+        );
+    }
+
+    #[test]
+    fn multibyte_content_inside_a_fence_does_not_panic() {
+        let input = "```text\n中文开头的一行\n```\n\n![[outside.png]]\n";
+        let result = std::panic::catch_unwind(|| process_internal_embeds(input));
+
+        let out = result.expect("fenced multibyte content must not panic");
+        assert!(out.contains("中文开头的一行"), "got: {out}");
+        assert!(out.contains("<img src=\"outside.png\""), "got: {out}");
+    }
+
+    #[test]
+    fn autolink_inside_parentheses_stops_before_adjacent_text() {
+        let input = "See (https://www.speedtest.net/awards/united_states/)for more information.";
+        let html = convert_markdown(input);
+
+        assert!(
+            html.contains("href=\"https://www.speedtest.net/awards/united_states/\""),
+            "got: {html}"
+        );
+        assert!(html.contains(")for more information."), "got: {html}");
+        assert!(
+            !html.contains("href=\"https://www.speedtest.net/awards/united_states/)for\""),
+            "got: {html}"
+        );
+    }
+
+    #[test]
+    fn path_components_reject_traversal_separators_and_absolute_paths() {
+        for invalid in ["", ".", "..", "../theme", "folder/theme", "folder\\theme", "/tmp/theme"] {
+            assert!(safe_path_component(invalid, "test").is_err(), "{invalid}");
+        }
+        assert_eq!(safe_path_component("SynthWave '84", "test").unwrap(), "SynthWave '84");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn image_directory_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("markpad-path-root-{nonce}"));
+        let outside = std::env::temp_dir().join(format!("markpad-path-outside-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, root.join("images")).unwrap();
+
+        assert!(resolve_image_directory(root.to_str().unwrap(), "images").is_err());
+
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[test]
+    fn theme_slug_collapses_punctuation_runs() {
+        assert_eq!(theme_slug("SynthWave '84"), "synthwave-84");
+    }
+
+    #[test]
+    fn display_math_keeps_multiple_braced_subscripts_out_of_markdown_emphasis() {
+        let html = convert_markdown("$$\\bar{b}_{1} + \\bar{b}_{2}$$\n");
+        assert!(
+            html.contains("$$\\bar{b}_{1} + \\bar{b}_{2}$$"),
+            "unexpected parser output: {html}",
+        );
+        assert!(!html.contains("<em"), "unexpected parser output: {html}");
+    }
+
+    // -----------------------------------------------------------------
+    // Math delimiters
+    //
+    // comrak runs CommonMark inline rules inside math delimiters, so KaTeX
+    // never sees what the user typed. The three cases below are the
+    // reported symptoms of that one cause; the block after them is the
+    // other half of the bargain, because a rule that mistakes prose for
+    // math breaks far more documents than the bug it fixes.
+    // -----------------------------------------------------------------
+
+    /// The rendered text with the markup taken back out, i.e. roughly what
+    /// `textContent` hands to KaTeX in the frontend.
+    fn rendered_math_source(html: &str) -> String {
+        let mut out = String::new();
+        let mut rest = html;
+        while let Some(at) = rest.find('<') {
+            out.push_str(&rest[..at]);
+            match rest[at..].find('>') {
+                Some(end) => rest = &rest[at + end + 1..],
+                None => {
+                    rest = "";
+                    break;
+                }
+            }
+        }
+        out.push_str(rest);
+        out.replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&amp;", "&")
+    }
+
+    #[test]
+    fn issue_174_inline_math_keeps_both_braced_subscripts() {
+        // `$\bar{b}_{1} + \bar{b}_{2}$` — the two `_` are both left- and
+        // right-flanking, so CommonMark pairs them into an `<em>` and KaTeX
+        // receives `$\bar{b}<em>{1} + \bar{b}</em>{2}$`. That is the whole of
+        // "only the first subscript can use braces", and why a space before
+        // the first `_` appeared to fix it.
+        let html = convert_markdown("Let $\\bar{b}_{1} + \\bar{b}_{2}$ be the estimates.\n");
+        assert!(!html.contains("<em"), "math was parsed as emphasis: {html}");
+        assert!(
+            html.contains("$\\bar{b}_{1} + \\bar{b}_{2}$"),
+            "the formula did not survive: {html}",
+        );
+    }
+
+    #[test]
+    fn issue_197_display_math_keeps_the_row_separators_of_an_aligned_block() {
+        // `\\` is a CommonMark escape for a literal `\`, so every row
+        // separator of the block is eaten and KaTeX renders "Only One
+        // Long-Long Line" that overflows horizontally.
+        let markdown =
+            "$$\n\\begin{aligned}\na &= b \\\\\nc &= d \\\\\ne &= f\n\\end{aligned}\n$$\n";
+        let html = convert_markdown(markdown);
+        let source = rendered_math_source(&html);
+        assert_eq!(
+            source.matches("\\\\").count(),
+            2,
+            "the row separators were eaten as CommonMark escapes: {html}",
+        );
+        assert!(
+            source.contains("a &= b \\\\"),
+            "the row separators were eaten as CommonMark escapes: {html}",
+        );
+    }
+
+    #[test]
+    fn issue_177_math_keeps_escaped_percent_signs() {
+        // `\%` loses its backslash to CommonMark, and the bare `%` then
+        // starts a TeX comment: KaTeX reports "Unexpected end of input in a
+        // macro argument".
+        let html = convert_markdown("$$\\mathbf{Accuracy: 100\\%}$$\n");
+        assert!(
+            html.contains("\\mathbf{Accuracy: 100\\%}"),
+            "the escaped percent sign was eaten: {html}",
+        );
+    }
+
+    #[test]
+    fn math_delimiters_survive_every_other_commonmark_inline_rule() {
+        // The point of masking the span rather than one character class:
+        // emphasis, escapes and code marks are all TeX here.
+        let html = convert_markdown("$$a*b*c \\_ \\{ \\& ~y~ [z](w)$$\n");
+        assert!(!html.contains("<em"), "got: {html}");
+        assert!(!html.contains("<del"), "got: {html}");
+        assert!(!html.contains("<a "), "got: {html}");
+        assert!(
+            rendered_math_source(&html).contains("$$a*b*c \\_ \\{ \\& ~y~ [z](w)$$"),
+            "got: {html}",
+        );
+    }
+
+    #[test]
+    fn a_multiline_display_math_block_keeps_one_line_per_source_line() {
+        // The mask is per line, so the block still occupies six lines and
+        // the frontend still sees one `<br />` per row.
+        let markdown = "$$\n\\begin{aligned}\nx &= 1\n\\end{aligned}\n$$\n\n- [ ] task\n";
+        let html = convert_markdown(markdown);
+        assert_eq!(html.matches("<br").count(), 4, "got: {html}");
+        assert!(
+            html.contains("data-sourcepos=\"7:1-7:10\""),
+            "the task moved off line 7: {html}",
+        );
+    }
+
+    #[test]
+    fn a_crlf_display_math_block_keeps_its_line_endings() {
+        let html = convert_markdown("$$\r\na_1 \\\\\r\nb_2\r\n$$\r\n");
+        assert!(!html.contains("<em"), "got: {html}");
+        assert!(
+            rendered_math_source(&html).contains("a_1 \\\\"),
+            "got: {html}",
+        );
+    }
+
+    // --- the other half: prose that must NOT become math ----------------
+
+    #[test]
+    fn two_prices_in_one_sentence_are_not_a_math_span() {
+        // The failure mode that matters most. `$100 and $200` pairs under any
+        // naive "next `$` closes it" rule and would silently swallow the
+        // Markdown of every document that mentions two prices.
+        let html = convert_markdown("It cost $100 and $200 today.\n");
+        assert!(
+            html.contains("It cost $100 and $200 today."),
+            "a price was treated as math: {html}",
+        );
+    }
+
+    #[test]
+    fn ordinary_dollar_amounts_are_not_math_spans() {
+        for markdown in [
+            "The price is $5.\n",
+            "Between $5 and $10.\n",
+            "$100$200 back to back.\n",
+            "A lone $ sign.\n",
+            "Trailing dollar $\n",
+            "Costs $ 5 with a space.\n",
+            "$5\n$6\n",
+        ] {
+            let html = convert_markdown(markdown);
+            assert_eq!(
+                rendered_math_source(&html).trim(),
+                markdown.trim(),
+                "input {markdown:?} was rewritten: {html}",
+            );
+        }
+    }
+
+    #[test]
+    fn an_escaped_dollar_never_opens_a_math_span() {
+        let html = convert_markdown("Pay \\$100 for $x$ items.\n");
+        assert!(
+            html.contains("Pay \\$100 for $x$ items."),
+            "the escaped dollar opened a span: {html}",
+        );
+    }
+
+    #[test]
+    fn an_escaped_dollar_reaches_the_frontend_still_escaped() {
+        // comrak resolves `\$` to `$`, after which nothing downstream can tell
+        // "the reader wants a dollar sign" from "the reader wants a formula" —
+        // and the frontend, which is the side that decides, renders the second.
+        // So the escape is masked like math is and handed over intact; the
+        // frontend resolves it in `convertInlineMathDelimiters`.
+        let html = convert_markdown("Literal \\$\\$x\\$\\$ here.\n");
+        assert!(
+            html.contains("Literal \\$\\$x\\$\\$ here."),
+            "the escape was resolved before the frontend could honour it: {html}",
+        );
+    }
+
+    #[test]
+    fn an_escaped_backslash_keeps_the_dollar_behind_it_live() {
+        // `\\$` is an escaped backslash and then an ordinary `$`. Masking only
+        // the last backslash would hand the frontend `\$` and lose the
+        // distinction the whole mask exists to preserve.
+        let html = convert_markdown("A backslash \\\\$ here.\n");
+        assert!(
+            html.contains("A backslash \\\\$ here."),
+            "the backslash run was split: {html}",
+        );
+    }
+
+    #[test]
+    fn an_escaped_dollar_inside_a_formula_stays_part_of_the_formula() {
+        // Inside math, `\$` is TeX for a dollar sign. The math span already
+        // shields it, and claiming it separately would cut the span in two.
+        let html = convert_markdown("$a \\$ b$\n");
+        assert_eq!(rendered_math_source(&html).trim(), "$a \\$ b$");
+    }
+
+    #[test]
+    fn an_escaped_dollar_in_a_link_destination_is_resolved_not_forwarded() {
+        // Nothing unescapes an `href` on the way to the reader, so the
+        // backslash would simply become part of the URL.
+        let html = convert_markdown("[t](http://example.com/\\$5)\n");
+        assert!(
+            html.contains("href=\"http://example.com/$5\""),
+            "the escape leaked into the link destination: {html}",
+        );
+    }
+
+    #[test]
+    fn an_escaped_dollar_inside_code_is_left_to_commonmark() {
+        // A backslash is not an escape character inside code, so `\$` is two
+        // literal characters there and comrak already gets it right.
+        let html = convert_markdown("Use `\\$x\\$` here.\n");
+        assert!(
+            html.contains(">\\$x\\$</code>"),
+            "the mask reached into a code span: {html}",
+        );
+    }
+
+    #[test]
+    fn dollars_inside_code_never_open_a_math_span() {
+        // A single `$$` inside a fence used to flip the delimiter parity of
+        // the entire document, because the old protection just split on `$$`.
+        let markdown = "```sh\necho $$\n```\n\nA *word* and $$x_1$$ after.\n\n`$a$` stays code.\n";
+        let html = convert_markdown(markdown);
+        assert!(html.contains("<em"), "the fence ate the emphasis: {html}");
+        assert!(
+            html.contains("$$x_1$$"),
+            "the math after the fence lost its protection: {html}",
+        );
+        assert!(
+            html.contains(">$a$</code>"),
+            "an inline code span was treated as math: {html}",
+        );
+    }
+
+    #[test]
+    fn a_math_span_never_reaches_across_an_inline_code_span() {
+        // The frontend cannot pair delimiters across a `<code>` element —
+        // `processInlineMath` rejects the whole subtree — so neither may the
+        // backend: masking here would silently eat the code span.
+        let html = convert_markdown("$a `x` b$ and *emphasis*.\n");
+        assert!(html.contains(">x</code>"), "got: {html}");
+        assert!(html.contains("<em"), "got: {html}");
+    }
+
+    #[test]
+    fn a_math_span_never_reaches_across_a_line_break() {
+        // `hardbreaks` puts each source line in its own text node, so an
+        // unpaired `$` must not reach the next line and blank out its
+        // Markdown.
+        let html = convert_markdown("Costs $5 today\nand *this* is emphasis $\n");
+        assert!(html.contains("<em"), "got: {html}");
+    }
+
+    #[test]
+    fn an_unpaired_display_delimiter_does_not_swallow_the_document() {
+        let markdown = "$$ unpaired\n\nA *word*.\n\nAnother paragraph with $$ too.\n";
+        let html = convert_markdown(markdown);
+        assert!(html.contains("<em"), "the stray `$$` ran away: {html}");
+    }
+
+    #[test]
+    fn a_document_containing_the_mask_prefix_still_round_trips() {
+        // Uniqueness is by construction, not by luck: the prefix grows until
+        // the document does not contain it.
+        let markdown = format!("{MATH_MASK_PREFIX}0{MATH_MASK_SUFFIX} and $x_1$ here.\n");
+        let html = convert_markdown(&markdown);
+        assert!(
+            html.contains(&format!("{MATH_MASK_PREFIX}0{MATH_MASK_SUFFIX}")),
+            "the document's own text was eaten: {html}",
+        );
+        assert!(html.contains("$x_1$"), "the math was lost: {html}");
+        assert!(!html.contains("<em"), "got: {html}");
+    }
+
+    #[test]
+    fn a_masked_span_is_escaped_the_way_comrak_escapes_text() {
+        let html = convert_markdown("$a < b & c > d \"e\"$\n");
+        assert!(
+            html.contains("$a &lt; b &amp; c &gt; d &quot;e&quot;$"),
+            "the restored span was not escaped: {html}",
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // The cross-language math-delimiter contract
+    //
+    // Everything above proves the backend hides the right spans from
+    // comrak. It cannot prove the thing correctness actually rests on:
+    // that the set the backend hides equals the set the *frontend*
+    // renders. Those are two implementations of one rule in two
+    // languages, and until now only one of them was pinned — loosening
+    // `findInlineMathEnd` in markdown.ts would have left every test in
+    // this file green.
+    //
+    //   backend ⊂ frontend → comrak mangles the formula before KaTeX
+    //                        sees it; that is #174, #177 and #197.
+    //   backend ⊃ frontend → the text is held back from Markdown and
+    //                        then rendered by nobody: the reader gets
+    //                        dead text that is neither prose nor a
+    //                        formula.
+    //
+    // So both sides are asserted against one shared, hand-authored
+    // table: scripts/mathDelimiterCorpus.json. The other half lives in
+    // scripts/mathDelimiterContract.test.ts and runs the real frontend.
+    // Change one side's rule and exactly one of the two goes red.
+    // -----------------------------------------------------------------
+
+    #[derive(serde::Deserialize)]
+    struct MathContractSpan {
+        kind: String,
+        source: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct MathContractCase {
+        name: String,
+        markdown: String,
+        html: String,
+        math: Vec<MathContractSpan>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct MathContractCorpus {
+        cases: Vec<MathContractCase>,
+    }
+
+    fn math_contract_corpus() -> MathContractCorpus {
+        serde_json::from_str(include_str!("../../scripts/mathDelimiterCorpus.json"))
+            .expect("scripts/mathDelimiterCorpus.json must stay valid JSON")
+    }
+
+    /// What the backend decided, in the corpus's vocabulary.
+    fn recognised_math(markdown: &str) -> Vec<(String, String)> {
+        let regions = code_region_ranges(markdown);
+        find_math_spans(markdown, &regions)
+            .into_iter()
+            .map(|(start, end)| {
+                let span = &markdown[start..end];
+                match span
+                    .strip_prefix("$$")
+                    .and_then(|inner| inner.strip_suffix("$$"))
+                {
+                    // `extractDisplayMathBlock` trims; mirror it exactly.
+                    Some(inner) => ("display".to_owned(), inner.trim().to_owned()),
+                    None => ("inline".to_owned(), span[1..span.len() - 1].to_owned()),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_backend_recognises_exactly_the_math_the_contract_lists() {
+        for case in math_contract_corpus().cases {
+            let expected: Vec<(String, String)> = case
+                .math
+                .iter()
+                .map(|span| (span.kind.clone(), span.source.clone()))
+                .collect();
+            assert_eq!(
+                recognised_math(&case.markdown),
+                expected,
+                "{}: the backend and the contract disagree about what is math\n  input: {:?}",
+                case.name,
+                case.markdown,
+            );
+        }
+    }
+
+    #[test]
+    fn the_math_contract_corpus_is_a_live_capture() {
+        // Keeps the `html` the frontend test consumes honest: it is what
+        // this renderer produces today, not what it produced once.
+        for case in math_contract_corpus().cases {
+            assert_eq!(
+                convert_markdown(&case.markdown),
+                case.html,
+                "{}: scripts/mathDelimiterCorpus.json no longer matches this \
+                 renderer — replace its `html` with the value on the left, and \
+                 leave `markdown` and `math` alone",
+                case.name,
+            );
+        }
+    }
+
+    #[test]
+    fn math_in_a_heading_keeps_the_anchor_a_wikilink_can_reach() {
+        // comrak derives the heading id from the *rendered* text, so the mask
+        // would otherwise become the anchor and silently break every
+        // `[[#heading]]` pointing at a heading that contains a formula.
+        let heading = "A heading with $x_1$";
+        let html = convert_markdown(&format!("# {heading}\n"));
+        assert!(html.contains("$x_1$"), "the math was lost: {html}");
+        assert_eq!(
+            heading_anchor_id(heading),
+            "a-heading-with-x_1",
+            "the wikilink side changed",
+        );
+        assert!(
+            html.contains("id=\"a-heading-with-x_1\""),
+            "the mask leaked into the anchor: {html}",
+        );
+    }
+
+    #[test]
+    fn math_in_a_link_destination_keeps_the_link_working() {
+        // The token has to survive `escape_href` too, which is why it is
+        // plain ASCII rather than a private-use character.
+        let html = convert_markdown("[t](http://example.com/$a$)\n");
+        assert!(
+            html.contains("href=\"http://example.com/$a$\""),
+            "the link destination was mangled: {html}",
+        );
+    }
+
+    #[test]
+    fn a_stray_backtick_does_not_swallow_later_paragraphs() {
+        // CommonMark parses inline elements per block and a blank line ends a
+        // block, so the loose backtick in the first paragraph cannot pair with
+        // the opening backtick of `run()` two paragraphs down.
+        let input =
+            "Use the ` character to start code.\n\n![[photo.png]]\n\nThen `run()` finishes.\n";
+
+        let out = process_internal_embeds(input);
+        assert!(out.contains("<img src=\"photo.png\""), "got: {out}");
+        assert!(out.contains("`run()`"), "got: {out}");
+    }
+
+    #[test]
+    fn a_stray_backtick_does_not_swallow_later_highlights_or_wikilinks() {
+        let input = "Use the ` character.\n\n==important== and [[#Some Heading|jump]]\n\nThen `run()` finishes.\n";
+
+        let out = process_wikilinks(input);
+        assert!(out.contains("<mark>important</mark>"), "got: {out}");
+        assert!(out.contains("(#some-heading)"), "got: {out}");
+    }
+
+    #[test]
+    fn inline_code_spans_still_pair_across_lines_inside_one_paragraph() {
+        // A code span may legitimately span several lines of the same block;
+        // the blank-line reset must not break that.
+        let input = "start `code\n![[inside.png]]` end\n";
+        let out = process_internal_embeds(input);
+        assert!(out.contains("![[inside.png]]"), "got: {out}");
+        assert!(!out.contains("<img"), "got: {out}");
+    }
+
+    #[test]
+    fn embed_attributes_are_html_escaped() {
+        // The viewer sanitizes with DOMPurify, but the HTML export path writes
+        // this markup straight to disk, so the quote has to die here.
+        let out = process_internal_embeds("![[a\" onerror=\"alert(1)]]\n");
+        assert!(!out.contains("onerror=\""), "attribute injection: {out}");
+        assert!(out.contains("&quot;"), "got: {out}");
+
+        let sized = process_internal_embeds("![[p.png|300\" onload=\"x]]\n");
+        assert!(!sized.contains("onload=\""), "attribute injection: {sized}");
+
+        let single = process_internal_embeds("![[p.png|64\" onload=\"y]]\n");
+        assert!(!single.contains("onload=\""), "attribute injection: {single}");
+    }
+
+    #[test]
+    fn embed_attribute_escaping_keeps_ordinary_paths_readable() {
+        let out = process_internal_embeds("![[my photo.png]]\n");
+        assert!(out.contains("src=\"my%20photo.png\""), "got: {out}");
+        assert!(out.contains("alt=\"my photo.png\""), "got: {out}");
+    }
+
+    #[test]
+    fn wikilink_anchors_match_the_ids_comrak_actually_renders() {
+        // Asserted against comrak's real output rather than a copy of its
+        // rules: if a comrak upgrade changes anchorization, this fails instead
+        // of silently producing wikilinks that jump nowhere.
+        for heading in [
+            "1. 概述",
+            "Ticks aren't in",
+            "Hello, World!",
+            "Setup & Teardown",
+            "under_score here",
+        ] {
+            let html = convert_markdown(&format!("## {heading}\n"));
+            let rendered_id = html
+                .split("id=\"")
+                .nth(1)
+                .and_then(|rest| rest.split('"').next())
+                .unwrap_or_else(|| panic!("no heading id rendered: {html}"));
+            assert_eq!(
+                heading_anchor_id(heading),
+                rendered_id,
+                "anchor for {heading:?} drifted from comrak: {html}",
+            );
+        }
+    }
+
+    #[test]
+    fn wikilink_targets_survive_punctuation_in_the_heading() {
+        // "1. 概述" used to become "1.-概述" while comrak rendered "1-概述",
+        // so the link resolved to nothing.
+        assert_eq!(heading_anchor_id("1. 概述"), "1-概述");
+
+        let out = process_wikilinks("[[#1. 概述|Overview]]\n");
+        assert!(out.contains("[Overview](#1-概述)"), "got: {out}");
+    }
+
+    #[test]
+    fn multiline_wikilinks_are_left_literal() {
+        // A heading id can never contain a newline, so such a target cannot
+        // resolve; rewriting it would also collapse two source lines into one
+        // and shift every task checkbox below it.
+        let out = process_wikilinks("[[#first\nsecond|alias]]\n");
+        assert!(out.contains("[[#first\nsecond|alias]]"), "got: {out}");
+    }
+
+    // ---- [[file#heading]] wikilinks -------------------------------------
+    //
+    // What these tests do NOT cover, and why:
+    //  * Bare note links, "[[Notes]]" with no heading. Deliberately out of
+    //    scope — see `wikilinks_without_a_heading_are_deliberately_left_literal`.
+    //  * Whether the target file exists. Resolution is the frontend's job
+    //    (`resolveMarkdownTargetPath` in src/lib/utils/markdownLinks.ts); the
+    //    Rust side never touches the filesystem here, so a link to a missing
+    //    note is emitted like any other and simply fails to open.
+    //  * Obsidian's nested-heading paths (`[[file#H1#H2]]`). Everything after
+    //    the first `#` is taken as one heading name, so such a target
+    //    anchorizes to the two names run together and will not resolve. That
+    //    matches the existing behaviour of the same-document form.
+    //  * Duplicate headings. comrak appends `-1`, `-2`, … to the second and
+    //    later headings with the same text; a wikilink can only ever address
+    //    the first one (see the doc comment on `heading_anchor_id`).
+    //  * The actual click-through. The href *shape* the frontend accepts is
+    //    pinned from the TypeScript side in scripts/wikilinkFileTargets.test.ts.
+
+    #[test]
+    fn copy_reference_output_becomes_a_real_link() {
+        // `[[Notes#Setup]]` is exactly what the app's own "Copy Reference"
+        // menu item writes to the clipboard (MarkdownViewer.svelte); it used
+        // to render as literal text because the pattern required `#` to
+        // follow `[[` immediately.
+        let out = process_wikilinks("[[Notes#Setup]]\n");
+        assert!(out.contains("[Notes > Setup](Notes.md#setup)"), "got: {out}");
+    }
+
+    #[test]
+    fn file_wikilink_href_carries_a_markdown_extension_the_frontend_recognizes() {
+        // getMarkdownLinkTarget() only claims a link whose path has a known
+        // markdown extension, so a note name written without one — the way
+        // Copy Reference writes it — has to gain one here or the click falls
+        // through to the external-URL opener.
+        let out = process_wikilinks("[[docs/Guide#Setup]]\n");
+        assert!(out.contains("(docs/Guide.md#setup)"), "got: {out}");
+    }
+
+    #[test]
+    fn file_wikilink_keeps_an_extension_it_was_already_given() {
+        let out = process_wikilinks("[[Notes.md#Setup]]\n");
+        assert!(out.contains("(Notes.md#setup)"), "got: {out}");
+        assert!(!out.contains("Notes.md.md"), "got: {out}");
+
+        let txt = process_wikilinks("[[log.txt#Errors]]\n");
+        assert!(txt.contains("(log.txt#errors)"), "got: {txt}");
+        assert!(!txt.contains("log.txt.md"), "got: {txt}");
+    }
+
+    #[test]
+    fn wikilinks_without_a_heading_are_deliberately_left_literal() {
+        // Obsidian's bare note link "[[Notes]]" is out of scope: this change
+        // fixes Copy Reference, whose every call site emits a "#". Claiming
+        // every "[[…]]" would also swallow bracketed citation numbering and
+        // pre-empt CommonMark reference links, neither of which is a wikilink.
+        // See the PR description.
+        for input in [
+            "[[Notes]]\n",
+            "[[1]] Author, Title.\n",
+            "[[TODO]] revisit this.\n",
+            "[[foo]] and [[foo|bar]]\n",
+            "[[docs/Guide|Guide]]\n",
+        ] {
+            assert_eq!(process_wikilinks(input), input, "should be literal");
+        }
+
+        // A "#" in the alias half does not make it a heading link either.
+        let aliased = "[[Notes|see #1]]\n";
+        assert_eq!(process_wikilinks(aliased), aliased);
+
+        // A reference definition must keep resolving the CommonMark way.
+        let html = convert_markdown("[[foo]] here.\n\n[foo]: https://example.com\n");
+        assert!(html.contains("href=\"https://example.com\""), "got: {html}");
+        assert!(!html.contains("foo.md"), "got: {html}");
+    }
+
+    #[test]
+    fn file_wikilink_alias_and_subfolder_and_punctuated_heading() {
+        let out = process_wikilinks("[[docs/Guide#1. 概述|Overview]]\n");
+        assert!(out.contains("[Overview](docs/Guide.md#1-概述)"), "got: {out}");
+    }
+
+    #[test]
+    fn file_wikilink_percent_encodes_what_would_break_the_destination() {
+        // A space would end the destination and the rest would be read as a
+        // title; parentheses would close it early. decodeLinkPath() on the
+        // frontend undoes all of this.
+        let out = process_wikilinks("[[My Notes (v2)#Setup]]\n");
+        assert!(out.contains("(My%20Notes%20%28v2%29.md#setup)"), "got: {out}");
+        assert!(out.contains("[My Notes (v2) > Setup]"), "got: {out}");
+    }
+
+    #[test]
+    fn file_wikilink_block_reference_targets_the_block_id_anchor() {
+        // `^abc123` at the end of a line becomes <a id="abc123">, and comrak's
+        // anchorizer drops the caret, so both sides agree on "abc123".
+        let out = process_wikilinks("[[Notes#^abc123]]\n");
+        assert!(out.contains("(Notes.md#abc123)"), "got: {out}");
+    }
+
+    #[test]
+    fn wikilinks_to_files_the_viewer_cannot_open_stay_literal() {
+        // A non-markdown target would not be claimed by getMarkdownLinkTarget,
+        // so the click would reach openUrl() with a relative path resolved
+        // against the webview origin. Leaving it as text is the honest result.
+        for input in ["[[report.pdf#Intro]]\n", "[[diagram.svg#part]]\n"] {
+            let out = process_wikilinks(input);
+            assert_eq!(out, input, "got: {out}");
+        }
+    }
+
+    #[test]
+    fn same_document_wikilinks_are_unchanged_by_the_file_form() {
+        let out = process_wikilinks("[[#Some Heading|jump]]\n");
+        assert!(out.contains("[jump](#some-heading)"), "got: {out}");
+
+        let bare = process_wikilinks("[[#Setup]]\n");
+        assert!(bare.contains("[Setup](#setup)"), "got: {bare}");
+    }
+
+    #[test]
+    fn file_wikilinks_in_code_spans_and_fences_stay_literal() {
+        let span = process_wikilinks("`[[Notes#Setup]]` but [[Notes#Setup]]\n");
+        assert!(span.contains("`[[Notes#Setup]]`"), "got: {span}");
+        assert!(span.contains("(Notes.md#setup)"), "got: {span}");
+
+        let fence = process_wikilinks("```\n[[Notes#Setup]]\n```\n");
+        assert!(fence.contains("```\n[[Notes#Setup]]\n```"), "got: {fence}");
+    }
+
+    #[test]
+    fn embeds_are_not_also_treated_as_file_wikilinks() {
+        // process_internal_embeds runs first and consumes `![[…]]`; the guard
+        // matters for the standalone call and for an embed it declined.
+        let out = process_wikilinks("![[photo.png]]\n");
+        assert!(out.contains("![[photo.png]]"), "got: {out}");
+
+        let html = convert_markdown("![[photo.png]]\n");
+        assert!(html.contains("<img src=\"photo.png\""), "got: {html}");
+    }
+
+    #[test]
+    fn bracketed_link_text_is_still_a_commonmark_link() {
+        // "[[1]](https://example.com)" is a CommonMark link whose text is
+        // "[1]" — a common citation spelling in READMEs. Requiring a "#"
+        // already protects that spelling, so the first case here would pass
+        // without the trailing-"(" guard; the second would not, which is why
+        // the guard stays.
+        for input in [
+            "See [[1]](https://example.com) for details.\n",
+            "See [[1#x]](https://example.com) for details.\n",
+            "[[Notes#Setup]](https://example.com)\n",
+        ] {
+            assert_eq!(process_wikilinks(input), input, "should be literal");
+            let html = convert_markdown(input);
+            assert!(html.contains("href=\"https://example.com\""), "got: {html}");
+        }
+    }
+
+    #[test]
+    fn file_wikilink_survives_the_full_render_pipeline() {
+        let html = convert_markdown("[[Notes#Setup]]\n");
+        assert!(html.contains("href=\"Notes.md#setup\""), "got: {html}");
+    }
+
+    #[test]
+    fn attribute_escaping_covers_the_html_metacharacters() {
+        assert_eq!(
+            escape_html_attribute("a\"b'c&d<e>f"),
+            "a&quot;b&#39;c&amp;d&lt;e&gt;f",
+        );
+        assert_eq!(escape_html_attribute("plain.png"), "plain.png");
+    }
+
+    /// Creates `<root>/src<i>/<name>` holding `body` and returns its path.
+    fn drop_source(root: &Path, index: usize, name: &str, body: &[u8]) -> PathBuf {
+        let dir = root.join(format!("src{index}"));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(name);
+        fs::write(&file, body).unwrap();
+        file
+    }
+
+    fn drop_into_img(src: &Path, doc_dir: &Path) -> String {
+        copy_file_to_img_blocking(src.to_str().unwrap(), doc_dir.to_str().unwrap(), "img").unwrap()
+    }
+
+    #[test]
+    fn repeated_drops_of_the_same_name_never_overwrite_an_earlier_copy() {
+        // Three same-named images from different folders, dropped in the same
+        // second. The conflict name used to be a *second-resolution* timestamp
+        // that was never re-checked for existence, so drops #2 and #3 computed
+        // the identical name and #3 silently replaced the bytes behind a link
+        // the document had already been given.
+        let root = temp_path("imgcopy-repeat");
+        let doc_dir = root.join("doc");
+        fs::create_dir_all(&doc_dir).unwrap();
+        let bodies: [&[u8]; 3] = [b"first", b"second", b"third"];
+        let sources: Vec<PathBuf> = bodies
+            .iter()
+            .enumerate()
+            .map(|(i, body)| drop_source(&root, i, "a.png", body))
+            .collect();
+
+        let written: Vec<String> = sources.iter().map(|src| drop_into_img(src, &doc_dir)).collect();
+
+        let distinct: std::collections::HashSet<&String> = written.iter().collect();
+        assert_eq!(distinct.len(), written.len(), "two drops shared a name: {written:?}");
+        for (rel, body) in written.iter().zip(bodies.iter()) {
+            assert_eq!(
+                fs::read(doc_dir.join(rel)).unwrap(),
+                *body,
+                "{rel} no longer holds the image that was dropped for it",
+            );
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_conflicting_dotfile_name_does_not_grow_a_trailing_dot() {
+        // ".png" is a dotfile, not an extension: the frontend's drop filter
+        // reads the name with `split('.').pop()` and sees "png", so it lets it
+        // through, while Rust's `Path::extension()` returns None. The old
+        // format string appended the separator unconditionally, so the conflict
+        // name ended in a dot. Windows strips a trailing dot when creating the
+        // file, so the link written into the document named a file that does
+        // not exist on disk; mac/Linux keep the dot and the link resolves.
+        let root = temp_path("imgcopy-dotfile");
+        let doc_dir = root.join("doc");
+        fs::create_dir_all(&doc_dir).unwrap();
+        let first = drop_source(&root, 0, ".png", b"first");
+        let second = drop_source(&root, 1, ".png", b"second");
+
+        drop_into_img(&first, &doc_dir);
+        let rel = drop_into_img(&second, &doc_dir);
+
+        assert!(!rel.ends_with('.'), "conflict name ends in a dot: {rel}");
+        assert_eq!(fs::read(doc_dir.join(&rel)).unwrap(), b"second");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn concurrent_drops_of_the_same_name_each_get_their_own_file() {
+        // Two windows dropping the same image at the same moment: an
+        // `exists()` test followed by a separate copy leaves a window in which
+        // both callers see the name as free and one copy lands on top of the
+        // other.
+        const DROPS: usize = 8;
+        let root = temp_path("imgcopy-concurrent");
+        let doc_dir = root.join("doc");
+        fs::create_dir_all(&doc_dir).unwrap();
+        let sources: Vec<(PathBuf, Vec<u8>)> = (0..DROPS)
+            .map(|i| {
+                let body = format!("image-{i}").into_bytes();
+                (drop_source(&root, i, "a.png", &body), body)
+            })
+            .collect();
+
+        let written: Vec<(String, Vec<u8>)> = std::thread::scope(|scope| {
+            let handles: Vec<_> = sources
+                .iter()
+                .map(|(src, body)| {
+                    let doc_dir = doc_dir.clone();
+                    scope.spawn(move || (drop_into_img(src, &doc_dir), body.clone()))
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+
+        let distinct: std::collections::HashSet<&String> = written.iter().map(|(rel, _)| rel).collect();
+        assert_eq!(distinct.len(), DROPS, "concurrent drops shared a name: {written:?}");
+        for (rel, body) in &written {
+            assert_eq!(
+                &fs::read(doc_dir.join(rel)).unwrap(),
+                body,
+                "{rel} no longer holds the image that was dropped for it",
+            );
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    // ---------------------------------------------------------------------
+    // The line-number contract of `convert_markdown`
+    //
+    // `convert_markdown` preprocesses the raw buffer, renders the *result*
+    // with `sourcepos = true`, and hands those line numbers to the frontend.
+    // The frontend then writes task-checkbox toggles back into the *raw*
+    // buffer at that line number. So every preprocessing step has to map
+    // input line N to output line N; a step that quietly eats or inserts a
+    // line makes the reading-mode checkbox rewrite a different line of the
+    // user's document (issue #352).
+    //
+    // A step MAY append after the last input line — the inline-footnote step
+    // parks its `[^ifn-N]: …` definitions there, which cannot shift the
+    // number of any line that already existed. It must never insert or drop
+    // a line inside the document.
+    //
+    // ⚠️ EVERY preprocessing step of `convert_markdown` MUST be registered in
+    // `line_preserving_transforms()` below. It is not optional and it is not
+    // best-effort: `every_convert_markdown_preprocessing_step_is_registered`
+    // re-reads this source file, extracts the calls `convert_markdown`
+    // actually makes, and fails if one of them is missing from the list.
+    // Adding a fifth transform without registering it turns that test red.
+    // ---------------------------------------------------------------------
+
+    type LineTransform = fn(&str) -> String;
+
+    /// The registry the contract test walks. Add every new preprocessing step.
+    fn line_preserving_transforms() -> Vec<(&'static str, LineTransform)> {
+        vec![
+            (
+                "process_parenthesized_autolinks",
+                (|s| process_parenthesized_autolinks(s).into_owned()) as LineTransform,
+            ),
+            (
+                "process_internal_embeds",
+                (|s| process_internal_embeds(s).into_owned()) as LineTransform,
+            ),
+            (
+                "process_wikilinks",
+                (|s| process_wikilinks(s).into_owned()) as LineTransform,
+            ),
+            (
+                "mask_math_spans",
+                (|s| mask_math_spans(s).text) as LineTransform,
+            ),
+        ]
+    }
+
+    /// Documents exercising every syntax the preprocessing steps claim, plus
+    /// the malformed spellings of each one — a lone `![[`, an unterminated
+    /// `^[`, a wikilink split over two lines — because those are exactly the
+    /// inputs where a lazy or newline-crossing pattern runs away.
+    const LINE_CONTRACT_CORPUS: &[&str] = &[
+        // A stray embed opener with a real embed further down.
+        "Prose with ![[ a stray opener.\n\n- [ ] task one\n\nLater an image ![[real.png]] here.\n",
+        // An inline footnote whose text wraps onto a second line.
+        "Some claim^[See the long explanation\nthat wraps to a second line] and more.\n\n- [ ] task\n",
+        // A block id sitting on its own line, Obsidian's block-reference form.
+        "A quotable paragraph.\n^blockid\n\n- [ ] task\n",
+        // A block id at the end of its own line.
+        "A quotable paragraph. ^blockid\n\n- [ ] task\n",
+        // Every well-formed spelling at once.
+        "![[pic.png|300x200]] [[#Setup|jump]] [[Notes#Setup]] ==mark== text^[note]\n\n- [ ] task\n",
+        // A wikilink split over two lines (already guarded, kept as a pin).
+        "[[#first\nsecond|alias]]\n- [ ] task\n",
+        // Code fences and spans, which every step must leave alone.
+        "```\n![[inside.md]]\n^[inside]\n==inside==\n```\n\n`==x==` ![[out.png]]\n",
+        // Unclosed fence, longer fences, tilde fences.
+        "~~~\n![[a.md]]\n\n````\n```\n![[b.md]]\n````\n\n```\n![[never-closed.md]]\n",
+        // Parenthesized autolink with nested parentheses.
+        "See (https://example.com/a(b)c)text here\n\n- [ ] task\n",
+        // Display math with underscores.
+        "$$\na_b\nc_d\n$$\n\nx^[note] and $$y_1$$\n\n- [ ] task\n",
+        // Headings, quotes, tables, nested and quoted tasks.
+        "# Head\n\n> quote ^qid\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n- [ ] task\n  - [x] nested\n\n> - [ ] quoted\n",
+        // Unbalanced brackets and carets in prose.
+        "A ^[ dangling footnote opener and a [[ dangling wikilink\n\n- [ ] task\n",
+        // Multibyte content — offsets are bytes, line numbers are not.
+        "中文段落 ![[图片.png]] ^[脚注]\n\n- [ ] 任务\n",
+        // Blank lines, CRLF, and no trailing newline.
+        "one\r\ntwo ![[x.png]]\r\n\r\n- [ ] task",
+    ];
+
+    const LINE_CONTRACT_SENTINEL: &str = "MPLINECONTRACTSENTINEL";
+
+    fn sentinel_line(text: &str) -> Option<usize> {
+        text.lines()
+            .position(|line| line.contains(LINE_CONTRACT_SENTINEL))
+    }
+
+    /// Asserts that `transform` keeps a marker line at the same line number.
+    ///
+    /// The marker is appended to every line-prefix of `input`, not just to
+    /// the whole document: a step that drops one line and inserts another
+    /// would leave the total unchanged, but no prefix boundary between the
+    /// two survives. Checking the sentinel rather than the raw line count is
+    /// what lets the inline-footnote step append its definitions afterwards.
+    fn assert_transform_preserves_line_numbers(
+        name: &str,
+        transform: LineTransform,
+        input: &str,
+    ) {
+        let lines: Vec<&str> = input.split_inclusive('\n').collect();
+        for take in 0..=lines.len() {
+            let mut probe = lines[..take].concat();
+            if !probe.is_empty() && !probe.ends_with('\n') {
+                probe.push('\n');
+            }
+            probe.push_str(LINE_CONTRACT_SENTINEL);
+            probe.push('\n');
+
+            let expected = sentinel_line(&probe).expect("the probe carries the sentinel");
+            let output = transform(&probe);
+            let actual = sentinel_line(&output).unwrap_or_else(|| {
+                panic!(
+                    "{name} swallowed the sentinel line entirely\n  input:  {probe:?}\n  output: {output:?}"
+                )
+            });
+            assert_eq!(
+                expected, actual,
+                "{name} moved line {expected} to line {actual}\n  input:  {probe:?}\n  output: {output:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn every_preprocessing_step_preserves_source_line_numbers() {
+        for (name, transform) in line_preserving_transforms() {
+            for input in LINE_CONTRACT_CORPUS {
+                assert_transform_preserves_line_numbers(name, transform, input);
+            }
+        }
+    }
+
+    #[test]
+    fn the_whole_preprocessing_pipeline_preserves_source_line_numbers() {
+        // Individually line-preserving steps could still compose badly: one
+        // step's output is the next one's input, so a rewrite that creates a
+        // new `^[` or `![[` opener would only show up here.
+        let pipeline: LineTransform = |content| {
+            let autolinks = process_parenthesized_autolinks(content);
+            let embeds = process_internal_embeds(&autolinks);
+            let links = process_wikilinks(&embeds);
+            mask_math_spans(&links).text
+        };
+        for input in LINE_CONTRACT_CORPUS {
+            assert_transform_preserves_line_numbers("the preprocessing pipeline", pipeline, input);
+        }
+    }
+
+    /// The body of `convert_markdown`, read back out of this source file.
+    ///
+    /// The needle is assembled at runtime so that it does not match this
+    /// file's own source text. Line endings are normalised first: git checks
+    /// this file out with CRLF wherever `core.autocrlf` is on — the default
+    /// on Windows, and what the Windows CI runner does — and the `\n`-anchored
+    /// needles are about the shape of the source, not about how the working
+    /// tree happens to store it.
+    fn convert_markdown_body() -> String {
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
+        let needle = format!("\nfn {}(content: &str) -> String {{", "convert_markdown");
+        let start = source
+            .find(&needle)
+            .expect("convert_markdown must keep its `&str -> String` signature");
+        let rest = &source[start + needle.len()..];
+        rest[..rest
+            .find("\n}\n")
+            .expect("convert_markdown must be terminated")]
+            .to_string()
+    }
+
+    #[test]
+    fn convert_markdown_hands_the_fail_safe_the_raw_buffer() {
+        // `annotate_task_checkboxes` is a fail-safe only while what reaches it
+        // is the buffer the command was called with. The hazard is not the
+        // call — it is the *name*: adding a step the obvious way,
+        //
+        //     let content = process_new_thing(content);
+        //
+        // near the top rebinds the parameter, and the unchanged call at the
+        // bottom starts handing over preprocessed text. Nothing about that
+        // edit looks wrong and no behavioural test can see it, because the two
+        // sides it is supposed to cross-check now agree by definition.
+        //
+        // "This string is the one the caller passed in" is provenance, not a
+        // type, so the compiler cannot be made to check it. What can be made
+        // structural is the shadowing: `convert_markdown` copies its input to
+        // `raw_buffer` before anything else runs, which turns the shadowing
+        // edit above into a harmless one. This test pins the three properties
+        // that copy depends on.
+        let body = convert_markdown_body();
+
+        let capture = "let raw_buffer = content;";
+        let first_let = body
+            .find("\n    let ")
+            .map(|i| i + "\n    ".len())
+            .expect("convert_markdown must bind something");
+        assert!(
+            body[first_let..].starts_with(capture),
+            "the raw buffer must be captured before the first preprocessing \
+             step, or the step can shadow `content` above it:\n{body}",
+        );
+        assert_eq!(
+            body.matches(capture).count(),
+            1,
+            "`raw_buffer` is bound more than once — a second binding is the \
+             same hole under a new name:\n{body}",
+        );
+        assert!(
+            Regex::new(r"annotate_task_checkboxes\([^;]*,\s*raw_buffer\s*\)")
+                .unwrap()
+                .is_match(&body),
+            "the fail-safe is no longer handed `raw_buffer`; whatever it now \
+             receives can agree with the HTML by construction:\n{body}",
+        );
+    }
+
+    #[test]
+    fn every_convert_markdown_preprocessing_step_is_registered() {
+        // Re-reads this file so that a fifth preprocessing step cannot be
+        // added to `convert_markdown` without also being put under the line
+        // contract. The needle is assembled at runtime so that it does not
+        // match this test's own source text.
+        //
+        // Line endings are normalised first. Git checks this file out with
+        // CRLF wherever `core.autocrlf` is on — the default on Windows, and
+        // what the Windows CI runner does — and the `\n`-anchored needles
+        // below are about the shape of the source, not about how the working
+        // tree happens to store it.
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
+        let needle = format!("\nfn {}(content: &str) -> String {{", "convert_markdown");
+        let start = source
+            .find(&needle)
+            .expect("convert_markdown must keep its `&str -> String` signature");
+        let rest = &source[start + needle.len()..];
+        let body = &rest[..rest.find("\n}\n").expect("convert_markdown must be terminated")];
+
+        // Bare `name(` calls: `.method(` and `Type::assoc(` are excluded by
+        // the leading character class.
+        let call = Regex::new(r"(?:^|[^A-Za-z0-9_:.])([a-z_][a-z0-9_]*)\s*\(").unwrap();
+        // Calls in `convert_markdown` that are not preprocessing steps.
+        // `annotate_task_checkboxes` runs on the rendered HTML, after
+        // sourcepos numbers exist; it is the fail-safe for this contract
+        // rather than a participant in it. `restore_math_spans` also runs on
+        // the rendered HTML — it is the second half of `mask_math_spans`,
+        // which *is* registered, and it never sees the source buffer.
+        let not_a_transform = [
+            "markdown_to_html",
+            "annotate_task_checkboxes",
+            "restore_math_spans",
+        ];
+
+        let mut found: Vec<String> = call
+            .captures_iter(body)
+            .map(|caps| caps[1].to_string())
+            .filter(|name| !not_a_transform.contains(&name.as_str()))
+            .collect();
+        found.sort();
+        found.dedup();
+
+        let mut registered: Vec<String> = line_preserving_transforms()
+            .into_iter()
+            .map(|(name, _)| name.to_string())
+            .collect();
+        registered.sort();
+
+        assert_eq!(
+            found, registered,
+            "convert_markdown's preprocessing steps and the line-contract \
+             registry have drifted apart — register every new step in \
+             line_preserving_transforms() (or, if the call is not a \
+             preprocessing step, add it to not_a_transform and say why)",
+        );
+    }
+
+    #[test]
+    fn a_stray_embed_opener_leaves_the_document_and_its_tasks_intact() {
+        let markdown =
+            "Prose with ![[ a stray opener.\n\n- [ ] task one\n\nLater an image ![[real.png]] here.\n";
+        let html = convert_markdown(markdown);
+        assert!(
+            html.contains("task one"),
+            "the stray opener swallowed the prose: {html}",
+        );
+        assert!(
+            html.contains("data-task-checkbox"),
+            "the stray opener shifted the task source position: {html}",
+        );
+        // A real embed further down still renders.
+        assert!(html.contains("<img src=\"real.png\""), "got: {html}");
+    }
+
+    #[test]
+    fn a_multiline_inline_footnote_does_not_shift_task_source_positions() {
+        let html = convert_markdown(
+            "Some claim^[See the long explanation\nthat wraps to a second line] and more.\n\n- [ ] task\n",
+        );
+        assert!(
+            html.contains("data-task-checkbox"),
+            "the multiline inline footnote shifted the task source position: {html}",
+        );
+    }
+
+    #[test]
+    fn a_block_id_on_its_own_line_does_not_shift_task_source_positions() {
+        let markdown = "A quotable paragraph.\n^blockid\n\n- [ ] task\n";
+        let html = convert_markdown(markdown);
+        assert!(
+            html.contains("id=\"blockid\""),
+            "the block id anchor disappeared: {html}",
+        );
+        assert!(
+            html.contains("data-task-checkbox"),
+            "the block id shifted the task source position: {html}",
+        );
+    }
+
+    #[test]
+    fn task_checkboxes_stay_inert_when_the_html_and_the_buffer_disagree() {
+        // The fail-safe in `annotate_task_checkboxes`. Feed it HTML whose
+        // sourcepos numbers came from one document and the raw buffer of a
+        // different one — the shape a broken line contract produces. Line 3
+        // of the buffer is a fence, so annotating would let a click write a
+        // "- [x]" marker into a code block (issue #352).
+        let rendered =
+            convert_markdown("intro paragraph\n\n- [ ] task\n").replace(" data-task-checkbox=\"\"", "");
+        assert!(
+            rendered.contains("data-sourcepos=\"3:1-3:10\"><input type=\"checkbox\""),
+            "expected an unannotated task input on line 3: {rendered}",
+        );
+
+        let mismatched = annotate_task_checkboxes(
+            rendered.clone(),
+            "- [ ] real task\n\n```\nnot a task\n```\n",
+        );
+        assert!(
+            !mismatched.contains("data-task-checkbox"),
+            "the fail-safe let a checkbox through onto a line that is not a task: {mismatched}",
+        );
+
+        // Control: the same HTML against the buffer it was rendered from.
+        let matching = annotate_task_checkboxes(rendered, "intro paragraph\n\n- [ ] task\n");
+        assert!(
+            matching.contains("data-task-checkbox"),
+            "the fail-safe rejected a genuine task line: {matching}",
+        );
+    }
 }
