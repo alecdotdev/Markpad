@@ -25,6 +25,10 @@ pub struct AppState {
     pub(crate) last_focused_viewer: Mutex<Option<String>>,
     window_registry: Mutex<HashMap<String, WindowMeta>>,
     window_counter: AtomicU64,
+    /// Serialises the read-modify-write cycle over `pinned-tags.json`. Guards
+    /// a critical section rather than a value, so the payload is `()` — see
+    /// `update_pinned_tags` for why the whole cycle has to be inside it.
+    pinned_tags: Mutex<()>,
 }
 
 /// Locks `mutex`, recovering the guarded value if a previous holder panicked.
@@ -34,6 +38,13 @@ pub struct AppState {
 /// a panic elsewhere. Propagating poisoning instead would turn one panic into
 /// a permanently unusable registry: every later `set_window_meta`,
 /// `list_viewer_windows` and window-destroyed handler would panic in turn.
+///
+/// `pinned_tags` is recovered on the same grounds even though it guards a
+/// file: the only thing a panic inside the cycle can leave behind is the
+/// pre-existing `pinned-tags.json`, because `atomic_write` publishes by
+/// rename and a panic before it simply never publishes. There is no
+/// half-applied state for the next holder to inherit, and propagating the
+/// poison would instead make pinning fail for the rest of the session.
 pub(crate) fn lock_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
 }
@@ -45,6 +56,7 @@ impl AppState {
             last_focused_viewer: Mutex::new(None),
             window_registry: Mutex::new(HashMap::new()),
             window_counter: AtomicU64::new(0),
+            pinned_tags: Mutex::new(()),
         }
     }
 }
@@ -81,12 +93,98 @@ fn pinned_tags_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(dir.join("pinned-tags.json"))
 }
 
-fn read_pinned_tags(app: &AppHandle) -> Vec<PinnedTag> {
-    pinned_tags_path(app)
+/// Reads the pin list, treating an unreadable or unparseable file as empty.
+///
+/// Under `update_pinned_tags`'s lock the empty fallback can only be reached by
+/// a file that is genuinely damaged from outside Markpad, never by a write in
+/// progress: `atomic_write` publishes by rename, so a concurrent reader opens
+/// either the whole old file or the whole new one.
+fn read_pinned_tags_at(path: &Path) -> Vec<PinnedTag> {
+    fs::read_to_string(path)
         .ok()
-        .and_then(|path| fs::read_to_string(path).ok())
         .and_then(|json| serde_json::from_str(&json).ok())
         .unwrap_or_default()
+}
+
+/// Reads the pin list without taking the lock.
+///
+/// A plain read needs no lock. The file is only ever replaced by
+/// `atomic_write`'s rename, so a reader racing a writer sees either the whole
+/// previous list or the whole next one, and both are lists that Markpad
+/// actually wrote. What is unsafe is not the read but the *cycle* — read,
+/// mutate, write back — which is why only `update_pinned_tags` locks.
+fn read_pinned_tags(app: &AppHandle) -> Vec<PinnedTag> {
+    pinned_tags_path(app)
+        .map(|path| read_pinned_tags_at(&path))
+        .unwrap_or_default()
+}
+
+/// Applies `edit` to the pin list and writes the result back, with the whole
+/// read-modify-write cycle held under `lock`.
+///
+/// `atomic_write` is not enough on its own, and the difference is easy to miss.
+/// It rules out a *torn* file: the rename publishes the new list in one step,
+/// so no reader ever sees half a JSON document. It says nothing about a *lost
+/// update*, where both writers produce a whole, valid file and the second one
+/// is built from a list it read before the first one landed:
+///
+/// ```text
+/// window A: read [x] ─── add "a" ─────────── write [x, a]
+/// window B:      read [x] ─── add "b" ─────────────────── write [x, b]
+/// on disk:  [x]                             [x, a]        [x, b]   ← "a" gone
+/// ```
+///
+/// Tauri dispatches commands on a thread pool and every window can call these,
+/// so the interleaving is reachable whenever two windows persist their pins at
+/// once — which is exactly what quitting with ⌘Q does, since each window saves
+/// its pinned tag from its own close handler.
+///
+/// This is the same defect the frontend fixed in #405 for the recent-files
+/// list. That fix was a re-read alone, which is sufficient there because
+/// `localStorage` is per-document and single-threaded, making an RMW cycle
+/// atomic by construction. Rust commands have no such property, so here the
+/// cycle needs an explicit lock.
+///
+/// Serialising also keeps two `atomic_write` calls off the same target at
+/// once, which is not something `atomic_write` handles either: its temp file
+/// is named from the target name, the pid and a nanosecond clock reading, so
+/// two threads of one process that land on the same reading collide on
+/// `create_new` — and the loser's cleanup then deletes the temp file the
+/// winner was about to rename. Both spellings of that failure showed up in the
+/// unlocked measurements (`File exists`, `No such file or directory`).
+fn update_pinned_tags(
+    lock: &Mutex<()>,
+    path: &Path,
+    edit: impl FnOnce(&mut Vec<PinnedTag>),
+) -> Result<(), String> {
+    let _guard = lock_recover(lock);
+    let mut tags = read_pinned_tags_at(path);
+    edit(&mut tags);
+    let json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
+    crate::atomic_write(path, json.as_bytes()).map_err(|error| error.to_string())
+}
+
+fn save_pinned_tag_at(
+    lock: &Mutex<()>,
+    path: &Path,
+    name: String,
+    color: String,
+    files: Vec<String>,
+) -> Result<(), String> {
+    update_pinned_tags(lock, path, move |tags| {
+        if let Some(tag) = tags.iter_mut().find(|tag| tag.name == name) {
+            tag.color = color;
+            tag.files = files;
+        } else {
+            tags.push(PinnedTag { name, color, files });
+        }
+    })
+}
+
+fn remove_pinned_tag_at(lock: &Mutex<()>, path: &Path, name: String) -> Result<(), String> {
+    update_pinned_tags(lock, path, move |tags| {
+        tags.retain(|tag| tag.name != name);
+    })
 }
 
 pub fn list_pinned_tags(app: AppHandle) -> Vec<PinnedTag> {
@@ -99,24 +197,15 @@ pub fn save_pinned_tag(
     color: String,
     files: Vec<String>,
 ) -> Result<(), String> {
-    let mut tags = read_pinned_tags(&app);
-    if let Some(tag) = tags.iter_mut().find(|tag| tag.name == name) {
-        tag.color = color;
-        tag.files = files;
-    } else {
-        tags.push(PinnedTag { name, color, files });
-    }
-    let json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
-    crate::atomic_write(&pinned_tags_path(&app)?, json.as_bytes())
-        .map_err(|error| error.to_string())
+    let path = pinned_tags_path(&app)?;
+    let state = app.state::<AppState>();
+    save_pinned_tag_at(&state.pinned_tags, &path, name, color, files)
 }
 
 pub fn remove_pinned_tag(app: AppHandle, name: String) -> Result<(), String> {
-    let mut tags = read_pinned_tags(&app);
-    tags.retain(|tag| tag.name != name);
-    let json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
-    crate::atomic_write(&pinned_tags_path(&app)?, json.as_bytes())
-        .map_err(|error| error.to_string())
+    let path = pinned_tags_path(&app)?;
+    let state = app.state::<AppState>();
+    remove_pinned_tag_at(&state.pinned_tags, &path, name)
 }
 
 pub fn set_window_meta(
@@ -364,5 +453,183 @@ pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
             lock_recover(&app_state.window_registry).remove(window.label());
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// A private directory to keep the pin file in, so a test never touches the
+    /// real `app_config_dir` and two runs cannot collide.
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("markpad-{tag}-{nonce}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn names(tags: &[PinnedTag]) -> HashSet<String> {
+        tags.iter().map(|tag| tag.name.clone()).collect()
+    }
+
+    /// Every concurrent edit has to survive.
+    ///
+    /// Deliberately asserts the PROPERTY — the final file contains exactly the
+    /// tags the writers between them asked for — rather than any mechanism. A
+    /// test that watched for a particular interleaving, or for a specific error,
+    /// would pass on whichever platform happens not to produce it; the set of
+    /// surviving names is the thing the user actually loses when this breaks,
+    /// and it is checked identically everywhere.
+    ///
+    /// Without the lock in `update_pinned_tags` this fails on every run: writers
+    /// read the same list and each writes back a full copy, so most of the
+    /// `keep-*` additions are overwritten and most of the `doomed-*` removals
+    /// come back from under a stale snapshot. Measured on master's shape, 1-4
+    /// of 8 pins survived and 3-7 of 8 unpins were resurrected.
+    #[test]
+    fn concurrent_edits_do_not_overwrite_one_another() {
+        const WRITERS: usize = 8;
+        const ROUNDS: usize = 4;
+
+        let dir = temp_dir("pinned-tags-race");
+        let path = dir.join("pinned-tags.json");
+        let lock = Mutex::new(());
+
+        // Seed the file with the tags the removers will delete, plus bystanders
+        // nobody touches. The bystanders are a control: they are in every
+        // writer's snapshot, so a lost update does NOT drop them, and they stay
+        // green either way. If they ever go missing the file was truncated or
+        // clobbered outright, which is a different failure from this one.
+        let seeded: Vec<PinnedTag> = (0..WRITERS)
+            .flat_map(|writer| {
+                [
+                    PinnedTag {
+                        name: format!("doomed-{writer}"),
+                        color: "#000000".to_string(),
+                        files: vec![],
+                    },
+                    PinnedTag {
+                        name: format!("bystander-{writer}"),
+                        color: "#111111".to_string(),
+                        files: vec![],
+                    },
+                ]
+            })
+            .collect();
+        fs::write(&path, serde_json::to_string(&seeded).unwrap()).unwrap();
+
+        std::thread::scope(|scope| {
+            for writer in 0..WRITERS {
+                let path = path.as_path();
+                let lock = &lock;
+                scope.spawn(move || {
+                    for round in 0..ROUNDS {
+                        save_pinned_tag_at(
+                            lock,
+                            path,
+                            format!("keep-{writer}"),
+                            "#222222".to_string(),
+                            vec![format!("/tmp/{writer}-{round}.md")],
+                        )
+                        .unwrap();
+                    }
+                });
+                scope.spawn(move || {
+                    for _ in 0..ROUNDS {
+                        remove_pinned_tag_at(lock, path, format!("doomed-{writer}")).unwrap();
+                    }
+                });
+            }
+        });
+
+        let survivors = read_pinned_tags_at(&path);
+        let found = names(&survivors);
+
+        let expected: HashSet<String> = (0..WRITERS)
+            .flat_map(|writer| [format!("keep-{writer}"), format!("bystander-{writer}")])
+            .collect();
+        assert_eq!(
+            found, expected,
+            "every pin written concurrently must survive and every unpin must stick"
+        );
+        // One entry per name: a writer that re-ran its own save must have found
+        // its earlier entry rather than appending a duplicate.
+        assert_eq!(survivors.len(), expected.len());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Re-pinning a tag replaces its color and file list in place.
+    #[test]
+    fn saving_an_existing_tag_updates_it_rather_than_duplicating_it() {
+        let dir = temp_dir("pinned-tags-update");
+        let path = dir.join("pinned-tags.json");
+        let lock = Mutex::new(());
+
+        save_pinned_tag_at(
+            &lock,
+            &path,
+            "work".to_string(),
+            "#1a73e8".to_string(),
+            vec!["/tmp/a.md".to_string()],
+        )
+        .unwrap();
+        save_pinned_tag_at(
+            &lock,
+            &path,
+            "work".to_string(),
+            "#d93025".to_string(),
+            vec!["/tmp/b.md".to_string()],
+        )
+        .unwrap();
+
+        let tags = read_pinned_tags_at(&path);
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].color, "#d93025");
+        assert_eq!(tags[0].files, vec!["/tmp/b.md".to_string()]);
+
+        remove_pinned_tag_at(&lock, &path, "work".to_string()).unwrap();
+        assert!(read_pinned_tags_at(&path).is_empty());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A poisoned lock must not disable pinning for the rest of the session.
+    #[test]
+    fn a_panicking_writer_does_not_lock_out_the_next_one() {
+        let dir = temp_dir("pinned-tags-poison");
+        let path = dir.join("pinned-tags.json");
+        let lock = Mutex::new(());
+
+        let panicked = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    update_pinned_tags(&lock, &path, |_| panic!("edit blew up")).unwrap();
+                })
+                .join()
+        });
+        assert!(panicked.is_err());
+        assert!(lock.is_poisoned());
+
+        // The panic happened before `atomic_write`, so nothing was published;
+        // the next writer must both acquire the lock and see an intact file.
+        save_pinned_tag_at(
+            &lock,
+            &path,
+            "after".to_string(),
+            "#188038".to_string(),
+            vec![],
+        )
+        .unwrap();
+        let tags = read_pinned_tags_at(&path);
+        assert_eq!(names(&tags), HashSet::from(["after".to_string()]));
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
