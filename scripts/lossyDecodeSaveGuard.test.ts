@@ -164,9 +164,15 @@ test('Save As to a new file stays open as the escape hatch', () => {
 	assert.match(body, /setTabDecodedLossy\(tab\.id, false\)/);
 });
 
-test('Save As onto the same path is still a destructive overwrite', () => {
+test('Save As onto the same file is still a destructive overwrite', () => {
 	const body = saveContentAs();
-	const refusal = body.indexOf('refuseIfLossilyDecoded(tab, selected)');
+	// "The same file", not "the same string": the dialog can come back with
+	// another spelling of the source file — a different case, or accents
+	// composed differently — and on macOS and Windows that still lands on the
+	// same bytes. The guard is therefore handed the target's resolved identity
+	// as well as its path. See pathIdentityCaseFolding.test.ts, which drives
+	// that refusal for real instead of reading for it.
+	const refusal = body.indexOf('refuseIfLossilyDecoded(tab, selected');
 	assert.notEqual(refusal, -1, 'picking the source file again must be refused');
 	assert.ok(
 		refusal < body.indexOf("invoke('save_file_content'"),

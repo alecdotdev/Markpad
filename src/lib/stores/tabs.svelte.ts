@@ -3,6 +3,7 @@ import { nextUntitledTitle } from '../utils/untitledTitle.js';
 import { settings } from './settings.svelte.js';
 import { hasRealFilePath } from '../utils/tabFileActions.js';
 import { buildTransferredTab, type TransferableTab } from '../utils/tabTransfer.js';
+import { canonicalizePath, isSameFilePath } from '../utils/pathIdentity.js';
 import {
 	canGoBackInHistory,
 	canGoForwardInHistory,
@@ -51,6 +52,29 @@ export interface Tab {
 	 * is a destroyed document, so the compiler asks every one of them.
 	 */
 	hasReplacementChars: boolean;
+	/**
+	 * `path` as the FILESYSTEM identifies it: case folded, Unicode normalized
+	 * and symlinks resolved, the way the volume itself does those (see the Rust
+	 * `canonical_identity`). This is what "same file" means; `path` stays
+	 * exactly what the user opened.
+	 *
+	 * The two are separate fields rather than one canonical `path` because
+	 * canonicalization is lossy in a way the user can see: it would retitle a
+	 * tab opened through a symlink after the link's target, rewrite the recent
+	 * files list and "Copy path" with a name the user never typed, and mutate
+	 * `path` on its own whenever a file is deleted and recreated under another
+	 * spelling. A path also cannot always be canonicalized — Save As names a
+	 * file that does not exist yet — so a single field would be canonical only
+	 * *sometimes*, which is worse than a second field that is explicitly either
+	 * known or not.
+	 *
+	 * Optional, and the safe direction: absent means "not resolved", and every
+	 * comparison then falls back to exact path equality — what it did before.
+	 * A construction site that forgets it therefore loses the improvement and
+	 * nothing else, which is why this is `?` where `hasReplacementChars`, whose
+	 * missing value would read as "safe to overwrite", is not.
+	 */
+	pathKey?: string;
 }
 
 class TabManager {
@@ -180,6 +204,15 @@ class TabManager {
 			this.activeTabId = restored.some((t) => t.id === data.activeTabId)
 				? data.activeTabId
 				: restored[0]?.id ?? null;
+			// Snapshots store paths as they were typed, and the restore reads
+			// each file directly rather than through `loadMarkdown`, so nothing
+			// else would ever resolve these. Without this a restored window sits
+			// outside the one-tab-per-file rule until every tab happens to be
+			// reopened. Resolving in the background is safe because it only ever
+			// ADDS an identity — no tab is closed or reassigned here.
+			for (const tab of restored) {
+				void canonicalizePath(tab.path).then((key) => this.setTabPathKey(tab.id, tab.path, key));
+			}
 		} catch (e) {
 			console.error('Failed to restore tab state', e);
 		}
@@ -213,19 +246,27 @@ class TabManager {
 	 * Only real file paths are exclusive: untitled tabs (`''`) and the home
 	 * sentinel are not files, and several untitled tabs are normal.
 	 *
-	 * Known boundary: paths are compared exactly, so on a case-insensitive
-	 * filesystem `/notes/A.md` and `/notes/a.md` still read as two files — the
-	 * same limitation `documentSession.refuseIfLossilyDecoded` documents; both
-	 * need the backend to canonicalize paths.
+	 * "The same path" means the same FILE, not the same string: `/notes/A.md`
+	 * and `/notes/a.md` are one file on macOS and Windows, and two tabs on them
+	 * are exactly the two auto-save timers this rule exists to prevent. The
+	 * caller supplies `pathKey` — the filesystem's own answer, resolved once
+	 * when the path entered the app — and `isSameFilePath` falls back to exact
+	 * equality when either side does not have one, which is what the callers
+	 * that cannot resolve a path yet get.
 	 */
-	private claimPath(path: string, claimantId: string) {
+	private claimPath(path: string, claimantId: string, pathKey?: string) {
 		if (!hasRealFilePath(path)) return;
-		for (const other of this.tabs.filter((t) => t.id !== claimantId && t.path === path)) {
+		const incoming = { path, pathKey };
+		for (const other of this.tabs.filter((t) => t.id !== claimantId && isSameFilePath(t, incoming))) {
 			if (!other.isDirty) {
 				this.closeTab(other.id);
 				continue;
 			}
 			other.path = '';
+			// The buffer no longer claims a file, so it must not keep the file's
+			// identity either — a stale key would make this tab collide with the
+			// next tab to open that file.
+			other.pathKey = undefined;
 			// The title still names the file the buffer came from — that is what
 			// makes the tab recognizable, and `saveContent` offers it as the
 			// default filename when the user places it.
@@ -234,14 +275,14 @@ class TabManager {
 		}
 	}
 
-	addTab(path: string, content: string = '') {
+	addTab(path: string, content: string = '', pathKey?: string) {
 		// Opening a file that is already open activates that tab instead of
 		// building a second buffer for it — VS Code and Sublime Text both
 		// resolve an open request to the existing view. `content` is ignored in
 		// that case on purpose: the open tab may hold unsaved edits, and a
 		// freshly read copy of the file would erase them.
 		if (hasRealFilePath(path)) {
-			const existing = this.tabs.find((t) => t.path === path);
+			const existing = this.tabs.find((t) => isSameFilePath(t, { path, pathKey }));
 			if (existing) {
 				this.activeTabId = existing.id;
 				return;
@@ -276,7 +317,8 @@ class TabManager {
 			splitRatio: 0.5,
 			isScrollSynced: false,
 			isTruncated: false,
-			hasReplacementChars: false
+			hasReplacementChars: false,
+			pathKey
 		});
 
 		this.activeTabId = id;
@@ -362,9 +404,17 @@ class TabManager {
 		);
 		// The destination window may already have this file open, which would
 		// leave the arriving buffer and the resident one saving over each other.
+		// The payload carries the path as the source window had it, not its
+		// identity, so this first claim compares literally.
 		this.claimPath(tab.path, tab.id);
 		this.tabs.push(tab);
 		this.activeTabId = tab.id;
+		// A transferred tab is never read from disk here — its buffer came with
+		// it — so nothing else would ever resolve its path, and it would sit out
+		// the one-tab-per-file rule for as long as it stayed open. Resolving it
+		// in the background cannot undo the claim above, but it does let every
+		// LATER open of the same file recognise this tab.
+		void canonicalizePath(tab.path).then((key) => this.setTabPathKey(tab.id, tab.path, key));
 		return tab.id;
 	}
 
@@ -465,6 +515,23 @@ class TabManager {
 		}
 	}
 
+	/**
+	 * Record the filesystem's answer for a tab whose path arrived through a
+	 * route that could not resolve it — back/forward, a link opened in a new
+	 * tab, a cross-window move, a restored window. `loadMarkdown` reads the
+	 * file anyway, so it resolves the path in the same breath and reports it
+	 * here, which is what turns those tabs from "unresolved, compared
+	 * literally" into full participants in the one-tab-per-file rule.
+	 *
+	 * Guarded on the path still matching: the tab may have been navigated
+	 * elsewhere while the resolution was in flight, and a key describing a file
+	 * the tab no longer holds is worse than no key at all.
+	 */
+	setTabPathKey(id: string, path: string, pathKey: string) {
+		const tab = this.tabs.find((t) => t.id === id);
+		if (tab && tab.path === path) tab.pathKey = pathKey;
+	}
+
 	updateTabScroll(id: string, scrollTop: number) {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
@@ -550,14 +617,15 @@ class TabManager {
 		this.activeTabId = this.tabs[nextIndex].id;
 	}
 
-	updateTabPath(id: string, path: string) {
+	updateTabPath(id: string, path: string, pathKey?: string) {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
 			// Save As can name a file that is already open here; the write has
 			// happened by the time this runs, so the other tab's buffer is
 			// already stale and must stop claiming the path.
-			this.claimPath(path, id);
+			this.claimPath(path, id, pathKey);
 			tab.path = path;
+			tab.pathKey = pathKey;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
 			const fileHistory = replaceCurrentHistoryEntry({
@@ -571,11 +639,15 @@ class TabManager {
 		}
 	}
 
-	renameTab(id: string, newPath: string) {
+	renameTab(id: string, newPath: string, pathKey?: string) {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
-			this.claimPath(newPath, id);
+			this.claimPath(newPath, id, pathKey);
 			tab.path = newPath;
+			// The old key described the old name, so keeping it would make this
+			// tab answer "same file" for a file it no longer holds. Unset is the
+			// honest state until something resolves the new path.
+			tab.pathKey = pathKey;
 			tab.title = newPath.split(/[/\\]/).pop() || 'Untitled';
 			const fileHistory = replaceCurrentHistoryEntry({
 				currentPath: tab.path,
@@ -588,7 +660,7 @@ class TabManager {
 		}
 	}
 
-	navigate(id: string, path: string) {
+	navigate(id: string, path: string, pathKey?: string) {
 		const tab = this.tabs.find(t => t.id === id);
 		if (tab) {
 			if (tab.path === path) return;
@@ -598,7 +670,7 @@ class TabManager {
 			// declining the navigation is not an option: the tab would keep its
 			// old path and get the other document's content, and the next save
 			// would write it to the wrong file.
-			this.claimPath(path, id);
+			this.claimPath(path, id, pathKey);
 
 			const fileHistory = navigateFileHistory({
 				currentPath: tab.path,
@@ -610,6 +682,7 @@ class TabManager {
 			tab.historyIndex = fileHistory.historyIndex;
 
 			tab.path = path;
+			tab.pathKey = pathKey;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
 			tab.scrollTop = 0;
@@ -633,11 +706,15 @@ class TabManager {
 			if (!result.path) return null;
 			const path = result.path;
 			// Back/forward walk this tab's own history, which can lead to a file
-			// that has since been opened in another tab.
+			// that has since been opened in another tab. History holds the paths
+			// as they were typed, not their identities, so this claim compares
+			// literally; the caller loads the file straight afterwards and
+			// `loadMarkdown` resolves the key then.
 			this.claimPath(path, id);
 			tab.history = result.history;
 			tab.historyIndex = result.historyIndex;
 			tab.path = path;
+			tab.pathKey = undefined;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
 			return path;
@@ -655,6 +732,7 @@ class TabManager {
 			tab.history = result.history;
 			tab.historyIndex = result.historyIndex;
 			tab.path = path;
+			tab.pathKey = undefined;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
 			return path;

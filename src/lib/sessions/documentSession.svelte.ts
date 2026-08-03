@@ -5,6 +5,7 @@ import { tabManager, type Tab } from '../stores/tabs.svelte.js';
 import { getMarkdownBodyWithoutFrontMatter } from '../utils/frontMatter.js';
 import { t } from '../utils/i18n.js';
 import { hasMarkdownLinkExtension } from '../utils/markdownLinks.js';
+import { canonicalizePath, isSameFilePath } from '../utils/pathIdentity.js';
 
 export type LoadMarkdownOptions = {
 	navigate?: boolean;
@@ -167,15 +168,17 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	 * or Shift-JIS in the first place (that needs a real decoder), and this
 	 * only stops it from overwriting what it could not read.
 	 *
-	 * Known boundary: the comparison is exact string equality, so on a
-	 * case-insensitive filesystem (macOS, Windows) a Save As typed as
-	 * `/notes/Legacy.md` for a tab opened as `/notes/legacy.md` reads as a
-	 * different path and is allowed through. Closing that needs the backend
-	 * to canonicalize both sides; the same-path check is a courtesy on top of
-	 * the guard that matters, which is saveContent.
+	 * "The same file" is the filesystem's judgement, not the string's: a Save As
+	 * typed as `/notes/Legacy.md` for a tab opened as `/notes/legacy.md` is the
+	 * source file on macOS and Windows, and letting it through is the exact
+	 * destruction this guard exists to stop. The caller resolves the target once
+	 * — it has just come out of a dialog — and passes its identity here.
+	 * `targetPath !== tab.path` stays as the cheap first test so the common
+	 * Ctrl+S case never consults anything further.
 	 */
-	function refuseIfLossilyDecoded(tab: Tab, targetPath: string): boolean {
-		if (!tab.hasReplacementChars || targetPath === '' || targetPath !== tab.path) return false;
+	function refuseIfLossilyDecoded(tab: Tab, targetPath: string, targetKey?: string): boolean {
+		if (!tab.hasReplacementChars || targetPath === '') return false;
+		if (targetPath !== tab.path && !isSameFilePath({ path: targetPath, pathKey: targetKey }, tab)) return false;
 		console.warn('Refusing to overwrite a file that was decoded lossily', tab.path);
 		if (!lossySaveWarnedTabs.has(tab.id)) {
 			lossySaveWarnedTabs.add(tab.id);
@@ -214,17 +217,37 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			if (loadOptions.resetScrollHistory || filePath !== options.currentFile()) {
 				options.resetScrollHistory();
 			}
+			// Ask the filesystem what file this path names, ONCE, before any of
+			// the decisions below. Every one of them is really a "same file?"
+			// question — is it already open, does it belong to the tab holding
+			// unsaved edits — and on macOS and Windows the string cannot answer
+			// it: `/notes/A.md` and `/notes/a.md` are one file, and so are the
+			// NFC and NFD spellings of an accented name.
+			//
+			// This is the only I/O added to the open path, and it is why the
+			// comparisons themselves can stay synchronous: the answer is put on
+			// the tab and reused. On failure `canonicalizePath` returns the path
+			// unchanged, so an unreachable volume degrades to today's behaviour
+			// rather than blocking the open.
+			const pathKey = await canonicalizePath(filePath);
+			const target = { path: filePath, pathKey };
+
 			if (loadOptions.navigate && tabManager.activeTab) {
 				pendingNavigateTabId = tabManager.activeTab.id;
 			} else if (!loadOptions.skipTabManagement) {
-				existing = tabManager.tabs.find((tab) => tab.path === filePath);
+				existing = tabManager.tabs.find((tab) => isSameFilePath(tab, target));
 				if (existing) tabManager.setActive(existing.id);
 				else if (tabManager.activeTab && tabManager.activeTab.path === '' && !tabManager.activeTab.isDirty && tabManager.activeTab.rawContent.trim() === '') {
-					tabManager.updateTabPath(tabManager.activeTab.id, filePath);
-				} else tabManager.addTab(filePath);
+					tabManager.updateTabPath(tabManager.activeTab.id, filePath, pathKey);
+				} else tabManager.addTab(filePath, '', pathKey);
 			}
 			const activeId = tabManager.activeTabId;
 			if (!activeId) return;
+			// Callers that manage tabs themselves — back/forward, a link opened
+			// in a new tab — put the path on the tab before getting here, so
+			// this is where those tabs learn their identity. Cheap and idempotent
+			// for the tabs that already have it.
+			tabManager.setTabPathKey(activeId, filePath, pathKey);
 
 			// Opening a file that is already open, in a tab that has unsaved
 			// edits, must not re-read it: the load below replaces rawContent AND
@@ -246,8 +269,12 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			// Note the tab is found by `activeTabId`: whether the caller reached
 			// it by `setActive` on an already-open file, by `addTab` resolving to
 			// it, or by never having left it, the buffer at risk is the same one.
+			//
+			// The match is by file, not by string: reopening `/notes/A.md` while
+			// `/notes/a.md` sits here with unsaved edits is reopening THIS file,
+			// and comparing the spellings would miss it and overwrite the buffer.
 			const receiving = tabManager.tabs.find((item) => item.id === activeId);
-			if (receiving && receiving.isDirty && receiving.path === filePath && !loadOptions.discardUnsavedBuffer) {
+			if (receiving && receiving.isDirty && isSameFilePath(receiving, target) && !loadOptions.discardUnsavedBuffer) {
 				if (filePath) options.saveRecentFile(filePath);
 				await options.afterLoad();
 				return;
@@ -283,7 +310,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				// file the user has since converted to UTF-8.
 				tabManager.setTabDecodedLossy(activeId, lossy);
 				lossySaveWarnedTabs.delete(activeId);
-				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath);
+				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath, pathKey);
 				const processed = await options.renderMarkdown(content, filePath);
 				tabManager.updateTabContent(activeId, processed);
 				// `isFull === false` means this is only the leading slice of a
@@ -338,7 +365,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				const [content, lossy] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean];
 				tabManager.setTabDecodedLossy(activeId, lossy);
 				lossySaveWarnedTabs.delete(activeId);
-				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath);
+				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath, pathKey);
 				if (tab) tab.isEditing = true;
 				tabManager.setTabRawContent(activeId, content);
 			}
@@ -364,6 +391,10 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			return false;
 		}
 		let targetPath = tab.path;
+		// The tab's own path is already resolved, so the ordinary save — Ctrl+S,
+		// and the auto-save timer every 1.5s — adds no I/O here. Only the dialog
+		// branch below produces a path nobody has resolved yet.
+		let targetKey = tab.pathKey;
 		if (!targetPath) {
 			const selected = await save({
 				filters: [
@@ -374,15 +405,16 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			});
 			if (!selected) return false;
 			targetPath = selected;
+			targetKey = await canonicalizePath(selected);
 		}
-		if (refuseIfLossilyDecoded(tab, targetPath)) return false;
+		if (refuseIfLossilyDecoded(tab, targetPath, targetKey)) return false;
 		const snapshot = tab.rawContent;
 		markSelfWrite(targetPath);
 		try {
 			await invoke('save_file_content', { path: targetPath, content: snapshot });
 			markSelfWrite(targetPath);
 			if (tab.path === '') {
-				tabManager.updateTabPath(tab.id, targetPath);
+				tabManager.updateTabPath(tab.id, targetPath, targetKey);
 				options.saveRecentFile(targetPath);
 			}
 			tab.originalContent = snapshot;
@@ -412,14 +444,17 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		});
 		if (!selected) return false;
 		// Picking the source file again in the dialog is the same destructive
-		// overwrite, just reached another way.
-		if (refuseIfLossilyDecoded(tab, selected)) return false;
+		// overwrite, just reached another way — and "again" includes naming it
+		// in a different case, or with the accents composed differently, both of
+		// which land on the very same file.
+		const selectedKey = await canonicalizePath(selected);
+		if (refuseIfLossilyDecoded(tab, selected, selectedKey)) return false;
 		const snapshot = tab.rawContent;
 		markSelfWrite(selected);
 		try {
 			await invoke('save_file_content', { path: selected, content: snapshot });
 			markSelfWrite(selected);
-			tabManager.updateTabPath(tab.id, selected);
+			tabManager.updateTabPath(tab.id, selected, selectedKey);
 			// The buffer now has a UTF-8 file of its own that it matches
 			// exactly, so it is safe to save from here on.
 			tabManager.setTabDecodedLossy(tab.id, false);

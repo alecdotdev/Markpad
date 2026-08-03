@@ -173,6 +173,74 @@ pub(crate) fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Strip Windows' verbatim (`\\?\`) prefix, which `canonicalize` adds and
+/// nothing else in Markpad wants: the string reaches window titles, the recent
+/// files list and the tab bar, and several Win32 APIs reject it. `\\?\C:\a`
+/// becomes `C:\a` and `\\?\UNC\server\share` becomes `\\server\share`. A no-op
+/// everywhere else, so callers do not need to know the platform.
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let text = match path.to_str() {
+        Some(text) => text,
+        // Not UTF-8: leave it alone rather than mangle it. The prefix is ASCII,
+        // so this only gives up on paths that could not round-trip anyway.
+        None => return path,
+    };
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => path,
+    }
+}
+
+/// The identity of a file, as the filesystem itself defines it.
+///
+/// Markpad compares paths to answer one question in three places — "is this
+/// the same file?" — and exact string equality gets it wrong three ways:
+///
+/// - **case**: `/notes/A.md` and `/notes/a.md` are one file on APFS and NTFS.
+/// - **Unicode normalization**: `café.md` spelled NFC and NFD are one file on
+///   APFS, and no amount of case folding makes those strings equal — they are
+///   different code points, not different cases.
+/// - **symlinks**: `notes/today.md` may be a link to `archive/2026-08-03.md`.
+///
+/// Which of those hold is a property of the **volume**, not of the platform:
+/// macOS can be formatted case-sensitive (APFSX), Linux can mount a
+/// case-insensitive volume, and the folding table used is the volume's, not
+/// Unicode's. That is why this asks the filesystem via `realpath`
+/// (`std::fs::canonicalize`) instead of guessing with `to_lowercase` — the
+/// guess is wrong in both directions, and being wrong in the "these are the
+/// same file" direction merges two genuinely different documents.
+///
+/// Symlinks are resolved deliberately. Every caller is really asking "would
+/// writing here destroy what that other buffer holds?", and for a link and its
+/// target the answer is yes — `atomic_write` above follows links precisely so
+/// that a write lands on the real file. Treating them as two documents is what
+/// would let two auto-save timers take turns overwriting one file.
+///
+/// A path that does not exist yet — Save As to a new name — has no canonical
+/// form, so the parent directory is canonicalized and the file name appended.
+/// That still folds and resolves the directory part, and the file name cannot
+/// be an alias of an existing file: if it were, the file would exist and the
+/// first branch would have handled it.
+pub(crate) fn canonical_identity(path: &Path) -> std::io::Result<PathBuf> {
+    match fs::canonicalize(path) {
+        Ok(resolved) => Ok(strip_verbatim_prefix(resolved)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let Some(file_name) = path.file_name() else {
+                return Err(e);
+            };
+            let parent = match path.parent() {
+                Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+                _ => PathBuf::from("."),
+            };
+            Ok(strip_verbatim_prefix(fs::canonicalize(parent)?).join(file_name))
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Text decoded from a file, together with the fidelity of that decode.
 struct DecodedText {
     content: String,
@@ -443,6 +511,202 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("markpad-{tag}-{nonce}"))
+    }
+
+    /// A directory to work in, so the case/normalization probes below cannot
+    /// collide with anything else in the temp dir.
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = temp_path(tag);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Does the volume `dir` lives on fold case? The tests below assert
+    /// different things depending on the answer, because the point of
+    /// `canonical_identity` is that it reports what the FILESYSTEM does rather
+    /// than what the platform usually does — a case-sensitive volume on macOS
+    /// and a case-insensitive volume on Linux both exist and both must work.
+    fn folds_case(dir: &Path) -> bool {
+        let upper = dir.join("CaseProbe.md");
+        fs::write(&upper, b"probe").unwrap();
+        let found = fs::metadata(dir.join("caseprobe.md")).is_ok();
+        fs::remove_file(&upper).unwrap();
+        found
+    }
+
+    #[test]
+    fn canonical_identity_reports_what_the_filesystem_does_about_case() {
+        let dir = temp_dir("canon-case");
+        let real = dir.join("Alpha.md");
+        fs::write(&real, b"body").unwrap();
+
+        let by_real = canonical_identity(&real).unwrap();
+        let lowered = dir.join("alpha.md");
+        // What the frontend consumes is whether these two come out EQUAL, so
+        // that is what gets asserted — not whether the lookup happened to
+        // succeed. Asking `is_err()` here tested the mechanism instead of the
+        // property, and got it wrong: on a case-sensitive volume the lowercase
+        // spelling names no file, but `canonical_identity` still answers for it
+        // through the parent-directory fallback that Save As depends on.
+        let by_lowered = canonical_identity(&lowered).ok();
+
+        // Either way, the identity is the name the DIRECTORY holds rather than
+        // the spelling that was asked for — otherwise the answer would depend
+        // on which spelling happened to be opened first.
+        assert_eq!(by_real.file_name().unwrap(), "Alpha.md");
+
+        if folds_case(&dir) {
+            // The two spellings name ONE file: opening both must not give two
+            // tabs, and saving through one must not be treated as a save to a
+            // different file. Both reduce to the same identity string, which
+            // is what lets the frontend keep comparing with `===`.
+            assert_eq!(
+                by_lowered.as_ref(),
+                Some(&by_real),
+                "one file must have one identity whichever way it is spelled",
+            );
+        } else {
+            // On a case-sensitive volume these are two different files and must
+            // keep being two. A `to_lowercase()` scheme would merge them here
+            // and quietly close a tab holding a genuinely different document —
+            // which is VS Code's open bug #123660, and the thing this whole
+            // approach exists to avoid.
+            assert_ne!(
+                by_lowered.as_ref(),
+                Some(&by_real),
+                "two files must keep two identities",
+            );
+        }
+
+        fs::remove_file(&real).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn canonical_identity_folds_unicode_normalization_when_the_volume_does() {
+        // APFS is normalization-INSENSITIVE as well as case-insensitive: a
+        // file written as NFC opens under its NFD spelling and vice versa.
+        // Case folding cannot reach this — the two strings differ in code
+        // points, not in case — so it is the clearest evidence that the
+        // question has to go to the filesystem.
+        //
+        // The two axes are independent, and all four combinations are real:
+        // default APFS folds both, case-sensitive APFS folds only
+        // normalization, NTFS folds only case, ext4 folds neither. So this
+        // probes normalization on its own rather than inferring it from the
+        // case answer or from the platform.
+        let dir = temp_dir("canon-nfd");
+        let nfc = dir.join("caf\u{e9}.md"); // café
+        let nfd = dir.join("cafe\u{301}.md"); // cafe + combining acute
+        fs::write(&nfc, b"body").unwrap();
+
+        let by_nfc = canonical_identity(&nfc).unwrap();
+        let by_nfd = canonical_identity(&nfd).ok();
+
+        if fs::metadata(&nfd).is_ok() {
+            assert_eq!(
+                by_nfd.as_ref(),
+                Some(&by_nfc),
+                "one file must have one identity whichever way it is spelled",
+            );
+        } else {
+            // A volume that keeps them apart really does have two files here,
+            // so the identities must stay apart too. As above, the assertion is
+            // on the identities and not on whether the lookup succeeded: the
+            // NFD spelling names nothing, but the parent-directory fallback
+            // still answers for it.
+            assert_ne!(
+                by_nfd.as_ref(),
+                Some(&by_nfc),
+                "two files must keep two identities",
+            );
+        }
+
+        fs::remove_file(&nfc).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_identity_resolves_a_symlink_to_its_target() {
+        // A link and its target are one file for every purpose Markpad has:
+        // `atomic_write` follows the link when it writes, so two tabs on the
+        // two names would be two auto-save timers on one document.
+        let dir = temp_dir("canon-link");
+        let target = dir.join("archive.md");
+        let link = dir.join("today.md");
+        fs::write(&target, b"body").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        assert_eq!(
+            canonical_identity(&link).unwrap(),
+            canonical_identity(&target).unwrap(),
+        );
+
+        fs::remove_file(&link).unwrap();
+        fs::remove_file(&target).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn canonical_identity_still_answers_for_a_file_that_does_not_exist_yet() {
+        // Save As names a file that is not there yet, so `realpath` fails on
+        // it. The directory is still resolvable, and that is the part that
+        // carries the symlinks and the `..` segments.
+        let dir = temp_dir("canon-new");
+        let nested = dir.join("sub");
+        fs::create_dir_all(&nested).unwrap();
+
+        let indirect = nested.join("..").join("sub").join("fresh.md");
+        assert_eq!(
+            canonical_identity(&indirect).unwrap(),
+            canonical_identity(&nested).unwrap().join("fresh.md"),
+        );
+
+        // A missing DIRECTORY has no identity to report; the caller keeps the
+        // literal path, which is what it would have used anyway.
+        assert!(canonical_identity(&dir.join("nope").join("x.md")).is_err());
+
+        // The fallback must never manufacture the identity of a file that DOES
+        // exist — that would merge a Save As target into an unrelated open
+        // document. This is the property both branches above lean on whenever a
+        // volume distinguishes two spellings: the spelling that names nothing
+        // still gets an identity, and it has to be a different one.
+        //
+        // It runs on every platform and every volume, which matters because the
+        // two axes cannot all be reproduced on one machine: macOS folds Unicode
+        // normalization on every filesystem it mounts, so the "normalization
+        // distinguishes these" branch of the test above is only ever taken on
+        // Linux and Windows. This asserts the same underlying property here.
+        let existing = nested.join("taken.md");
+        fs::write(&existing, b"body").unwrap();
+        assert_ne!(
+            canonical_identity(&nested.join("not-taken.md")).unwrap(),
+            canonical_identity(&existing).unwrap(),
+            "a name that resolves to nothing must not borrow another file's identity",
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn verbatim_prefix_is_stripped_so_paths_stay_displayable() {
+        // `canonicalize` returns `\\?\C:\...` on Windows. That string reaches
+        // the tab bar, the window title and the recent-files list, and several
+        // Win32 APIs reject it, so it never leaves this module.
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"\\?\C:\notes\a.md")),
+            PathBuf::from(r"C:\notes\a.md"),
+        );
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from(r"\\?\UNC\server\share\a.md")),
+            PathBuf::from(r"\\server\share\a.md"),
+        );
+        // Untouched everywhere else.
+        assert_eq!(
+            strip_verbatim_prefix(PathBuf::from("/notes/a.md")),
+            PathBuf::from("/notes/a.md"),
+        );
     }
 
     #[test]
@@ -3082,6 +3346,28 @@ async fn save_file_content(path: String, content: String) -> Result<(), String> 
     .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Resolve `path` to the identity the filesystem gives it — see
+/// `canonical_identity` for what that folds and why the filesystem, rather
+/// than a platform guess, is the thing being asked.
+///
+/// The frontend calls this once per path, when the path ENTERS the app, and
+/// keeps the answer on the tab (`Tab.pathKey`). Comparisons themselves stay
+/// synchronous string equality: `TabManager.claimPath` runs on every navigate
+/// and cannot become async without turning six sync call sites into promises.
+///
+/// Async because `realpath` walks the path component by component and can hit
+/// a network volume that is slow or unreachable.
+#[tauri::command]
+async fn canonicalize_path(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        canonical_identity(Path::new(&path))
+            .map(|resolved| resolved.to_string_lossy().into_owned())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
+}
+
 #[tauri::command]
 fn print_pdf(window: tauri::WebviewWindow) -> Result<(), String> {
     window.print().map_err(|error| error.to_string())
@@ -3981,6 +4267,7 @@ pub fn run() {
             send_markdown_path,
             read_file_content,
             read_file_content_checked,
+            canonicalize_path,
             read_file_as_data_url,
             save_file_content,
             export_pdf_windows,
