@@ -1098,6 +1098,276 @@ mod tests {
         );
     }
 
+    // ---------------------------------------------------------------------
+    // `process_parenthesized_autolinks` — semantics and cost
+    //
+    // The pass shipped for #290 as a scan per candidate: for every
+    // `(<scheme>://` it re-walked the rest of the whitespace-free run looking
+    // for the balancing `)`. That walk has no early exit when the run holds
+    // more `(` than `)`, so on a run with no closing paren at all every
+    // candidate walked to the end of the run and the cost was quadratic in
+    // the length of the longest run.
+    //
+    // `parenthesized_autolinks_agree_with_the_scan_they_replace` below keeps
+    // that original scan, verbatim, as the executable definition of what this
+    // pass means, and asserts the one-pass version is byte-identical to it —
+    // including which `Cow` variant comes back. It is the semantic guard, and
+    // it is deterministic.
+    //
+    // The cost guard has to be wall-clock, because no property of the *output*
+    // distinguishes a linear implementation from a quadratic one; only the
+    // work does. It is sized from measurements of both, in the profile CI
+    // actually runs (`cargo test`, i.e. debug), so that neither verdict is
+    // close: 3 ms one-pass, 152 s scan-per-candidate, budget 4 s. Failing
+    // wrongly needs a machine 1300x slower than the one that was measured;
+    // passing wrongly needs one 38x faster.
+    // ---------------------------------------------------------------------
+
+    /// The implementation this pass shipped with in `3e63d9a` (#291), kept
+    /// verbatim as the reference the one-pass version has to reproduce.
+    fn scan_parenthesized_autolinks(content: &str) -> Cow<'_, str> {
+        let regions = code_region_ranges(content);
+        let mut output = String::new();
+        let mut copied_to = 0;
+        let mut scan_from = 0;
+
+        while let Some(opening_offset) = content[scan_from..].find('(') {
+            let opening = scan_from + opening_offset;
+            let url_start = opening + 1;
+            let url_tail = &content[url_start..];
+            if !(url_tail.starts_with("http://")
+                || url_tail.starts_with("https://")
+                || url_tail.starts_with("ftp://"))
+            {
+                scan_from = url_start;
+                continue;
+            }
+
+            let mut depth = 1usize;
+            let mut closing = None;
+            for (offset, ch) in url_tail.char_indices() {
+                if ch.is_whitespace() {
+                    break;
+                }
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            closing = Some(url_start + offset);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            let Some(closing) = closing else {
+                scan_from = url_start;
+                continue;
+            };
+            let after_closing = closing + ')'.len_utf8();
+            let adjacent_text = content[after_closing..]
+                .chars()
+                .next()
+                .is_some_and(char::is_alphanumeric);
+            if !adjacent_text || in_code_region(&regions, opening) {
+                scan_from = after_closing;
+                continue;
+            }
+
+            let url = &content[url_start..closing];
+            output.push_str(&content[copied_to..url_start]);
+            output.push('[');
+            output.push_str(url);
+            output.push_str("](");
+            output.push_str(url);
+            output.push(')');
+            output.push(')');
+            copied_to = after_closing;
+            scan_from = after_closing;
+        }
+
+        if output.is_empty() {
+            Cow::Borrowed(content)
+        } else {
+            output.push_str(&content[copied_to..]);
+            Cow::Owned(output)
+        }
+    }
+
+    fn assert_autolinks_agree(input: &str) {
+        let reference = scan_parenthesized_autolinks(input);
+        let actual = process_parenthesized_autolinks(input);
+        assert_eq!(
+            reference, actual,
+            "one-pass pairing disagrees with the scan it replaces\n  input: {input:?}",
+        );
+        assert_eq!(
+            matches!(reference, Cow::Borrowed(_)),
+            matches!(actual, Cow::Borrowed(_)),
+            "borrowed/owned disagrees, so an untouched document is now copied\n  input: {input:?}",
+        );
+    }
+
+    /// Every string of up to `depth` pieces drawn from `alphabet`.
+    fn for_every_combination(alphabet: &[&str], depth: usize, check: &mut impl FnMut(&str)) {
+        fn walk(alphabet: &[&str], depth: usize, cur: &mut String, check: &mut impl FnMut(&str)) {
+            check(cur);
+            if depth == 0 {
+                return;
+            }
+            for piece in alphabet {
+                let mark = cur.len();
+                cur.push_str(piece);
+                walk(alphabet, depth - 1, cur, check);
+                cur.truncate(mark);
+            }
+        }
+        walk(alphabet, depth, &mut String::new(), check);
+    }
+
+    #[test]
+    fn parenthesized_autolinks_agree_with_the_scan_they_replace() {
+        // The shapes the pairing rule actually turns on: an unbalanced run, a
+        // URL with a legitimate inner pair, a candidate nested inside another,
+        // code spans and fences, non-ASCII whitespace next to the parens, and
+        // the pattern at both ends of the document.
+        const ADVERSARIAL: &[&str] = &[
+            "",
+            "(",
+            ")",
+            "()",
+            "(http://a",
+            "(http://a)",
+            "(http://a)b",
+            "(http://a) b",
+            "(https://a)b",
+            "(ftp://a)b",
+            "(HTTP://a)b",
+            "http://a)b",
+            "((http://a)b",
+            "((http://a))b",
+            "(http://a(b))c",
+            "(https://en.wikipedia.org/wiki/Mercury_(planet))then",
+            "(https://en.wikipedia.org/wiki/Foo_(bar)x",
+            "(http://a(http://b)c)d",
+            "(http://a(http://b)c",
+            "((((http://a))))b",
+            "(http://a))))b",
+            "))))(http://a)b",
+            "(http://a(http://a(http://a",
+            "(http://a)\u{65e5}\u{672c}",
+            "\u{65e5}\u{672c}(http://a)b",
+            "\u{a0}(http://a)b",
+            "(http://a\u{a0})b",
+            "(http://a\u{3000})b",
+            "`(http://a)b`",
+            "``(http://a)b``",
+            "```\n(http://a)b\n```\n",
+            "~~~\n(http://a)b\n~~~\n",
+            "```\n(http://a)b\n",
+            "text `code (http://a)b` text (http://c)d",
+            "(http://a)b at the very start",
+            "at the very end (http://a)b",
+            "\n\n(http://a)b\n\n",
+            "(http://",
+            "(http://)x",
+            "(http://a)b(http://c)d",
+            "(http://a(",
+            "(http://a()x",
+            "( http://a)b",
+            "(\thttp://a)b",
+            "(http://a\tb)c",
+            "(http://a b)c",
+            "[text](http://a)b",
+            "![img](http://a)b",
+            "(http://a)b\r\n(http://c)d\r\n",
+        ];
+        for input in ADVERSARIAL {
+            assert_autolinks_agree(input);
+        }
+        for input in LINE_CONTRACT_CORPUS {
+            assert_autolinks_agree(input);
+            assert_autolinks_agree(&input.replace('\n', "\r\n"));
+        }
+
+        // Exhaustive over the alphabet the rule is written in. 7^0..7^5
+        // documents, every arrangement of parens, schemes, whitespace and
+        // backticks up to five pieces long.
+        let mut count = 0usize;
+        for_every_combination(&["(", ")", "http://", "a", " ", "\n", "`"], 5, &mut |s| {
+            assert_autolinks_agree(s);
+            count += 1;
+        });
+        for_every_combination(&["(http://a", ")", "b", " ", "(", "`"], 5, &mut |s| {
+            assert_autolinks_agree(s);
+            count += 1;
+        });
+        assert!(count > 25_000, "the enumeration collapsed: {count} inputs");
+    }
+
+    #[test]
+    fn parenthesized_autolinks_stay_linear_in_the_longest_run() {
+        // One whitespace-free run of `(http://a`, no closing paren anywhere:
+        // every `(` is a candidate and none of them can ever be closed. The
+        // scan-per-candidate shape walks the rest of the run for each one.
+        //
+        // Measured on an M-series laptop at this size: 0.8 ms one-pass /
+        // 9.1 s scan-per-candidate in a release build, 3 ms / 152 s in a
+        // debug build.
+        let mut input = String::with_capacity(320_016);
+        while input.len() < 320_000 {
+            input.push_str("(http://a");
+        }
+
+        let started = std::time::Instant::now();
+        let out = process_parenthesized_autolinks(&input);
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(out, Cow::Borrowed(_)),
+            "nothing in this input can be rewritten",
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(4),
+            "a {} KB run took {elapsed:?}; the pairing is no longer one pass",
+            input.len() / 1024,
+        );
+    }
+
+    #[test]
+    fn parenthesized_autolinks_leave_code_regions_alone() {
+        let fenced = "```\nSee (https://example.com/x)then.\n```\n";
+        assert_eq!(process_parenthesized_autolinks(fenced), fenced);
+        let span = "See `(https://example.com/x)then` here.\n";
+        assert_eq!(process_parenthesized_autolinks(span), span);
+
+        // …and still rewrite the same text outside one.
+        let mixed = "```\n(https://example.com/x)a\n```\n\n(https://example.com/y)b\n";
+        let out = process_parenthesized_autolinks(mixed);
+        assert!(
+            out.contains("```\n(https://example.com/x)a\n```"),
+            "got: {out}"
+        );
+        assert!(
+            out.contains("[https://example.com/y](https://example.com/y))b"),
+            "got: {out}",
+        );
+    }
+
+    #[test]
+    fn parenthesized_autolink_keeps_a_balanced_pair_inside_the_url() {
+        // The Wikipedia shape: the `)` that ends the URL is the balancing
+        // one, not the first one.
+        let html = convert_markdown("See (https://en.wikipedia.org/wiki/Mercury_(planet))then.\n");
+        assert!(
+            html.contains("href=\"https://en.wikipedia.org/wiki/Mercury_(planet)\""),
+            "got: {html}",
+        );
+        assert!(html.contains(")then."), "got: {html}");
+    }
+
     #[test]
     fn path_components_reject_traversal_separators_and_absolute_paths() {
         for invalid in ["", ".", "..", "../theme", "folder/theme", "folder\\theme", "/tmp/theme"] {
@@ -2650,67 +2920,141 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
     processed
 }
 
+/// The `(` of every `(<scheme>://…` in `content`, paired with the `)` that
+/// closes it, or `None` when nothing closes it before the run ends.
+///
+/// One left-to-right pass. Every candidate is pushed with the nesting depth
+/// its closing `)` has to bring the run back to, so the `)` that pops it is by
+/// construction the *first* one at which the depth relative to that `(`
+/// returns to zero — exactly what a scan starting at that `(` would find, and
+/// the reason the whole document needs only one traversal instead of one per
+/// candidate.
+///
+/// Whitespace clears the pending candidates: a bare URL never spans it, so a
+/// `)` on the far side of a space can close nothing on this side. That reset
+/// is also what used to bound the old per-candidate scan, and it is why the
+/// old cost was quadratic in the length of a single whitespace-free run rather
+/// than in the length of the document — see `process_parenthesized_autolinks`.
+fn parenthesized_url_candidates(content: &str) -> Vec<(usize, Option<usize>)> {
+    let mut candidates: Vec<(usize, Option<usize>)> = Vec::new();
+    // (index into `candidates`, the depth its `)` brings the run back to)
+    let mut pending: Vec<(usize, isize)> = Vec::new();
+    let mut depth: isize = 0;
+
+    let bytes = content.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' => {
+                let tail = &content[i + 1..];
+                if tail.starts_with("http://")
+                    || tail.starts_with("https://")
+                    || tail.starts_with("ftp://")
+                {
+                    pending.push((candidates.len(), depth));
+                    candidates.push((i, None));
+                }
+                depth += 1;
+                i += 1;
+            }
+            b')' => {
+                depth -= 1;
+                while let Some(&(idx, want)) = pending.last() {
+                    if depth > want {
+                        break;
+                    }
+                    candidates[idx].1 = Some(i);
+                    pending.pop();
+                }
+                i += 1;
+            }
+            // The boundary is `char::is_whitespace`, i.e. Unicode White_Space,
+            // so the ASCII arm has to include U+000B, which
+            // `u8::is_ascii_whitespace` leaves out, and the non-ASCII arm has
+            // to decode (U+00A0, U+2028, U+3000 … are all whitespace).
+            b'\t' | b'\n' | 0x0B | 0x0C | b'\r' | b' ' => {
+                pending.clear();
+                depth = 0;
+                i += 1;
+            }
+            b if b < 0x80 => i += 1,
+            _ => {
+                let ch = content[i..].chars().next().unwrap_or('\0');
+                if ch.is_whitespace() {
+                    pending.clear();
+                    depth = 0;
+                }
+                i += ch.len_utf8();
+            }
+        }
+    }
+
+    candidates
+}
+
+/// Rewrites `(https://example.com/x)y` — a bare URL in parentheses with text
+/// welded to the closing paren — as an explicit link, because comrak's
+/// autolinker swallows the `)` and the text after it into the destination
+/// (issue #290). The `)` that ends the URL is the one that balances the `(`,
+/// so `(https://en.wikipedia.org/wiki/Foo_(bar))x` keeps its inner pair.
+///
+/// The pairing comes from a single pass (`parenthesized_url_candidates`)
+/// rather than a scan per candidate. The old shape re-walked the rest of the
+/// whitespace-free run for every `(<scheme>` it found, which never terminates
+/// early when the run has more `(` than `)` — a run of `(http://a` with no
+/// closing paren made every candidate scan to the end of the run. Cost was
+/// therefore quadratic in the length of the *longest run*, not of the
+/// document: at a fixed 1 MB of input it went from 12 ms with 100-byte runs to
+/// 60 s with one 1 MB run. Ordinary prose is unaffected either way; a
+/// generated or hostile `.md` is not, and this pass runs on every keystroke.
+///
+/// Line-number contract: every rewrite is confined to the bytes between a `(`
+/// and its `)`, neither of which may be a newline, and nothing is inserted or
+/// removed outside that span — so input line N stays output line N.
 fn process_parenthesized_autolinks(content: &str) -> Cow<'_, str> {
+    // No scheme anywhere means no candidate anywhere, which skips both scans.
+    if !content.contains("://") {
+        return Cow::Borrowed(content);
+    }
+    let candidates = parenthesized_url_candidates(content);
+    if candidates.is_empty() {
+        return Cow::Borrowed(content);
+    }
+
     let regions = code_region_ranges(content);
     let mut output = String::new();
     let mut copied_to = 0;
     let mut scan_from = 0;
 
-    while let Some(opening_offset) = content[scan_from..].find('(') {
-        let opening = scan_from + opening_offset;
-        let url_start = opening + 1;
-        let url_tail = &content[url_start..];
-        if !(url_tail.starts_with("http://")
-            || url_tail.starts_with("https://")
-            || url_tail.starts_with("ftp://"))
-        {
-            scan_from = url_start;
+    for &(opening, closing) in &candidates {
+        // A `(` the previous rewrite already swallowed is not a candidate.
+        if opening < scan_from {
             continue;
         }
-
-        let mut depth = 1usize;
-        let mut closing = None;
-        for (offset, ch) in url_tail.char_indices() {
-            if ch.is_whitespace() {
-                break;
-            }
-            match ch {
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        closing = Some(url_start + offset);
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-
         let Some(closing) = closing else {
-            scan_from = url_start;
             continue;
         };
         let after_closing = closing + ')'.len_utf8();
+        scan_from = after_closing;
+
         let adjacent_text = content[after_closing..]
             .chars()
             .next()
             .is_some_and(char::is_alphanumeric);
         if !adjacent_text || in_code_region(&regions, opening) {
-            scan_from = after_closing;
             continue;
         }
 
+        let url_start = opening + 1;
         let url = &content[url_start..closing];
         output.push_str(&content[copied_to..url_start]);
         output.push('[');
         output.push_str(url);
         output.push_str("](");
         output.push_str(url);
-        output.push_str(")");
+        output.push(')');
         output.push(')');
         copied_to = after_closing;
-        scan_from = after_closing;
     }
 
     if output.is_empty() {
