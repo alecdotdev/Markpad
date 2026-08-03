@@ -6,7 +6,20 @@
 	import { managedImageFromCopy, type ManagedImage } from '../utils/managedImages.js';
 	import { MARKDOWN_LANGUAGE_ID, shouldLinkifyPastedUrl } from '../utils/pasteContext.js';
 
-	import * as monaco from "monaco-editor";
+	// Monaco is ~86% of the startup JavaScript (a 4.4 MB chunk, ~360ms of
+	// parse+eval, paid once per window because every window is its own webview)
+	// and a reader who only ever views Markdown never touches a line of it. So
+	// the module is pulled in from `onMount` below instead of here: a static
+	// `import` would put it back in the startup graph no matter how rarely this
+	// component mounts. Only the *types* are imported statically — `import type`
+	// is erased entirely, so it costs nothing at runtime.
+	//
+	// The `?worker` imports below stay static on purpose. Vite compiles each of
+	// them to a URL string plus a `new Worker(url)` wrapper and emits the worker
+	// bundle as its own file, so they are already lazy: nothing is fetched until
+	// Monaco actually asks `getWorker()` for one. Making them dynamic would move
+	// a few hundred bytes and buy nothing.
+	import type * as Monaco from "monaco-editor";
 	import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 	import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 	import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
@@ -61,11 +74,15 @@
 
 	let container: HTMLDivElement;
 	let vimStatusNode = $state<HTMLDivElement>();
-	let editor: monaco.editor.IStandaloneCodeEditor;
+	// Assigned by the dynamic `import()` in `onMount`, before anything reads it:
+	// every use of a Monaco *value* in this file sits behind an `editor` /
+	// `editorReady` guard, and `editor` only exists once the module has landed.
+	let monaco: typeof Monaco;
+	let editor: Monaco.editor.IStandaloneCodeEditor;
 	let isApplyingExternalScroll = false;
 	const managedImages: ManagedImage[] = $state([]);
 
-	let cursorPosition = $state<monaco.Position | null>(null);
+	let cursorPosition = $state<Monaco.Position | null>(null);
 	let selectionCount = $state(0);
 	let cursorCount = $state(0);
 	let wordCount = $state(0);
@@ -82,9 +99,13 @@
 	//
 	// `editorReady` has to be `$state` rather than a plain `if (editor)` guard:
 	// `editor` is assigned inside `onMount` and is not reactive, so an effect
-	// that bailed out on it would never re-run once the editor appeared.
+	// that bailed out on it would never re-run once the editor appeared. That
+	// was already true when the editor was built synchronously on mount; now
+	// that `onMount` first awaits the Monaco chunk, *every* effect that touches
+	// the editor has to gate on this flag, or it runs once against a missing
+	// editor and never runs again.
 	let editorReady = $state(false);
-	let localizedActions: monaco.IDisposable[] = [];
+	let localizedActions: Monaco.IDisposable[] = [];
 
 	// `settings.osType` is resolved asynchronously from the Rust side, so it can
 	// still be 'unknown' while the editor registers its keybindings. Fall back to
@@ -133,6 +154,29 @@
 	};
 
 	onMount(() => {
+		let cancelled = false;
+		let teardown: (() => void) | null = null;
+
+		// `onMount` itself stays synchronous: Svelte only treats a *synchronously*
+		// returned function as the unmount cleanup, so an `async` callback would
+		// hand it a promise and silently leak the editor, its listeners and the
+		// `window.open` patch. The await lives in this inner task instead, and the
+		// synchronous return closes over both the cancel flag (the component can
+		// be destroyed while the chunk is still in flight — Ctrl+E then Ctrl+E
+		// again) and whatever cleanup `createEditor` produced.
+		void (async () => {
+			monaco = await import("monaco-editor");
+			if (cancelled) return;
+			teardown = createEditor();
+		})();
+
+		return () => {
+			cancelled = true;
+			teardown?.();
+		};
+	});
+
+	function createEditor() {
 		const originalOpen = window.open;
 		window.open = function (
 			url?: string | URL,
@@ -184,6 +228,14 @@
 		};
 
 		defineThemes();
+
+		// The active tab can change while the Monaco chunk is downloading (open a
+		// document in edit mode, then Ctrl+Tab before it lands). The effect that
+		// normally handles a tab switch bailed out on the missing editor, so
+		// re-read the id here: the view state saved on unmount has to be filed
+		// against the tab the editor is really showing, not the one that was
+		// active when this component was created.
+		currentTabId = tabManager.activeTabId;
 
 		const getTheme = () => {
 			if (theme && theme.startsWith("vscode:")) return "vscode-custom";
@@ -297,7 +349,7 @@
 
 			if (model && selections.length > 0) {
 				selectionCount = selections.reduce(
-					(acc: number, selection: monaco.Selection) => {
+					(acc: number, selection: Monaco.Selection) => {
 						return acc + model.getValueInRange(selection).length;
 					},
 					0,
@@ -384,7 +436,7 @@
 							word.endColumn,
 						);
 
-						const suggestions: monaco.languages.CompletionItem[] = [
+						const suggestions: Monaco.languages.CompletionItem[] = [
 							...currentEntries.map((e) => ({
 								label: e,
 								kind: e.endsWith("/")
@@ -592,7 +644,7 @@
 
 			editor.dispose();
 		};
-	});
+	}
 
 	// Editing primitives used by the context-menu actions. They live at
 	// component scope, not inside `onMount`, because the actions that call them
@@ -748,8 +800,8 @@
 	 * multi-cursor selection would cost far more than the edge case is worth.
 	 */
 	function isLinkifyPasteTarget(
-		model: monaco.editor.ITextModel,
-		selection: monaco.Selection,
+		model: Monaco.editor.ITextModel,
+		selection: Monaco.Selection,
 	): boolean {
 		return shouldLinkifyPastedUrl({
 			languageId: model.getLanguageId(),
@@ -1231,8 +1283,13 @@
 		});
 	}
 
+	// Every effect below reads `editorReady` first, and only then `editor`. See
+	// the declaration of `editorReady`: `editor` is a plain `let`, so an effect
+	// gated on it alone would run once before the Monaco chunk resolves, find
+	// nothing, and never be re-triggered — losing scroll sync, the zoom-aware
+	// font size, the theme and Vim mode for the whole life of the editor.
 	$effect(() => {
-		if (editor && onscrollsync) {
+		if (editorReady && editor && onscrollsync) {
 			const emitSync = () => {
 				if (isApplyingExternalScroll) return;
 
@@ -1254,7 +1311,7 @@
 		const activeTabId = tabManager.activeTabId;
 		const content = value;
 
-		if (!editor) return;
+		if (!editorReady || !editor) return;
 
 		if (activeTabId !== currentTabId) {
 			if (currentTabId) {
@@ -1282,7 +1339,7 @@
 	});
 
 	$effect(() => {
-		if (editor) {
+		if (editorReady && editor) {
 			editor.updateOptions({
 				minimap: { enabled: settings.minimap },
 				wordWrap: settings.wordWrap as
@@ -1309,7 +1366,7 @@
 
 
 	$effect(() => {
-		if (editor && theme) {
+		if (editorReady && editor && theme) {
 			if (theme.startsWith("vscode:")) return;
 			const targetTheme =
 				theme === "system"
@@ -1324,7 +1381,7 @@
 	});
 
 	$effect(() => {
-		if (editor && settings.vimMode && vimStatusNode) {
+		if (editorReady && editor && settings.vimMode && vimStatusNode) {
 			let disposed = false;
 			let vim: { dispose: () => void } | null = null;
 			const currentEditor = editor;
@@ -1526,6 +1583,23 @@
 		class="editor-container"
 		bind:this={container}
 	></div>
+	<!--
+		Measured: fetching, parsing and evaluating the Monaco chunk takes ~390ms
+		on an Apple-silicon Mac (~360ms of that is parse+eval, not transfer), so
+		the first switch into edit mode leaves this pane blank long enough to read
+		as a dropped keypress. Same wordless spinner the app already shows while
+		it boots, so there is no new string to translate and nothing to mistake
+		for an error. It costs nothing after the first mount in a window: the
+		chunk is in the module cache, `editorReady` flips in the same tick, and
+		this never paints again.
+	-->
+	{#if !editorReady}
+		<div class="editor-loading">
+			<svg class="spinner" viewBox="0 0 50 50">
+				<circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="4"></circle>
+			</svg>
+		</div>
+	{/if}
 </div>
 
 {#if settings.vimMode}
@@ -1564,12 +1638,55 @@
 
 <style>
 	.editor-outer {
+		position: relative;
 		flex: 1;
 		height: 100%;
 		width: 100%;
 		display: flex;
 		background-color: var(--color-canvas-default);
 		overflow: hidden;
+	}
+
+	.editor-loading {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--color-canvas-default);
+	}
+
+	.spinner {
+		width: 50px;
+		height: 50px;
+		animation: rotate 2s linear infinite;
+	}
+
+	.spinner .path {
+		stroke: var(--color-accent-fg);
+		stroke-linecap: round;
+		animation: dash 1.5s ease-in-out infinite;
+	}
+
+	@keyframes rotate {
+		100% {
+			transform: rotate(360deg);
+		}
+	}
+
+	@keyframes dash {
+		0% {
+			stroke-dasharray: 1, 150;
+			stroke-dashoffset: 0;
+		}
+		50% {
+			stroke-dasharray: 90, 150;
+			stroke-dashoffset: -35;
+		}
+		100% {
+			stroke-dasharray: 90, 150;
+			stroke-dashoffset: -124;
+		}
 	}
 
 	.editor-container {
