@@ -271,6 +271,34 @@ export function enclosingFunctionName(text: string, index: number): string | nul
 }
 
 /**
+ * The source of the one function bound to `name`, whatever the spelling —
+ * `function name() {}`, `const name = () => {}`, `{ name: (…) => {} }`, a class
+ * method.
+ *
+ * For the checks that state something about *one function*, where the anchor
+ * pair `sliceBetween(text, 'async function subject', 'async function
+ * whatever-comes-next')` names the neighbour rather than the subject: the slice
+ * is then only as tight as the declaration order happens to make it, and it
+ * widens silently as the file grows. Both uses in truncatedBufferGuard.test.ts
+ * had already grown past their subject — the transfer slice ran from
+ * `canTransfer` through `canDetach`, the detach slice from `handleDetach`
+ * through `moveTabToWindow` — and each swallowed function carries a
+ * character-identical copy of the guard under test. Measured: the guard deleted
+ * from the subject, the neighbour's copy satisfying the `assert.match`, the
+ * whole suite green.
+ *
+ * A function extracted as a function cannot drift that way. `assert.equal` on
+ * the count rather than "the first one" is deliberate: a rename or a second
+ * definition of the same name fails here, loudly, instead of quietly changing
+ * what the caller is asserting about.
+ */
+export function functionSource(text: string, name: string): string {
+	const found = functionScopes(text).filter((scope) => scope.name === name);
+	assert.equal(found.length, 1, `expected exactly one function named ${JSON.stringify(name)}, found ${found.length}`);
+	return text.slice(found[0].start, found[0].end);
+}
+
+/**
  * The source text of each function argument passed to `callee(…)`, braces
  * included.
  *

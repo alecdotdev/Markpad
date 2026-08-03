@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { getSupportedLanguages, t, type LanguageCode } from '../src/lib/utils/i18n.js';
+import { getSupportedLanguages, t, translations, type LanguageCode, type Translation } from '../src/lib/utils/i18n.js';
 
 // WHAT THIS FILE COVERS, AND WHAT IT DOES NOT
 //
@@ -22,6 +22,33 @@ const supported = getSupportedLanguages().map((l) => l.code);
 
 function count(source: string, pattern: RegExp): number {
 	return source.match(pattern)?.length ?? 0;
+}
+
+/**
+ * Does `lang`'s own dictionary define `key`, without the English fallback?
+ *
+ * `t()` falls back to English, so `assert.notEqual(t(key, lang), key)` can only
+ * fail when ENGLISH lacks the key — which each caller below already asserts one
+ * line earlier. The 26-language loop around it restated that 26 times and could
+ * not see the regression it was written for: deleting the German
+ * `menu.inlineCode` entry left the whole suite green while the German context
+ * menu rendered the English label.
+ *
+ * These labels are held to a stricter bar than the dictionary at large.
+ * i18nCoverage.test.ts reports per-locale gaps rather than failing on them,
+ * because 19 locales are missing >100 keys and nobody should have to translate
+ * a new English string 25 times before landing it. That trade does not apply
+ * here: this is a fixed list of a dozen context-menu entries, all 26 languages
+ * define all of them today, and adding an eleventh action means adding a row to
+ * FORMATTING_ACTIONS by hand — so the cost is visible where it is incurred.
+ */
+function defines(lang: LanguageCode, key: string): boolean {
+	let node: string | Translation | undefined = translations[lang];
+	for (const part of key.split('.')) {
+		if (typeof node !== 'object' || node === null || !(part in node)) return false;
+		node = node[part];
+	}
+	return typeof node === 'string';
 }
 
 // The markdown formatting entries that used to be English string literals.
@@ -60,13 +87,16 @@ test('every context-menu label is translated, none is an English literal', () =>
 	);
 });
 
-test('the formatting labels exist in English and resolve in every language', () => {
+test('the formatting labels exist in English and are translated in every language', () => {
 	for (const [, key, englishLabel] of FORMATTING_ACTIONS) {
 		assert.equal(t(key, 'en'), englishLabel, `${key} is defined for English`);
 		for (const lang of supported) {
-			const label = t(key, lang as LanguageCode);
-			assert.notEqual(label, key, `${key} resolves for ${lang} instead of echoing the key`);
-			assert.ok(label.length > 0, `${key} is non-empty for ${lang}`);
+			// `defines`, not `t(...) !== key` — see the note on the helper.
+			assert.ok(
+				defines(lang as LanguageCode, key),
+				`${key} is translated for ${lang}; it currently falls back to the English label`,
+			);
+			assert.ok(t(key, lang as LanguageCode).length > 0, `${key} is non-empty for ${lang}`);
 		}
 	}
 });
@@ -92,7 +122,11 @@ test('toggle-occurrences-highlight has its own label, not Show Whitespace', () =
 	for (const lang of supported) {
 		const occurrences = t('settings.occurrencesHighlight', lang as LanguageCode);
 		const whitespace = t('settings.showWhitespace', lang as LanguageCode);
-		assert.notEqual(occurrences, 'settings.occurrencesHighlight', `defined for ${lang}`);
+		// Same substitution as above: `occurrences !== 'settings.occurrencesHighlight'`
+		// only ever failed if English lacked the key, which the assertions at the
+		// top of this test already cover.
+		assert.ok(defines(lang as LanguageCode, 'settings.occurrencesHighlight'), `translated for ${lang}`);
+		assert.ok(defines(lang as LanguageCode, 'settings.showWhitespace'), `translated for ${lang}`);
 		assert.notEqual(
 			occurrences,
 			whitespace,
@@ -156,13 +190,13 @@ test('actions are re-registered when the UI language changes', () => {
 	);
 	assert.match(editor, /onDestroy\(disposeLocalizedActions\)/, 'teardown releases them too');
 
-	// The old design read a `uiLanguage` snapshot captured inside onMount.
+	// The old design read a `uiLanguage` snapshot captured inside onMount. The
+	// narrower "no label is still bound to the snapshot" count that used to
+	// follow this line is gone: it counted occurrences of a pattern containing
+	// `uiLanguage`, so the line above has to pass for it to be reached and,
+	// once it has, the count is zero by construction. There is no state of the
+	// component in which it, and not the line above, is the failure.
 	assert.doesNotMatch(editor, /uiLanguage/, 'no captured language snapshot remains');
-	assert.equal(
-		count(editor, /label: t\('[^']+', uiLanguage\)/g),
-		0,
-		'no label is still bound to the snapshot',
-	);
 });
 
 test('no action id is registered more than once', () => {

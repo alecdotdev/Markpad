@@ -425,9 +425,20 @@ test('closing the window still reviews unsaved tabs', () => {
 	// `appExit` and the window close handler are untouched by this change; the
 	// confirmation there is load-bearing because the buffer dies with the
 	// window. Source-level, because they are wired to Tauri window events.
-	const exit = sliceBetween(viewer, 'async function appExit()', 'async function toggleEdit');
+	//
+	// `pluck` rather than an anchor pair: the previous end anchor was
+	// `'async function toggleEdit'`, which is 969 lines below a 16-line
+	// function, so both assertions below were satisfied by anything anywhere in
+	// that span. Measured — the review moved verbatim into a helper 20 lines
+	// down that nobody calls, `appExit` reduced to `appWindow.close()`, whole
+	// suite green.
+	const exit = pluck('appExit');
 	assert.match(exit, /tabManager\.tabs\.some\(\(t\) => t\.isDirty \|\| \(t\.path === '' && t\.rawContent\.trim\(\) !== ''\)\)/);
 	assert.match(exit, /modal\.areYouSureYouWantToExit/);
+	// And the answer has to be acted on. Asking and then closing anyway loses
+	// the same buffer the dialog exists to protect; the identifier is left
+	// unpinned because which local holds the answer is not the contract.
+	assert.match(exit, /if \(\w+ !== 'discard'\) return;/, "an answer other than 'discard' stops the exit");
 
 	const closeHandler = sliceBetween(viewer, 'appWindow.onCloseRequested', 'onDragDropEvent');
 	assert.match(closeHandler, /await canCloseTab\(dirty\.id\)/);

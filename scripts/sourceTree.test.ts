@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { callbackBodies, enclosingFunctionName, offsetOf, sliceBetween, sliceFrom } from './sourceTree.js';
+import { callbackBodies, enclosingFunctionName, functionSource, offsetOf, sliceBetween, sliceFrom } from './sourceTree.js';
 
 // scripts/sourceTree.ts is the plumbing four convention tests state their claims
 // through, so a hole in it is a hole in all of them at once, and it is invisible
@@ -92,6 +92,45 @@ test('a callback body is its own body, whatever the closing brace looks like', (
 	]);
 	assert.deepEqual(callbackBodies(source, '$effect.pre'), ['{\n\t\tpre();\n\t}']);
 	assert.deepEqual(callbackBodies(source, 'onMount'), []);
+});
+
+test('a function is extracted as a function, not as "up to the next declaration"', () => {
+	// The hole this closes: an anchor pair that names the *neighbour* stops
+	// bounding the subject as soon as anything is declared between them, and a
+	// neighbour carrying the same guard then satisfies the assertion. Here the
+	// two functions are deliberately near-identical, which is the case in
+	// MarkdownViewer.svelte (`canTransfer`/`canDetach`,
+	// `handleDetach`/`moveTabToWindow`) that went undetected.
+	const source = [
+		'<script lang="ts">',
+		'\tasync function subject(id: string) {',
+		'\t\treturn guard(id);',
+		'\t}',
+		'',
+		'\tasync function neighbour(id: string) {',
+		'\t\treturn guard(id);',
+		'\t}',
+		'',
+		'\tconst options = {',
+		'\t\tpredicate: (id: string) => guard(id),',
+		'\t};',
+		'</script>',
+	].join('\n');
+
+	assert.equal(functionSource(source, 'subject'), 'async function subject(id: string) {\n\t\treturn guard(id);\n\t}');
+	assert.equal(functionSource(source, 'predicate'), '(id: string) => guard(id)');
+
+	// The neighbour is not part of the subject, which is the whole point.
+	assert.doesNotMatch(functionSource(source, 'subject'), /neighbour/);
+
+	// A renamed or duplicated subject is a failure with a name, not a wider slice.
+	assert.throws(() => functionSource(source, 'gone'), /exactly one function named "gone", found 0/);
+	// Two functions of the same name is the case a "first match wins" helper
+	// would silently pick one of — a wrapper and the method it delegates to, say.
+	assert.throws(
+		() => functionSource(source.replace('predicate:', 'subject:'), 'subject'),
+		/exactly one function named "subject", found 2/,
+	);
 });
 
 test('the parsers read .ts files as well as components', () => {

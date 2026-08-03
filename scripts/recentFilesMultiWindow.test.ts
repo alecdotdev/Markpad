@@ -60,8 +60,6 @@ Object.defineProperty(globalThis, 'window', {
 Object.defineProperty(globalThis, 'navigator', { value: { language: 'en-US' }, configurable: true });
 
 const {
-	RECENT_FILES_KEY,
-	RECENT_FILES_LIMIT,
 	dropRecentFile,
 	isRecentFilesStorageEvent,
 	parseRecentFiles,
@@ -71,13 +69,32 @@ const {
 	updateStoredRecentFiles,
 } = await import('../src/lib/utils/recentFiles.js');
 
+/*
+ * The key and the cap, written out rather than imported.
+ *
+ * They used to be `RECENT_FILES_KEY` and `RECENT_FILES_LIMIT`, exported from
+ * `recentFiles.ts` for this file and for nothing else, and every assertion
+ * compared the module's value with itself. Measured: `'recent-files'` renamed
+ * to `'markpad-recent'` — green, and a rename orphans every existing user's
+ * list, because that literal appears nowhere else to contradict it. `9` changed
+ * to `3` — green, because the boundedness test seeded `LIMIT + 5` and then
+ * asserted the result was `LIMIT` long.
+ *
+ * Both are on-disk format. A localStorage key and the length of a list the user
+ * can see are things a reader should be able to look up in the test, and things
+ * that must not change without someone deciding to change them, so they are
+ * stated here and the exports are gone.
+ */
+const KEY = 'recent-files';
+const LIMIT = 9;
+
 function seed(files: string[]) {
 	backing.clear();
 	writes.length = 0;
-	backing.set(RECENT_FILES_KEY, JSON.stringify(files));
+	backing.set(KEY, JSON.stringify(files));
 }
 
-const stored = () => parseRecentFiles(backing.get(RECENT_FILES_KEY) ?? null);
+const stored = () => parseRecentFiles(backing.get(KEY) ?? null);
 
 /**
  * A window: its own in-memory copy of the list, exactly as the component holds
@@ -153,10 +170,31 @@ test('renaming onto a path already in the list leaves one entry', () => {
 });
 
 test('the list stays bounded no matter how the entries arrived', () => {
-	const many = Array.from({ length: RECENT_FILES_LIMIT + 5 }, (_, index) => `/f${index}.md`);
+	const many = Array.from({ length: LIMIT + 5 }, (_, index) => `/f${index}.md`);
 	seed(many);
 	makeWindow([]).open('/new.md');
-	assert.equal(stored().length, RECENT_FILES_LIMIT);
+	assert.equal(stored().length, LIMIT);
+	assert.equal(stored()[0], '/new.md');
+});
+
+test('each of the two caps is load-bearing on its own', () => {
+	// An open goes through both of them — `promoteRecentFile` caps, and
+	// `updateStoredRecentFiles` caps again — so the test above stays green when
+	// either one is deleted, and only fails when both are. Each layer is driven
+	// alone here: the pure function directly, and the helper with a mutation
+	// that does not cap.
+	//
+	// Both layers earn their keep. `promoteRecentFile` is exported and is the
+	// one that defines what "recent" means; the cap in `updateStoredRecentFiles`
+	// is what bounds the stored list whatever a caller hands it, including the
+	// merge of a sibling window's longer list.
+	const many = Array.from({ length: LIMIT + 5 }, (_, index) => `/f${index}.md`);
+
+	assert.equal(promoteRecentFile(many, '/new.md').length, LIMIT, 'promoteRecentFile caps what it returns');
+
+	seed(many);
+	updateStoredRecentFiles((current) => ['/new.md', ...current]);
+	assert.equal(stored().length, LIMIT, 'and the stored list is capped even when the mutation is not');
 	assert.equal(stored()[0], '/new.md');
 });
 
@@ -173,25 +211,25 @@ test('a write that changes nothing does not wake the other windows', () => {
 
 test('a corrupt entry is survivable', () => {
 	backing.clear();
-	backing.set(RECENT_FILES_KEY, '{not json');
+	backing.set(KEY, '{not json');
 	assert.deepEqual(readStoredRecentFiles(), []);
-	backing.set(RECENT_FILES_KEY, '{"a":1}');
+	backing.set(KEY, '{"a":1}');
 	assert.deepEqual(readStoredRecentFiles(), []);
-	backing.set(RECENT_FILES_KEY, '["/a.md", 7, null]');
+	backing.set(KEY, '["/a.md", 7, null]');
 	assert.deepEqual(readStoredRecentFiles(), ['/a.md']);
 	// And a corrupt entry must not stop the next open from being recorded.
-	backing.set(RECENT_FILES_KEY, 'garbage');
+	backing.set(KEY, 'garbage');
 	makeWindow([]).open('/b.md');
 	assert.deepEqual(stored(), ['/b.md']);
 });
 
 test('only this key, and a wholesale clear, count as a remote change', () => {
-	assert.equal(isRecentFilesStorageEvent({ key: RECENT_FILES_KEY, storageArea: null }), true);
+	assert.equal(isRecentFilesStorageEvent({ key: KEY, storageArea: null }), true);
 	// `key: null` is localStorage being cleared.
 	assert.equal(isRecentFilesStorageEvent({ key: null, storageArea: null }), true);
 	assert.equal(isRecentFilesStorageEvent({ key: 'theme', storageArea: null }), false);
 	assert.equal(
-		isRecentFilesStorageEvent({ key: RECENT_FILES_KEY, storageArea: {} as Storage }),
+		isRecentFilesStorageEvent({ key: KEY, storageArea: {} as Storage }),
 		false,
 		'sessionStorage is a different store',
 	);
