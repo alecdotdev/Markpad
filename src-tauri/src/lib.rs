@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -60,6 +61,11 @@ static TASK_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
 static TASK_SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX]\](?:\s|$)").unwrap()
 });
+
+/// Distinguishes the temp files of `atomic_write` calls that share a process.
+/// Never reset, and read with `fetch_add` so no two callers can be handed the
+/// same value — the property the wall clock could not supply.
+static TEMP_FILE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Write `bytes` to `target` durably and atomically: write to a sibling temp
 /// file, fsync it, then rename over the target. Atomic on both Unix and
@@ -124,22 +130,49 @@ pub(crate) fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "markpad".to_string());
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let pid = std::process::id();
-    let temp_name = format!(".{}.markpad-tmp-{}-{}", file_name, pid, nanos);
-    let mut temp_path = parent_path.clone();
-    temp_path.push(temp_name);
 
+    // Claim a temp file nobody else holds. The name must be unique or two
+    // concurrent writers of the same target collide, and a collision is not a
+    // harmless retry: the loser used to delete `temp_path` on its way out,
+    // which is the *winner's* file, and the winner then failed its rename with
+    // ENOENT. So uniqueness comes from a per-process counter rather than the
+    // clock — macOS timer granularity is coarser than a nanosecond, and two
+    // threads calling `SystemTime::now` back to back routinely read the same
+    // value. `create_new` still arbitrates across processes (a stale temp left
+    // by a dead process whose pid we inherited), hence the bounded retry.
+    let (mut file, temp_path) = {
+        let pid = std::process::id();
+        let mut attempts = 0;
+        loop {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let seq = TEMP_FILE_SEQ.fetch_add(1, Ordering::Relaxed);
+            let mut candidate = parent_path.clone();
+            candidate.push(format!(".{file_name}.markpad-tmp-{pid}-{nanos}-{seq}"));
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&candidate)
+            {
+                Ok(file) => break (file, candidate),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempts < 16 => {
+                    attempts += 1;
+                }
+                // Anything else — no such directory, permission denied — will
+                // not improve on a retry, and neither will an `AlreadyExists`
+                // that survived 16 fresh names.
+                Err(e) => return Err(e),
+            }
+        }
+    };
+
+    // From here on `temp_path` is a file this call created, so cleaning it up
+    // can never touch another writer's temp file.
     let write_result = (|| -> std::io::Result<()> {
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp_path)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
         Ok(())
     })();
 
@@ -3136,6 +3169,62 @@ mod tests {
         atomic_write(&path, b"{\"new\":true}").unwrap();
 
         assert_eq!(fs::read(&path).unwrap(), b"{\"new\":true}");
+        let leftovers: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("markpad-tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn concurrent_atomic_writes_to_one_target_all_succeed() {
+        // Two threads used to derive the same temp name from the same clock
+        // reading (macOS ticks coarser than a nanosecond), and the collision
+        // took down *both* writers: the loser of `create_new` got EEXIST, and
+        // its cleanup deleted the winner's temp file, so the winner's rename
+        // failed with ENOENT. Concurrent writers are ordinary here — every
+        // `save_file`, theme write and window-state flush shares this path.
+        let dir = temp_path("atomic-concurrent");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("contended.json");
+
+        const WRITERS: usize = 8;
+        let bodies: Vec<Vec<u8>> = (0..WRITERS)
+            .map(|i| format!("{{\"writer\":{i}}}").into_bytes())
+            .collect();
+
+        let failures: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = bodies
+                .iter()
+                .map(|body| {
+                    let path = path.as_path();
+                    scope.spawn(move || atomic_write(path, body).map_err(|e| e.to_string()))
+                })
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|h| h.join().unwrap().err())
+                .collect()
+        });
+        assert!(
+            failures.is_empty(),
+            "every concurrent write must succeed, got: {failures:?}",
+        );
+
+        // Last writer wins, and the winner is whole: a torn or empty file
+        // would mean the rename published a temp file some other thread had
+        // deleted or was still filling.
+        let final_bytes = fs::read(&path).unwrap();
+        assert!(
+            bodies.contains(&final_bytes),
+            "final contents are not one of the values written: {:?}",
+            String::from_utf8_lossy(&final_bytes),
+        );
+
         let leftovers: Vec<String> = fs::read_dir(&dir)
             .unwrap()
             .flatten()
