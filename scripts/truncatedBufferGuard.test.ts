@@ -50,6 +50,8 @@ const { createDocumentSession } = await import('../src/lib/sessions/documentSess
 const viewer = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
 
 const errors: string[] = [];
+/** What the close dialog answers next. Set per test. */
+let closeAnswer: 'save' | 'discard' | 'cancel' = 'discard';
 
 function makeSession() {
 	return createDocumentSession({
@@ -67,7 +69,7 @@ function makeSession() {
 		onError: (message) => errors.push(message),
 		selfWriteGraceMs: 400,
 		cancelPendingAutoSave: () => {},
-		askClose: async () => 'discard' as const,
+		askClose: async () => closeAnswer,
 		onCloseSaveNewerEdits: () => {},
 		onCloseAutoSaveFailed: () => {},
 	});
@@ -77,6 +79,7 @@ function reset() {
 	tabManager.closeAll();
 	invokeCalls = [];
 	errors.length = 0;
+	closeAnswer = 'discard';
 }
 
 /** Open a >50KB file and leave the background full read pending forever. */
@@ -235,6 +238,163 @@ test('toggling a task checkbox completes the buffer before writing it', async ()
 		(write!.args.content as string).includes('- [ ] last'),
 		'the part of the file past the preview window survives',
 	);
+});
+
+// --- the refusal itself: what each writer does when the buffer stays partial ---
+//
+// Everything above proves the guard lets a COMPLETED buffer through. The
+// branch it exists for — `ensureFullContent` answering false — had no test
+// driving a writer into it, and an audit that deleted the verdict check from
+// `toggleTaskCheckbox` outright left the whole suite green.
+//
+// `ensureFullContent` answers false in exactly three states, and each is
+// exercised below:
+//
+//   1. the tab is gone — a transfer or detach whose tab closed mid-flight,
+//   2. the partial buffer already carries edits: replacing it would trade the
+//      user's typing for the file's tail, so it is left alone,
+//   3. the re-read itself failed — the only one of the three that reports.
+//
+// The two writers that do not consult it, `saveContent` and `saveContentAs`,
+// carry the same refusal as their own `isTruncated` backstop, so they are
+// driven into it here too.
+//
+// A buffer that is still partial afterwards is unusable in both directions: it
+// cannot be written (that truncates the file) and it can no longer be completed
+// (state 2 is permanent once the buffer is dirty). So every test asserts the
+// same pair — nothing reached `save_file_content`, and the buffer was left
+// exactly as it was found.
+
+/** Did anything at all get written to disk in this test? */
+const wroteToDisk = () => invokeCalls.some((call) => call.cmd === 'save_file_content');
+
+const TASKS = `- [ ] first\n\n${'y'.repeat(PREVIEW_BYTES)}\n\n- [ ] last\n`;
+const TASKS_PARTIAL = TASKS.slice(0, PREVIEW_BYTES);
+
+/** Open the >50KB task list and leave it holding only its preview slice. */
+async function openPartialTasks() {
+	handleInvoke = (cmd) => {
+		if (cmd === 'open_markdown_preview') return ['<p>preview</p>', TASKS_PARTIAL, false, false];
+		if (cmd === 'read_file_content_checked') return new Promise(() => {});
+		throw new Error(`unexpected invoke: ${cmd}`);
+	};
+	const session = makeSession();
+	await session.loadMarkdown('/docs/tasks.md');
+	const tab = tabManager.activeTab!;
+	assert.equal(tab.rawContent, TASKS_PARTIAL, 'precondition: the buffer is the partial read');
+	return { session, tab };
+}
+
+/**
+ * From here on the file's tail cannot be read — an unplugged drive, a network
+ * volume that went away, a file another process replaced. Writes are allowed
+ * through so that a guard which stops refusing is caught by the write it lets
+ * happen, not by an "unexpected invoke" from the stub.
+ */
+function makeTailUnreadable() {
+	handleInvoke = (cmd) => {
+		if (cmd === 'read_file_content_checked') return Promise.reject(new Error('Os { code: 5, kind: Uncategorized }'));
+		if (cmd === 'save_file_content') return null;
+		if (cmd === 'canonicalize_path') return '/docs/copy.md';
+		if (cmd === 'plugin:dialog|save') return '/docs/copy.md';
+		throw new Error(`unexpected invoke: ${cmd}`);
+	};
+}
+
+test('a re-read that fails leaves the buffer partial, still flagged, and reported', async () => {
+	reset();
+	const { session, tab } = await openPartial();
+	makeTailUnreadable();
+
+	assert.equal(await session.ensureFullContent(tab.id), false, 'a buffer that is still partial must be reported as such');
+	assert.equal(tab.rawContent, PARTIAL, 'a failed read must not leave a half-filled buffer behind');
+	assert.equal(tab.isTruncated, true, 'and the flag must survive, or every writer downstream stops refusing');
+	assert.equal(tab.isDirty, false, 'nothing was edited, so nothing may be marked unsaved');
+	assert.deepEqual(errors, ['Error loading the rest of the file'], 'the user is told why the document cannot be edited');
+});
+
+test('completing the buffer of a tab that is gone is refused, not assumed', async () => {
+	// `handleDetach` and `moveTabToWindow` pass an id, and the tab behind it can
+	// be closed while the call is in flight. "No such tab" is not "nothing to
+	// do": answering true would hand the transfer a buffer nobody owns.
+	reset();
+	const { session, tab } = await openPartial();
+	const id = tab.id;
+	tabManager.closeTab(id);
+	const before = invokeCalls.length;
+
+	assert.equal(await session.ensureFullContent(id), false, 'there is no buffer to vouch for');
+	assert.equal(invokeCalls.length, before, 'and nothing is read for it either');
+});
+
+test('a task checkbox is not toggled into a buffer that could not be completed', async () => {
+	// The audit's injected defect: `toggleTaskCheckbox` calling
+	// `ensureFullContent` and ignoring what it says. Reading mode shows the
+	// preview slice with its checkboxes already clickable, so this is reachable
+	// with one click on a large file whose tail never arrived.
+	reset();
+	const { session, tab } = await openPartialTasks();
+	makeTailUnreadable();
+
+	assert.equal(await session.toggleTaskCheckbox(1, true), false, 'the toggle must report failure so the checkbox springs back');
+	assert.equal(wroteToDisk(), false, 'a partial buffer must never reach save_file_content');
+	assert.equal(tab.rawContent, TASKS_PARTIAL, 'and the buffer must not be edited either');
+	assert.equal(tab.isDirty, false, 'a dirty partial buffer can never be completed again — that is the trap');
+	assert.ok(errors.length > 0, 'the refusal is reported, not silent');
+});
+
+test('a task checkbox is not toggled into a partial buffer that already carries edits', async () => {
+	// The other refusal state, and the one that is silent by design: the tail is
+	// readable, but taking it would overwrite what the user typed. The toggle's
+	// `false` is the whole signal — the caller in MarkdownViewer puts the
+	// checkbox back with it.
+	reset();
+	const { session, tab } = await openPartialTasks();
+	const edited = `${TASKS_PARTIAL}\n- [ ] typed by hand\n`;
+	tabManager.updateTabRawContent(tab.id, edited);
+	handleInvoke = (cmd) => {
+		if (cmd === 'read_file_content_checked') return [TASKS, false];
+		if (cmd === 'save_file_content') return null;
+		throw new Error(`unexpected invoke: ${cmd}`);
+	};
+
+	assert.equal(await session.toggleTaskCheckbox(1, true), false, 'the toggle must report failure so the checkbox springs back');
+	assert.equal(wroteToDisk(), false, 'the preview slice must not be written over the document');
+	assert.equal(tab.rawContent, edited, 'and the edits it carries must not be traded for the file’s tail');
+});
+
+test('Save As refuses to copy a partially loaded document', async () => {
+	// The copy would be silently short, and it is a NEW file — nothing about it
+	// says it is missing everything past 50KB. The guard sits before the dialog,
+	// so the user is not asked where to put a document that is not going to be
+	// written.
+	reset();
+	const { session } = await openPartial();
+	makeTailUnreadable();
+
+	assert.equal(await session.saveContentAs(), false, 'Save As must report failure rather than write a short copy');
+	assert.equal(wroteToDisk(), false, 'an incomplete copy must never be written');
+	assert.equal(
+		invokeCalls.some((call) => call.cmd.endsWith('dialog|save')),
+		false,
+		'and the Save As dialog is not opened for a write that cannot happen',
+	);
+	assert.deepEqual(errors, ['Refusing to save a partially loaded document']);
+});
+
+test('answering “Save” to the close dialog cannot flush a partial buffer', async () => {
+	// The close path is the one place a refused save is not merely reported:
+	// `canCloseTab` returning true here closes the tab, and the buffer — the only
+	// copy of those edits — goes with it. A save that was refused is not a save.
+	reset();
+	const { session, tab } = await openPartial();
+	tabManager.updateTabRawContent(tab.id, `${PARTIAL}edited`);
+	makeTailUnreadable();
+	closeAnswer = 'save';
+
+	assert.equal(await session.canCloseTab(tab.id), false, 'a tab whose save was refused must stay open');
+	assert.equal(wroteToDisk(), false);
+	assert.ok(errors.length > 0, 'the user is told why the tab will not close');
 });
 
 // --- wiring that cannot be executed outside a Svelte runtime ---
