@@ -54,6 +54,7 @@ export interface Tab {
 	content: string;
 	rawContent: string;
 	originalContent: string;
+	/** Preview pixels — the coarsest of three position fields. See `scrollPercentage`. */
 	scrollTop: number;
 	isDirty: boolean;
 	isEditing: boolean;
@@ -66,6 +67,32 @@ export interface Tab {
 	history: string[];
 	historyIndex: number;
 	editorViewState: any; // monaco.editor.ICodeEditorViewState | null
+	/**
+	 * Where the reader was, written down three ways because none of them
+	 * survives everything. Re-activating a tab tries them in that order and
+	 * stops at the first that resolves; the editor tries `editorViewState`,
+	 * then `anchorLine`, then `scrollPercentage`, and never reads `scrollTop`.
+	 *
+	 * `anchorLine` is a SOURCE line, so it is the only one that still means
+	 * anything once the layout changes — a re-render, a fold, a resize, a swap
+	 * between the two panes. Reach for it first.
+	 *
+	 * `scrollPercentage` is a 0-1 fraction of the scrollable range. It survives
+	 * a container of some other height, but it drifts with the content: the
+	 * "rough percentage of the document instead of where you left off" that
+	 * #420 added `anchorLine` to fix.
+	 *
+	 * `scrollTop` is raw pixels in the preview container, exact only while that
+	 * DOM is still that size. It also drives `isScrolled` (the title bar
+	 * shadow), which is why a programmatic scroll updates it and nothing else.
+	 *
+	 * They are not three views of one value. Each writer updates a different
+	 * subset — a user scroll of the preview writes all three, a programmatic
+	 * one only `scrollTop`, closing the editor only the other two — so the most
+	 * recently written is not the most precise, and one of them can be current
+	 * while its neighbours are not. None of them scrolls anything when
+	 * assigned: the restore runs on tab activation, not on write.
+	 */
 	scrollPercentage: number;
 	anchorLine: number;
 	isSplit: boolean;
