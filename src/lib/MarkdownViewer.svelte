@@ -107,10 +107,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	let recentFiles = $state<string[]>([]);
 	let isFocused = $state(true);
 	
-	let containerEl: HTMLElement;
 	let markdownBody: HTMLElement | null = $state(null);
-	const renderDebounceMs = 50;
-	let renderTimeout: ReturnType<typeof setTimeout> | null = null;
 	let stopObservingFoldLayout: (() => void) | null = null;
 	
 	const highlightColorMap: Record<string, string> = {
@@ -251,7 +248,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	let canGoForwardInFileHistory = $derived(tabManager.activeTabId ? tabManager.canGoForward(tabManager.activeTabId) : false);
 
 	let loadingTabs = $state<string[]>([]);
-	const loadRevisionByTab = new Map<string, number>();
 	let isAtBottom = $state(false);
 
 	let showHome = $state(false);
@@ -322,8 +318,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 	// ui state
 	let tooltip = $state({ show: false, text: '', shortcut: '', html: '', isFootnote: false, x: 0, y: 0, align: 'top' as 'top' | 'right' | 'left' | 'below' });
-	let caretEl: HTMLElement;
-	let caretAbsoluteTop = 0;
 	let modalState = $state<{
 		show: boolean;
 		title: string;
