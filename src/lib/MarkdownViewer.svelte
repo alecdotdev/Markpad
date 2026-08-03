@@ -69,7 +69,7 @@ import {
 	const appWindow = getCurrentWindow();
 
 	import HomePage from './components/HomePage.svelte';
-import { tabManager } from './stores/tabs.svelte.js';
+import { tabManager, type Tab } from './stores/tabs.svelte.js';
 import { snapshotTab } from './utils/tabTransfer.js';
 import { adjustPreviewMaxWidth, getPreviewContentWidth, getStoredPreviewFullWidth } from './utils/previewWidth.js';
 import { settings } from './stores/settings.svelte.js';
@@ -1577,68 +1577,86 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		return documentSession.canCloseTab(tabId);
 	}
 
-	async function toggleEdit(silentSave = false) {
+	/**
+	 * The last auto-save a tab gets before it stops being auto-saveable.
+	 *
+	 * Shared by the two ways out of an editable pane (leaving edit mode,
+	 * closing split view). It is NOT a condition of the switch: the view
+	 * changes whether or not the write succeeds, and nothing here asks the
+	 * user anything. The only reason it exists is that the background debounce
+	 * requires `isEditing || isSplit` (see the auto-save effect), so the tab is
+	 * about to lose its scheduled writer while still dirty — a user who asked
+	 * for "save automatically" would otherwise be left with edits that no timer
+	 * is going to flush.
+	 *
+	 * Untitled tabs are excluded on purpose: `saveContent` would open the Save
+	 * dialog for them, which is exactly the forced save decision this stopped
+	 * making.
+	 */
+	async function flushBeforeLeavingEditableMode(tab: Tab) {
+		if (!tab.isDirty || tab.path === '') return;
+		// `confirmBeforeSave` disables the silent background save entirely
+		// (the Settings label promises confirmation before each write), so it
+		// disables this flush too.
+		if (!settings.autoSave || settings.confirmBeforeSave) return;
+
+		cancelPendingAutoSave(tab.id);
+		const success = await saveContent(tab.id);
+		if (!success) {
+			// Reported, not obeyed. A file that cannot be written — read-only
+			// path, a buffer the lossy-decode guard refuses — used to trap the
+			// user in the editor with no way to look at their own text.
+			addToast(t('toast.autoSaveFailed', settings.language), 'error');
+			return;
+		}
+		if (tab.isDirty) {
+			// TOCTOU: the user typed during the await, so the file is one
+			// revision behind and the debounce is about to be dropped. The
+			// preview shows those newest edits, so nothing is lost or wrong on
+			// screen; the disk is what the user should hear about.
+			addToast(t('toast.savedNewerEdits', settings.language), 'info');
+		}
+	}
+
+	/**
+	 * Reading mode's HTML, rendered from the tab's own buffer and its own path.
+	 * Writes through the tab id, so a tab switch during the render cannot land
+	 * one document's HTML on another — and, unlike the `loadMarkdown` call this
+	 * replaces, it neither activates the tab nor re-reads the file.
+	 */
+	async function renderPreviewLeavingEditableMode(tab: Tab) {
+		try {
+			await renderTabPreviewFromRaw(tab);
+		} catch (e) {
+			console.error('Failed to render markdown', e);
+		}
+	}
+
+	async function toggleEdit() {
 		const tab = tabManager.activeTab;
 		if (!tab || tab.path === undefined) return;
 
 		if (isEditing) {
-			// Switch back to view
-			if (tab.isDirty && tab.path !== '') {
-				// `confirmBeforeSave` always wins: when the user has asked
-				// for confirmation, every dirty toggle must show the modal,
-				// even if the caller passed `silentSave=true` (hotkey path).
-				const shouldSilent =
-					!settings.confirmBeforeSave && (silentSave || settings.autoSave);
-				if (shouldSilent) {
-					cancelPendingAutoSave(tab.id);
-					const success = await saveContent(tab.id);
-					if (!success) {
-						addToast(t('toast.autoSaveFailed', settings.language), 'error');
-						return; // If save fails, stay in edit mode
-					}
-				} else {
-					const response = await askCustom(t('modal.youHaveUnsavedChangesBeforeReturning', settings.language), {
-						title: t('modal.unsavedChanges', settings.language),
-						kind: 'warning',
-						showSave: true,
-					});
-
-					// Cancel only happens on save / discard. If user picks
-					// Cancel, the pending auto-save timer keeps running.
-					if (response === 'cancel') return;
-					if (response === 'save') {
-						cancelPendingAutoSave(tab.id);
-						const success = await saveContent(tab.id);
-						if (!success) return;
-					} else if (response === 'discard') {
-						cancelPendingAutoSave(tab.id);
-						tab.rawContent = tab.originalContent;
-						tab.isDirty = false;
-					}
-				}
-			}
-			// If `saveContent` left `tab.isDirty=true` (TOCTOU — user typed
-			// during the await), staying in edit mode is the safe default:
-			// a non-editable dirty tab disables auto-save, blocks Cmd+S,
-			// and risks getting clobbered by the next disk reload. Surface
-			// a hint and keep the tab editable.
-			if (tab.path !== '' && tab.isDirty) {
-				addToast(t('toast.savedNewerEdits', settings.language), 'info');
-				return;
-			}
-
+			// Switch back to view.
+			//
+			// Reading mode renders THIS TAB'S BUFFER, never the file on disk, so
+			// leaving the editor no longer depends on a save. The old code
+			// re-read `tab.path` here, which is the only reason a dirty tab had
+			// to be flushed first — silently, or through a modal — and that
+			// flush is what #168 reports as "no way to see rendered view until
+			// file is saved". Rendering the buffer is also what every editor the
+			// user is likely to have open does: VS Code's Markdown preview
+			// follows the in-memory document (it works on an untitled buffer and
+			// updates as you type), Typora's rendered view IS the buffer, and
+			// Obsidian switches to Reading view with no save step.
+			//
+			// Nothing is at risk. The buffer stays in memory, the tab keeps its
+			// dirty dot, and the two places where the buffer really is about to
+			// disappear — closing the tab (`canCloseTab`) and closing the window
+			// (`appExit`) — still ask. A view toggle is not one of them.
+			await flushBeforeLeavingEditableMode(tab);
 			tab.isEditing = false;
-			if (tab.path !== '') {
-				await loadMarkdown(tab.path, { preserveEditState: true });
-				} else {
-					// Untitled: render the in-memory buffer for the preview.
-					try {
-						const processedInfo = await renderMarkdownPreview(tab.rawContent, '');
-						tabManager.updateTabContent(tab.id, processedInfo);
-					} catch (e) {
-						console.error('Failed to render markdown', e);
-					}
-				}
+			await renderPreviewLeavingEditableMode(tab);
 		} else {
 			// Switch to edit
 			if (tab.path !== '') {
@@ -1922,9 +1940,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	 * pays the cost once per export instead of once per keystroke, which is
 	 * what the narrow effect condition exists to avoid.
 	 *
-	 * Reading mode is left alone: its DOM came from `loadMarkdown` rendering
-	 * this same buffer, and re-rendering would throw away the scroll position
-	 * and the fold/find state the user is looking at.
+	 * Reading mode is left alone: its DOM came from `renderTabPreviewFromRaw`
+	 * rendering this same buffer, and re-rendering would throw away the scroll
+	 * position and the fold/find state the user is looking at.
 	 */
 	async function syncPreviewForPrint() {
 		const tab = tabManager.activeTab;
@@ -2357,7 +2375,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	});
 
-	async function toggleSplitView(tabId: string, silentSave = false) {
+	async function toggleSplitView(tabId: string) {
 		const tab = tabManager.tabs.find((t) => t.id === tabId);
 		if (!tab) return;
 
@@ -2390,52 +2408,15 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			tabManager.setSplitEnabled(tab.id, true);
 			if (liveMode) toggleLiveMode();
 		} else {
-			if (tab.isDirty && tab.path !== '') {
-				// `confirmBeforeSave` always wins: when the user has asked
-				// for confirmation, every dirty toggle must show the modal,
-				// even if the caller passed `silentSave=true` (hotkey path).
-				const shouldSilent =
-					!settings.confirmBeforeSave && (silentSave || settings.autoSave);
-				if (shouldSilent) {
-					cancelPendingAutoSave(tab.id);
-					const success = await saveContent(tab.id);
-					if (!success) {
-						addToast(t('toast.autoSaveFailed', settings.language), 'error');
-						return;
-					}
-				} else {
-					const response = await askCustom(t('modal.youHaveUnsavedChangesBeforeClosingSplitView', settings.language), {
-						title: t('modal.unsavedChanges', settings.language),
-						kind: 'warning',
-						showSave: true,
-					});
-
-					// Cancel keeps the pending auto-save timer alive.
-					if (response === 'cancel') return;
-					if (response === 'save') {
-						cancelPendingAutoSave(tab.id);
-						const success = await saveContent(tab.id);
-						if (!success) return;
-					} else if (response === 'discard') {
-						cancelPendingAutoSave(tab.id);
-						tab.rawContent = tab.originalContent;
-						tab.isDirty = false;
-					}
-				}
-			}
-			// Same TOCTOU guard as toggleEdit: if the user typed during
-			// the save, the tab is still dirty. Keep it in split mode so
-			// auto-save keeps firing and Cmd+S still works on it; flipping
-			// it out would make a non-editable dirty tab.
-			if (tab.path !== '' && tab.isDirty) {
-				addToast(t('toast.savedNewerEdits', settings.language), 'info');
-				return;
-			}
-
+			// Closing split view is the same move as leaving edit mode, and it
+			// gets the same treatment: the surviving pane renders the buffer,
+			// so no save has to happen first and nothing is asked. The split
+			// preview was already rendering that buffer on every keystroke —
+			// the old `loadMarkdown` here swapped it for the disk version at
+			// the last moment, which is why the dirty tab had to be flushed.
+			await flushBeforeLeavingEditableMode(tab);
 			tabManager.setSplitEnabled(tab.id, false);
-			if (tab.path !== '') {
-				await loadMarkdown(tab.path);
-			}
+			await renderPreviewLeavingEditableMode(tab);
 		}
 	}
 
@@ -2500,11 +2481,17 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			}
 		if (cmdOrCtrl && !e.shiftKey && !e.altKey && (code === 'Backslash' || code === 'IntlBackslash')) {
 			e.preventDefault();
-			if (tabManager.activeTabId) toggleSplitView(tabManager.activeTabId, true);
+			if (tabManager.activeTabId) toggleSplitView(tabManager.activeTabId);
 		}
 		if (cmdOrCtrl && key === 'e') {
 			e.preventDefault();
-			if (!isSplit) toggleEdit(true);
+			// The `silentSave` argument these two used to pass meant "suppress
+			// the unsaved-changes modal on the hotkey path". There is no modal
+			// on a view toggle any more, and a keystroke that says "show me the
+			// other pane" is not a request to write the file: whether a dirty
+			// tab is flushed is now decided by the user's auto-save setting
+			// alone, identically for the hotkey and the toolbar button.
+			if (!isSplit) toggleEdit();
 		}
 		if (cmdOrCtrl && key === 's') {
 			// Reading mode used to swallow the shortcut entirely. An untitled
