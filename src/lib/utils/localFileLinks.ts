@@ -1,4 +1,4 @@
-import { resolveExportImagePath } from './exportHtml.js';
+import { isAssetUrl, resolveExportImagePath } from './exportHtml.js';
 
 const absoluteFilePathPattern = /^(?:[a-zA-Z]:[\\/]|\/|\\\\)/;
 
@@ -35,6 +35,18 @@ const absoluteFilePathPattern = /^(?:[a-zA-Z]:[\\/]|\/|\\\\)/;
 export function resolveLocalFileLinkPath(rawHref: string, currentFile: string): string | null {
 	const trimmed = rawHref.trim();
 	if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) return null;
+
+	// An asset URL is never a link the author wrote. `resolveExportImagePath`
+	// accepts `asset://localhost/…` and `http://asset.localhost/…` because that
+	// is the shape a local image's `src` takes inside the webview, and the
+	// exporter has to turn those back into disk paths to inline them. A link is
+	// the opposite situation: the href is the author's text, and accepting the
+	// asset form there means `[report](http://asset.localhost/Users/me/.ssh/id_rsa)`
+	// reads as a remote address everywhere the user can see it — the link text,
+	// the status bar — while resolving to a local path that goes straight to the
+	// OS default handler. Reusing the image resolver is right; inheriting that
+	// one clause of it is not.
+	if (isAssetUrl(trimmed)) return null;
 
 	const resolved = resolveExportImagePath(trimmed, currentFile);
 	if (!resolved) return null;

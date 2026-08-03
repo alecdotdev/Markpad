@@ -146,3 +146,33 @@ test('neither OS call can leave an unhandled rejection behind', () => {
 	}
 	assert.equal(handler.match(/addToast\(`Failed to open/g)?.length, 2, 'both failures are reported');
 });
+
+test('an asset URL is never treated as a link to a local file', () => {
+	// `resolveExportImagePath` accepts `asset://localhost/…` and
+	// `http://asset.localhost/…` on purpose: that is the shape a local image's
+	// `src` takes inside the webview, and the exporter has to turn it back into
+	// a disk path to inline the bytes. A *link* is the opposite situation — the
+	// href is the author's own text — so inheriting that clause let a document
+	// write a link that reads as a remote address in the link text and the
+	// status bar while resolving to a local path and going to the OS default
+	// handler.
+	for (const href of [
+		'http://asset.localhost/etc/passwd',
+		'https://asset.localhost/Users/me/.ssh/id_rsa',
+		'http://asset.localhost/C:/Windows/System32/drivers/etc/hosts',
+		'asset://localhost/etc/hosts',
+		'ASSET://LOCALHOST/etc/hosts',
+		'HTTP://ASSET.LOCALHOST/etc/passwd',
+	]) {
+		assert.equal(resolveLocalFileLinkPath(href, CURRENT), null, href);
+	}
+
+	// The host is matched as a whole label, so a lookalike is a plain remote
+	// address and was never in scope — asserted so a future loosening of the
+	// pattern cannot pass this file.
+	assert.equal(resolveLocalFileLinkPath('http://asset.localhost.evil.test/etc/passwd', CURRENT), null);
+
+	// Ordinary links keep working: this guard must not swallow them.
+	assert.equal(resolveLocalFileLinkPath('./data.csv', CURRENT), '/notes/data.csv');
+	assert.equal(resolveLocalFileLinkPath('https://example.com/page', CURRENT), null);
+});
