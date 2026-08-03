@@ -119,6 +119,16 @@ const RULES: Rule[] = [
 		allowed: ['src/lib/MarkdownViewer.svelte'],
 	},
 	{
+		name: 'the home tab sentinel is spelled in one place',
+		why: "The home screen lives in a tab whose `path` is a sentinel rather than a file. Every reader of that field has to know the sentinel, and the one that did not — the render gate, which identified the home tab as `path === '' && title === 'Recents'` — went stale the day the sentinel was introduced and rendered the home tab as a blank page for six months (#392). A literal only some readers know about is a literal that can fall out of step in silence.",
+		// The string itself, not the `isHomePath` helper: a second site would
+		// spell the sentinel again rather than call the helper, so the helper's
+		// name is exactly what such a site does NOT contain. Comments say
+		// `HOME_TAB_PATH`, which is a symbol a rename can carry.
+		marker: /(['"])HOME\1/g,
+		allowed: ['src/lib/utils/homeTab.ts'],
+	},
+	{
 		name: 'highlight color palette has one definition',
 		why: 'A second palette drifts from the one bound to the --highlight-color custom property, so find highlights and the settings preview disagree.',
 		// Pins the custom property the palette feeds — the actual contract with

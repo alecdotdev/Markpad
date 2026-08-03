@@ -22,6 +22,8 @@
 	import FindBar from './components/FindBar.svelte';
 	import { exportAsHtml as _exportHtml, exportAsPdf as _exportPdf } from './utils/export';
 	import { askToOpenExportedFile } from './utils/openExportedFile.js';
+	import { isHomePath } from './utils/homeTab.js';
+	import { hasRealFilePath } from './utils/tabFileActions.js';
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
 import { sanitizeMarkdownHtml } from './utils/sanitize.js';
@@ -499,11 +501,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		// complete the buffer first; these predicates are the backstop.
 		canTransfer: (tabId) => {
 			const tab = tabManager.tabs.find((item) => item.id === tabId);
-			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME' && !tab.isTruncated;
+			return !isCloseWalkActive && tab !== undefined && !isHomePath(tab.path) && !tab.isTruncated;
 		},
 		canDetach: (tabId) => {
 			const tab = tabManager.tabs.find((item) => item.id === tabId);
-			return !isCloseWalkActive && tab !== undefined && tab.path !== 'HOME' && !tab.isTruncated && tabManager.tabs.length >= 2;
+			return !isCloseWalkActive && tab !== undefined && !isHomePath(tab.path) && !tab.isTruncated && tabManager.tabs.length >= 2;
 		},
 		transferPayload: (tabId) => {
 			const tab = tabManager.tabs.find((item) => item.id === tabId);
@@ -562,7 +564,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	async function savePinnedTagIfNeeded() {
 		const tag = tabManager.windowTag;
 		if (!tag?.pinned) return;
-		const files = tabManager.tabs.filter((tab) => tab.path !== '' && tab.path !== 'HOME').map((tab) => tab.path);
+		const files = tabManager.tabs.filter((tab) => hasRealFilePath(tab.path)).map((tab) => tab.path);
 		await invoke('save_pinned_tag', { name: tag.name, color: tag.color, files });
 	}
 
@@ -2688,7 +2690,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	async function mergeSelfInto(targetLabel: string) {
 		if (isCloseWalkActive) return;
 		for (const tab of [...tabManager.tabs]) {
-			if (tab.path === 'HOME') {
+			if (isHomePath(tab.path)) {
 				tabManager.closeTab(tab.id);
 				continue;
 			}
@@ -3246,7 +3248,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		</div>
 	{/if}
 
-	{#if tabManager.activeTab && (tabManager.activeTab.path !== '' || tabManager.activeTab.title !== 'Recents') && !showHome}
+	{#if tabManager.activeTab && !isHomePath(tabManager.activeTab.path) && !showHome}
 			<div
 				class="markdown-container"
 				style="zoom: {isEditing && !isSplit ? 1 : zoomLevel / 100}; --code-font: {settings.codeFont}, monospace; --code-font-size: {settings.codeFontSize}px; --highlight-color: {highlightColorMap[settings.highlightColor] || highlightColorMap.yellow};"

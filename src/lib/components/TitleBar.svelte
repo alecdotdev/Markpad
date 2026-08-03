@@ -10,6 +10,7 @@
 	import { settings } from '../stores/settings.svelte.js';
 	import { t } from '../utils/i18n.js';
 	import { getConfiguredTitlebarToolbarIds } from '../utils/titlebarToolbar.js';
+	import { hasRealFilePath } from '../utils/tabFileActions.js';
 	import { getVersion } from '@tauri-apps/api/app';
 
 	let currentLanguage = $state(settings.language);
@@ -152,7 +153,7 @@
 			tabManager.setWindowTag({ ...tag, pinned: false });
 			return;
 		}
-		const files = tabManager.tabs.filter((tab) => tab.path !== '' && tab.path !== 'HOME').map((tab) => tab.path);
+		const files = tabManager.tabs.filter((tab) => hasRealFilePath(tab.path)).map((tab) => tab.path);
 		invoke('save_pinned_tag', { name: tag.name, color: tag.color, files }).catch(console.error);
 		tabManager.setWindowTag({ ...tag, pinned: true });
 	}

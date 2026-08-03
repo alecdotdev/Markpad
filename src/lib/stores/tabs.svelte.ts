@@ -2,6 +2,7 @@ import { t } from '../utils/i18n.js';
 import { nextUntitledTitle } from '../utils/untitledTitle.js';
 import { settings } from './settings.svelte.js';
 import { hasRealFilePath } from '../utils/tabFileActions.js';
+import { HOME_TAB_PATH, isHomePath } from '../utils/homeTab.js';
 import { buildTransferredTab, type TransferableTab } from '../utils/tabTransfer.js';
 import { canonicalizePath, isSameFilePath } from '../utils/pathIdentity.js';
 import {
@@ -139,11 +140,11 @@ class TabManager {
 	 * are not persisted.
 	 *
 	 * The filter is `hasRealFilePath`, not `path !== ''`: the home screen sits
-	 * in a tab whose path is the sentinel string `'HOME'`, which passes the
-	 * non-empty test and used to be written into the snapshot. Restoring it
-	 * then asked the backend to read a file called `HOME`, and the failure left
-	 * a permanently unreadable phantom tab — or, when HOME was the only tab, a
-	 * window that came back empty.
+	 * in a tab whose path is `HOME_TAB_PATH`, which passes the non-empty test
+	 * and used to be written into the snapshot. Restoring it then asked the
+	 * backend to read a file under that name, and the failure left a
+	 * permanently unreadable phantom tab — or, when the home tab was the only
+	 * one, a window that came back empty.
 	 *
 	 * `collapsedHeaders` is deliberately NOT in here. Every other field written
 	 * below describes the window and survives whatever happened to the file
@@ -184,9 +185,9 @@ class TabManager {
 	 * (legacy untitled entries are dropped).
 	 *
 	 * Entries are accepted only for real file paths. Snapshots written by
-	 * earlier builds can still contain the `'HOME'` sentinel, so the read side
-	 * has to reject it too — otherwise those users keep restoring a tab that
-	 * can never be read.
+	 * earlier builds can still contain `HOME_TAB_PATH`, so the read side has to
+	 * reject it too — otherwise those users keep restoring a tab that can never
+	 * be read.
 	 */
 	restoreState(jsonBuffer: string) {
 		try {
@@ -394,7 +395,7 @@ class TabManager {
 	}
 
 	addHomeTab() {
-		const homeTab = this.tabs.find(t => t.path === 'HOME');
+		const homeTab = this.tabs.find(t => isHomePath(t.path));
 		if (homeTab) {
 			this.activeTabId = homeTab.id;
 			return;
@@ -403,7 +404,7 @@ class TabManager {
 		const id = crypto.randomUUID();
 		this.tabs.push({
 			id,
-			path: 'HOME',
+			path: HOME_TAB_PATH,
 			title: t('tabs.home', settings.language),
 			content: '',
 			rawContent: '',
@@ -466,7 +467,7 @@ class TabManager {
 		}
 
 		const tab = this.tabs[index];
-		if (tab.path && tab.path !== 'HOME') {
+		if (hasRealFilePath(tab.path)) {
 			this.recentlyClosed.push(tab.path);
 		}
 		this.tabs.splice(index, 1);

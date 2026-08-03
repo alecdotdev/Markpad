@@ -182,9 +182,9 @@ export function createWindowSession(options: WindowSessionOptions) {
 				options.restoreState(savedData);
 				for (const tab of options.restoredTabs()) {
 					// The home screen is not a document. Snapshots from builds that
-					// wrote its `'HOME'` sentinel must not turn into a read of a
-					// file by that name — and unlike a file that merely failed to
-					// read, there is nothing here to come back to later.
+					// wrote its `HOME_TAB_PATH` sentinel must not turn into a read
+					// of a file by that name — and unlike a file that merely failed
+					// to read, there is nothing here to come back to later.
 					if (!hasRealFilePath(tab.path)) {
 						options.dropRestoredTab(tab.id);
 						continue;

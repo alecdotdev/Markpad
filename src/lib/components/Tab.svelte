@@ -7,6 +7,7 @@
 	import { t } from '../utils/i18n.js';
 	import { settings } from '../stores/settings.svelte.js';
 	import { getTabFileActions, hasRealFilePath } from '../utils/tabFileActions.js';
+	import { isHomePath } from '../utils/homeTab.js';
 
 	let { tab, isActive, isLast, onclick, onclose } = $props<{
 		tab: Tab;
@@ -98,7 +99,7 @@
 				.filter((window) => window.label !== selfLabel)
 				.map((window) => ({
 					label: `${t('menu.moveToWindow', currentLang)} ${windowDisplay(window, currentLang)}`,
-					disabled: tab.path === 'HOME',
+					disabled: isHomePath(tab.path),
 					onHover: () => emitTo(window.label, 'window-identify', windowDisplay(window, currentLang)),
 					onClick: () => emitTo(selfLabel, 'menu-tab-move', { tabId: tab.id, targetLabel: window.label }),
 				}));
@@ -115,7 +116,7 @@
 				{ label: t('menu.undoCloseTab', currentLang), shortcut: 'Ctrl+Shift+T', onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-undo') },
 				{
 					label: t('menu.rename', currentLang),
-					// Rename renames the file on disk; untitled/HOME tabs have
+					// Rename renames the file on disk; untitled and home tabs have
 					// no file, and the handler previously no-oped silently.
 					disabled: !hasRealFilePath(tab.path),
 					onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-rename', tab.id),
@@ -125,9 +126,9 @@
 				{ separator: true },
 				{
 					label: t('menu.moveToNewWindow', currentLang),
-					// Moving the only tab would just churn windows, and the HOME
+					// Moving the only tab would just churn windows, and the home
 					// tab is recreatable anywhere; both stay in place.
-					disabled: tab.path === 'HOME' || tabManager.tabs.length < 2,
+					disabled: isHomePath(tab.path) || tabManager.tabs.length < 2,
 					onClick: () => emitTo(getCurrentWindow().label, 'menu-tab-detach', tab.id),
 				},
 				...moveToWindowItems,
@@ -146,7 +147,7 @@
 	class="tab {isActive ? 'active' : ''}"
 	class:last={isLast}
 	role="group"
-	title={tab.path || 'Recents'}
+	title={hasRealFilePath(tab.path) ? tab.path : tab.title}
 	oncontextmenu={handleContextMenu}
 	onmouseenter={startTitleMarquee}
 	onmouseleave={stopTitleMarquee}>
