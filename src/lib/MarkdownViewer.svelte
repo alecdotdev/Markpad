@@ -1123,6 +1123,14 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		// Depend on the ID and body existence to trigger restore
 		const id = tabManager.activeTabId;
 		const body = markdownBody;
+		// ...and on WHICH DOCUMENT that tab holds. Following a link, and
+		// back/forward, keep the tab and swap the document under it, and
+		// `clearReadingPosition` puts the tab at the top of the new one. This
+		// effect is the only thing that moves the preview to a tab's recorded
+		// position, so without this dependency that reset reaches nothing: the
+		// container keeps the pixel offset the reader had in the PREVIOUS
+		// document, and the new document opens part-way down.
+		void currentFile;
 
 		if (id && body) {
 			untrack(() => {

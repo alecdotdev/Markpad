@@ -92,6 +92,10 @@ export interface Tab {
 	 * recently written is not the most precise, and one of them can be current
 	 * while its neighbours are not. None of them scrolls anything when
 	 * assigned: the restore runs on tab activation, not on write.
+	 *
+	 * Because a cascade stops at its first resolved entry, they can only be
+	 * INVALIDATED as a set — pointing the tab at another document clears all of
+	 * them, and `editorViewState`, through `clearReadingPosition`.
 	 */
 	scrollPercentage: number;
 	anchorLine: number;
@@ -785,6 +789,37 @@ class TabManager {
 		}
 	}
 
+	/**
+	 * This tab is about to show a DIFFERENT document, so everything that says
+	 * where the reader was in the old one is void. The three routes that do
+	 * that — `navigate` (following a link), `goBack` and `goForward` — all end
+	 * here, because the fields have to be cleared as a set.
+	 *
+	 * Clearing one of them is not enough and reads as if it were. Both restore
+	 * paths are fallback cascades that stop at the first entry that resolves
+	 * (see `scrollPercentage` above): the preview tries `anchorLine`, then
+	 * `scrollPercentage`, then `scrollTop`, and the editor tries
+	 * `editorViewState`, then `anchorLine`, then `scrollPercentage`. So a reset
+	 * of only the last entry is unreachable for any tab that had been scrolled,
+	 * and the tab restores the OLD document's position — `anchorLine` is a
+	 * source line, and the line the reader left in one file names an unrelated
+	 * block in the next one.
+	 *
+	 * Nothing here scrolls anything; a restore runs on tab activation and on
+	 * editor mount, which is why the symptom of getting this wrong shows up on
+	 * a later tab switch rather than at the moment of the navigation.
+	 *
+	 * Only a change of DOCUMENT clears them. Save As and rename
+	 * (`updateTabPath`, `renameTab`) change the tab's path while the text on
+	 * screen stays put, and the reader has not moved.
+	 */
+	private clearReadingPosition(tab: Tab) {
+		tab.editorViewState = null;
+		tab.anchorLine = 0;
+		tab.scrollPercentage = 0;
+		tab.scrollTop = 0;
+	}
+
 	navigate(id: string, path: string, pathKey?: string) {
 		const tab = this.tabs.find(t => t.id === id);
 		if (tab) {
@@ -810,7 +845,7 @@ class TabManager {
 			tab.pathKey = pathKey;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
-			tab.scrollTop = 0;
+			this.clearReadingPosition(tab);
 		}
 	}
 
@@ -842,6 +877,7 @@ class TabManager {
 			tab.pathKey = undefined;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
+			this.clearReadingPosition(tab);
 			return path;
 		}
 		return null;
@@ -860,6 +896,7 @@ class TabManager {
 			tab.pathKey = undefined;
 			tab.title = path.split(/[/\\]/).pop() || 'Untitled';
 			tab.isDirty = false;
+			this.clearReadingPosition(tab);
 			return path;
 		}
 		return null;
