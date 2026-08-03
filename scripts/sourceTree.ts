@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -13,6 +14,41 @@ import { join } from 'node:path';
 // maintained twice. One copy each, here.
 
 export type SourceFile = { path: string; text: string };
+
+/**
+ * `source` from the first occurrence of `start` onwards.
+ *
+ * The assertion is the whole point. `source.slice(source.indexOf(marker))` with
+ * an absent marker slices from -1, which yields the last *character* of the file
+ * rather than nothing — so an `assert.doesNotMatch` against the result can never
+ * fail, and an `assert.match` fails while blaming the wrong thing.
+ *
+ * Both instances found in this suite so far were silent for their whole life:
+ * scrollSyncInput.test.ts (the anchor drifted when the code around it changed)
+ * and issue261EditorPdf.test.ts (the subject was deleted in the same commit that
+ * added the assertion). Neither was noticed by a test run, because neither
+ * failed.
+ */
+export function sliceFrom(source: string, start: string): string {
+	const from = source.indexOf(start);
+	assert.notEqual(from, -1, `expected to find ${JSON.stringify(start)}`);
+	return source.slice(from);
+}
+
+/**
+ * `source` from the first `start` to the first `end` that follows it.
+ *
+ * Searching `end` from the end of `start` rather than from 0 is deliberate: an
+ * `end` that happens to occur earlier in the file produces an empty string, and
+ * an empty subject is degenerate for the same reason -1 is.
+ */
+export function sliceBetween(source: string, start: string, end: string): string {
+	const from = source.indexOf(start);
+	assert.notEqual(from, -1, `expected to find ${JSON.stringify(start)}`);
+	const to = source.indexOf(end, from + start.length);
+	assert.notEqual(to, -1, `expected to find ${JSON.stringify(end)} after ${JSON.stringify(start)}`);
+	return source.slice(from, to);
+}
 
 /** Every compilable source file under `dir`, with forward-slash paths. */
 export function walkSourceFiles(dir: string): string[] {

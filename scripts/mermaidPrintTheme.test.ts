@@ -54,9 +54,12 @@ function makeMermaid(behaviour: (source: string) => string) {
 	};
 }
 
+/** The fake seen as the `Element` the helper's signature asks for. */
+const asElement = (element: FakeElement) => element as unknown as Element;
+
 function diagram(source: string | null, html: string) {
 	const element = new FakeElement('mermaid-diagram');
-	if (source !== null) rememberDiagramSource(element, source);
+	if (source !== null) rememberDiagramSource(asElement(element), source);
 	element.innerHTML = html;
 	return element;
 }
@@ -75,7 +78,7 @@ test('the diagram theme follows the app appearance', () => {
 
 test('the source is kept on the container so the diagram can be rebuilt', () => {
 	const element = diagram('flowchart TD\n A --> B', '<svg>screen</svg>');
-	assert.equal(readDiagramSource(element), 'flowchart TD\n A --> B');
+	assert.equal(readDiagramSource(asElement(element)), 'flowchart TD\n A --> B');
 	assert.equal(findRestorableDiagrams(new FakeRoot([element]) as unknown as ParentNode).length, 1);
 	// A diagram rendered before this change carries no source and is skipped
 	// rather than blanked.

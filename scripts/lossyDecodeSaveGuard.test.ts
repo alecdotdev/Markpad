@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import type { Tab } from '../src/lib/stores/tabs.svelte.js';
 import { buildTransferredTab, snapshotTab, validateTransferPayload } from '../src/lib/utils/tabTransfer.js';
+import { sliceBetween } from './sourceTree.js';
 
 // Every read path decodes leniently (#371): a file in a legacy encoding
 // (GBK, Big5, Shift-JIS, EUC-KR, CP1251 ...) opens as U+FFFD mojibake instead
@@ -24,18 +25,10 @@ const windowSession = readFileSync('src/lib/sessions/windowSession.svelte.ts', '
 const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
 const rust = readFileSync('src-tauri/src/lib.rs', 'utf8');
 
-function slice(source: string, start: string, end: string): string {
-	const from = source.indexOf(start);
-	assert.notEqual(from, -1, `expected to find ${start}`);
-	const to = source.indexOf(end, from + start.length);
-	assert.notEqual(to, -1, `expected to find ${end} after ${start}`);
-	return source.slice(from, to);
-}
-
-const loadMarkdown = () => slice(session, 'async function loadMarkdown', 'async function saveContent');
-const saveContent = () => slice(session, 'async function saveContent(', 'async function saveContentAs');
-const saveContentAs = () => slice(session, 'async function saveContentAs', 'async function toggleTaskCheckbox');
-const guard = () => slice(session, 'function refuseIfLossilyDecoded', 'function updateLoading');
+const loadMarkdown = () => sliceBetween(session, 'async function loadMarkdown', 'async function saveContent');
+const saveContent = () => sliceBetween(session, 'async function saveContent(', 'async function saveContentAs');
+const saveContentAs = () => sliceBetween(session, 'async function saveContentAs', 'async function toggleTaskCheckbox');
+const guard = () => sliceBetween(session, 'function refuseIfLossilyDecoded', 'function updateLoading');
 
 test('one decoder, and it reports what it destroyed', () => {
 	// The fact is known exactly once — when the bytes are decoded — and was
@@ -57,7 +50,7 @@ test('a preview cut inside a multi-byte character is not called lossy', () => {
 	// The preview stops at a fixed byte count, so a perfectly valid UTF-8 file
 	// is routinely cut mid-character. Reporting that as lossy would lock every
 	// large CJK/emoji document out of saving — a guard worse than the bug.
-	const preview = slice(rust, 'fn build_markdown_preview', '#[tauri::command]');
+	const preview = sliceBetween(rust, 'fn build_markdown_preview', '#[tauri::command]');
 	const trim = preview.indexOf('utf8_truncation_boundary');
 	assert.notEqual(trim, -1, 'the split tail must be dropped before decoding');
 	assert.ok(trim < preview.indexOf('decode_utf8_lossy'), 'trim first, then judge fidelity');
@@ -101,11 +94,11 @@ test('the editable-pane shortcut reports fidelity too', () => {
 	const bare = session.match(/invoke\('read_file_content'/g)?.length ?? 0;
 	assert.equal(bare, 0, 'no writable buffer may be filled by the unchecked command');
 	assert.match(
-		slice(session, 'async function ensureFullContent', 'const lossySaveWarnedTabs'),
+		sliceBetween(session, 'async function ensureFullContent', 'const lossySaveWarnedTabs'),
 		/invoke\('read_file_content_checked'/,
 	);
 	assert.match(
-		slice(session, 'async function ensureFullContent', 'const lossySaveWarnedTabs'),
+		sliceBetween(session, 'async function ensureFullContent', 'const lossySaveWarnedTabs'),
 		/setTabDecodedLossy\(tabId, lossy\)/,
 	);
 });
@@ -216,6 +209,7 @@ function makeTab(overrides: Partial<Tab> = {}): Tab {
 		splitRatio: 0.5,
 		isScrollSynced: false,
 		hasReplacementChars: true,
+		collapsedHeaders: new Set<string>(),
 		...overrides,
 	};
 }
@@ -243,7 +237,7 @@ test('a payload without the flag is rejected, not defaulted', () => {
 	// The file's own doctrine: no coercion, no defaults. Defaulting a missing
 	// flag to false would silently re-open the hole for any sender that
 	// forgets it.
-	const snap = snapshotTab(makeTab()) as Record<string, unknown>;
+	const snap: Record<string, unknown> = { ...snapshotTab(makeTab()) };
 	delete snap.hasReplacementChars;
 	assert.equal(validateTransferPayload(JSON.stringify(snap)), null);
 });

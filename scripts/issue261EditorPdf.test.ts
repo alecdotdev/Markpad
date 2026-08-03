@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { sliceBetween, sliceFrom } from './sourceTree.js';
+
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 const styles = readFileSync('src/styles.css', 'utf8');
 
 test('editor context menu is not intercepted by the document menu', () => {
-	const start = viewer.indexOf('function handleContextMenu(e: MouseEvent)');
-	const handler = viewer.slice(start, viewer.indexOf('\n\tfunction handleMouseOver', start));
+	const handler = sliceBetween(viewer, 'function handleContextMenu(e: MouseEvent)', '\n\tfunction handleMouseOver');
 	const editorReturn = handler.indexOf('if (isInsideEditor) return;');
 	const preventDefault = handler.indexOf('e.preventDefault();');
 
@@ -45,10 +46,7 @@ test('print layout lets the viewer pane escape the interactive split flex ratio'
 });
 
 test('floating toc toggle keeps a visible translucent surface outside edit mode', () => {
-	const selector = viewer.slice(
-		viewer.indexOf('\t.toc-toggle-floating {'),
-		viewer.indexOf('\n\t.toc-toggle-floating.expanded {'),
-	);
+	const selector = sliceBetween(viewer, '\t.toc-toggle-floating {', '\n\t.toc-toggle-floating.expanded {');
 
 	assert.match(selector, /background-color:\s*color-mix\(in srgb, var\(--color-canvas-default\) 82%, transparent\);/);
 	assert.match(selector, /border:\s*1px solid var\(--color-border-default\);/);
@@ -59,7 +57,7 @@ test('floating toc toggle keeps a visible translucent surface outside edit mode'
 });
 
 test('print layout gives document content paper-specific rhythm and boundaries', () => {
-	const printStyles = styles.slice(styles.indexOf('@media print {'));
+	const printStyles = sliceFrom(styles, '@media print {');
 
 	assert.match(printStyles, /\.markdown-body h1,[\s\S]*?line-height:\s*1\.2;/);
 	assert.match(printStyles, /\.markdown-body p\s*\{[\s\S]*?margin:\s*0 0 0\.75em;/);
@@ -72,8 +70,7 @@ test('print layout gives document content paper-specific rhythm and boundaries',
 });
 
 test('print layout paints a theme-independent page and keeps Markdown alerts intact', () => {
-	const printStyles = styles.slice(styles.indexOf('@media print {'));
-	const viewerPrintStyles = viewer.slice(viewer.indexOf('\t@media print {'));
+	const printStyles = sliceFrom(styles, '@media print {');
 
 	assert.match(printStyles, /@page\s*\{[\s\S]*?margin:\s*0;/);
 	assert.match(printStyles, /\.markdown-body\s*\{[\s\S]*?box-sizing:\s*border-box\s*!important;/);
@@ -88,11 +85,22 @@ test('print layout paints a theme-independent page and keeps Markdown alerts int
 	assert.match(printStyles, /\.markdown-body \.markdown-alert\s*\{[\s\S]*?box-decoration-break:\s*clone\s*!important;/);
 	assert.match(printStyles, /\.markdown-body details\.markdown-alert\s*\{[\s\S]*?break-inside:\s*avoid\s*!important;/);
 	assert.match(printStyles, /\.markdown-body tr\s*\{[\s\S]*?break-inside:\s*avoid;/);
-	assert.doesNotMatch(viewerPrintStyles, /\.markdown-body\s*\{[\s\S]*?padding:\s*0\s*!important;/);
+
+	// The paper padding above is set globally, so a component-scoped print rule
+	// in MarkdownViewer.svelte would beat it: Svelte adds a hash class to its
+	// own selectors, and `.markdown-body.svelte-xxxx { padding: 0 !important }`
+	// outranks `.markdown-body { padding: 0.75in !important }`. Exactly that
+	// rule lived in the component until 37b3693 removed it.
+	//
+	// This is searched over the whole component rather than over a slice from
+	// `@media print {`: the component now has no print block at all, so slicing
+	// to that marker sliced from -1 — the last character of the file — and the
+	// assertion could not fail for the entire time it existed.
+	assert.doesNotMatch(viewer, /@media print\s*\{[\s\S]*?\.markdown-body\s*\{[\s\S]*?padding:\s*0\s*!important;/);
 });
 
 test('print layout keeps wide metadata tables readable', () => {
-	const printStyles = styles.slice(styles.indexOf('@media print {'));
+	const printStyles = sliceFrom(styles, '@media print {');
 
 	// Diagram colours are no longer patched from CSS — the export re-renders
 	// them with Mermaid's light theme instead (see utils/mermaidPrint.ts).

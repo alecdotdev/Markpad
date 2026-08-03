@@ -1,6 +1,11 @@
 {
   "extends": "./.svelte-kit/tsconfig.json",
   "compilerOptions": {
+    // scripts/*.test.ts import their subjects with an explicit `.ts`
+    // extension, which is what `tsx` (the test runner's loader) resolves.
+    // Legal because the whole project is `noEmit` — nothing here is compiled
+    // to JS, so there is no output path for the extension to be wrong in.
+    "allowImportingTsExtensions": true,
     "allowJs": true,
     "checkJs": true,
     "esModuleInterop": true,
@@ -10,10 +15,37 @@
     "sourceMap": true,
     "strict": true,
     "moduleResolution": "bundler"
-  }
+  },
+  // TypeScript does not merge `include` across `extends`, so this list is a
+  // copy of the one in .svelte-kit/tsconfig.json (rewritten relative to this
+  // file, which sits one level up) plus `scripts/`.
+  //
+  // `scripts/` holds the whole Node test suite. SvelteKit only ever generates
+  // `test/` and `tests/` entries, so without this override every *.test.ts was
+  // invisible to `npm run check`: renaming an exported function left the type
+  // check green and only the test run red.
+  //
+  // Keep in sync with .svelte-kit/tsconfig.json when SvelteKit is upgraded.
+  "include": [
+    ".svelte-kit/ambient.d.ts",
+    ".svelte-kit/env.d.ts",
+    ".svelte-kit/non-ambient.d.ts",
+    ".svelte-kit/types/**/$types.d.ts",
+    "vite.config.js",
+    "vite.config.ts",
+    "src/**/*.js",
+    "src/**/*.ts",
+    "src/**/*.svelte",
+    "test/**/*.js",
+    "test/**/*.ts",
+    "test/**/*.svelte",
+    "tests/**/*.js",
+    "tests/**/*.ts",
+    "tests/**/*.svelte",
+    "scripts/**/*.js",
+    "scripts/**/*.mjs",
+    "scripts/**/*.ts"
+  ]
   // Path aliases are handled by https://svelte.dev/docs/kit/configuration#alias
   // except $lib which is handled by https://svelte.dev/docs/kit/configuration#files
-  //
-  // If you want to overwrite includes/excludes, make sure to copy over the relevant includes/excludes
-  // from the referenced tsconfig.json - TypeScript does not merge them in
 }

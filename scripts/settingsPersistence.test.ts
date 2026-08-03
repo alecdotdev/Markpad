@@ -114,12 +114,12 @@ function createRecordingStore(): { proxy: InstanceType<typeof SettingsStore>; re
 	const reads = new Set<string>();
 	resetStorage();
 	const real = new SettingsStore();
-	const proxy = new Proxy(real as Record<string, unknown>, {
+	const proxy = new Proxy(real, {
 		get(target, property, receiver) {
 			if (typeof property === 'string') reads.add(property);
 			return Reflect.get(target, property, receiver);
 		},
-	}) as InstanceType<typeof SettingsStore>;
+	});
 	return { proxy, reads };
 }
 

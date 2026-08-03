@@ -60,7 +60,7 @@ function createMarkdownTokenizer() {
 		onDidChangeConfiguration: () => ({ dispose() {} }),
 	};
 
-	const tokenizer = new (MonarchTokenizer as any)(
+	const tokenizer = new MonarchTokenizer(
 		languageService,
 		themeService,
 		'markdown',

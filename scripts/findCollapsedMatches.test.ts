@@ -2,15 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const findBar = readFileSync('src/lib/components/FindBar.svelte', 'utf8');
+import { sliceBetween } from './sourceTree.js';
 
-function slice(source: string, start: string, end: string): string {
-	const from = source.indexOf(start);
-	assert.notEqual(from, -1, `expected to find ${start}`);
-	const to = source.indexOf(end, from + start.length);
-	assert.notEqual(to, -1, `expected to find ${end} after ${start}`);
-	return source.slice(from, to);
-}
+const findBar = readFileSync('src/lib/components/FindBar.svelte', 'utf8');
 
 test('find keeps counting matches inside collapsed folds', () => {
 	// Reference systems all keep hidden-but-present text findable and reveal
@@ -18,7 +12,7 @@ test('find keeps counting matches inside collapsed folds', () => {
 	// `hidden=until-found` / closed `<details>` content matchable precisely
 	// because it can reveal it. Dropping the matches from the count would be
 	// the `display: none` rule, which is not what a collapsed fold is.
-	const acceptNode = slice(findBar, 'function isHostElement(', 'function isInsideHost(');
+	const acceptNode = sliceBetween(findBar, 'function isHostElement(', 'function isInsideHost(');
 
 	assert.doesNotMatch(acceptNode, /is-collapsed/);
 	assert.doesNotMatch(acceptNode, /foldable-content-wrapper/);
@@ -31,7 +25,7 @@ test('find knows both kinds of collapsed fold container', () => {
 });
 
 test('activating a match reveals the folds hiding it before scrolling to it', () => {
-	const setActive = slice(findBar, 'function setActive(', 'export function next()');
+	const setActive = sliceBetween(findBar, 'function setActive(', 'export function next()');
 
 	const reveal = setActive.indexOf('revealFoldsAround(');
 	const scroll = setActive.indexOf('scrollIntoView(');
@@ -46,7 +40,7 @@ test('revealing a fold goes through the viewer toggle instead of stripping the c
 	// fold state: it re-applies `is-collapsed` on every re-render and feeds
 	// the ToC. Clearing the class here would create a second source of truth
 	// that the next render silently reverts.
-	const reveal = slice(findBar, 'function foldToggleFor(', 'export function clearHighlights()');
+	const reveal = sliceBetween(findBar, 'function foldToggleFor(', 'export function clearHighlights()');
 
 	assert.match(reveal, /\.header-fold-icon/);
 	assert.match(reveal, /\.callout-toggle/);
@@ -57,7 +51,7 @@ test('revealing a fold goes through the viewer toggle instead of stripping the c
 });
 
 test('nested folds are opened outermost first', () => {
-	const reveal = slice(findBar, 'function revealFoldsAround(', 'export function clearHighlights()');
+	const reveal = sliceBetween(findBar, 'function revealFoldsAround(', 'export function clearHighlights()');
 
 	assert.match(reveal, /while \(curr && curr !== root\)/);
 	assert.match(reveal, /collapsed\.reverse\(\)/);
@@ -66,7 +60,7 @@ test('nested folds are opened outermost first', () => {
 test('the scroll is re-aimed once the fold height transition has settled', () => {
 	// styles.css animates `.foldable-content-wrapper` height for 0.25s, so the
 	// first scrollIntoView aims at a target that is still moving.
-	const setActive = slice(findBar, 'function setActive(', 'export function next()');
+	const setActive = sliceBetween(findBar, 'function setActive(', 'export function next()');
 
 	assert.match(setActive, /setTimeout\(/);
 	assert.match(setActive, /FOLD_TRANSITION_MS/);

@@ -38,8 +38,18 @@ function makeTab(overrides: Partial<Tab> = {}): Tab {
 		splitRatio: 0.3,
 		isScrollSynced: true,
 		hasReplacementChars: false,
+		collapsedHeaders: new Set<string>(),
 		...overrides,
 	};
+}
+
+/**
+ * The snapshot as a mutable bag, for the tests that corrupt one field and
+ * re-serialize. A copy, so the `TransferableTab` contract stays intact for
+ * every other caller.
+ */
+function snapshotBag(tab: Tab): Record<string, unknown> {
+	return { ...snapshotTab(tab) };
 }
 
 function roundTrip(tab: Tab): TransferableTab {
@@ -96,7 +106,7 @@ test('snapshot never mutates the source tab', () => {
 });
 
 test('the snapshot excludes rendered content and editorViewState', () => {
-	const snap = snapshotTab(makeTab()) as Record<string, unknown>;
+	const snap = snapshotBag(makeTab());
 	assert.ok(!('content' in snap));
 	assert.ok(!('editorViewState' in snap));
 	assert.ok(!('id' in snap));
@@ -114,25 +124,25 @@ test('validation rejects non-object payloads', () => {
 });
 
 test('validation rejects a missing rawContent — no default, no coercion', () => {
-	const snap = snapshotTab(makeTab()) as Record<string, unknown>;
+	const snap = snapshotBag(makeTab());
 	delete snap.rawContent;
 	assert.equal(validateTransferPayload(JSON.stringify(snap)), null);
 });
 
 test('validation rejects a non-string rawContent', () => {
-	const snap = snapshotTab(makeTab()) as Record<string, unknown>;
+	const snap = snapshotBag(makeTab());
 	snap.rawContent = 5;
 	assert.equal(validateTransferPayload(JSON.stringify(snap)), null);
 });
 
 test('validation rejects a history that is not an array', () => {
-	const snap = snapshotTab(makeTab()) as Record<string, unknown>;
+	const snap = snapshotBag(makeTab());
 	snap.history = 'nope';
 	assert.equal(validateTransferPayload(JSON.stringify(snap)), null);
 });
 
 test('validation rejects history entries that are not strings', () => {
-	const snap = snapshotTab(makeTab()) as Record<string, unknown>;
+	const snap = snapshotBag(makeTab());
 	snap.history = [1, 2];
 	assert.equal(validateTransferPayload(JSON.stringify(snap)), null);
 });
@@ -152,14 +162,14 @@ test('validation is strict for every field — even cosmetic numerics get no def
 		'anchorLine',
 		'historyIndex',
 	]) {
-		const snap = snapshotTab(makeTab()) as Record<string, unknown>;
+		const snap = snapshotBag(makeTab());
 		delete snap[field];
 		assert.equal(validateTransferPayload(JSON.stringify(snap)), null, `missing ${field}`);
 	}
 });
 
 test('validation rejects non-finite numbers (NaN serializes to null)', () => {
-	const snap = snapshotTab(makeTab()) as Record<string, unknown>;
+	const snap = snapshotBag(makeTab());
 	snap.scrollTop = NaN; // JSON.stringify turns this into null
 	assert.equal(validateTransferPayload(JSON.stringify(snap)), null);
 });
