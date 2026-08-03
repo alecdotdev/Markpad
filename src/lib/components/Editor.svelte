@@ -5,6 +5,11 @@
 	import { t, type LanguageCode } from '../utils/i18n.js';
 	import { managedImageFromCopy, type ManagedImage } from '../utils/managedImages.js';
 	import { MARKDOWN_LANGUAGE_ID, shouldLinkifyPastedUrl } from '../utils/pasteContext.js';
+	import {
+		getScrollSyncPositionFromPixels,
+		getScrollTopForSyncPosition,
+		type ScrollSyncPosition,
+	} from '../utils/scrollSync.js';
 
 	// Monaco is ~86% of the startup JavaScript (a 4.4 MB chunk, ~360ms of
 	// parse+eval, paid once per window because every window is its own webview)
@@ -27,11 +32,6 @@
 	import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 	import { openUrl } from "@tauri-apps/plugin-opener";
 	import { invoke } from "@tauri-apps/api/core";
-
-	type ScrollSyncPosition = {
-		section: 'frontmatter' | 'body';
-		ratio: number;
-	};
 
 	let {
 		value = $bindable(),
@@ -1179,43 +1179,6 @@
 	});
 
 	onDestroy(disposeLocalizedActions);
-
-	function clampScrollRatio(value: number) {
-		if (!Number.isFinite(value)) return 0;
-		return Math.max(0, Math.min(1, value));
-	}
-
-	function getScrollSyncPositionFromPixels(scrollTop: number, scrollMax: number, frontMatterEnd: number): ScrollSyncPosition {
-		const safeMax = Math.max(0, scrollMax);
-		const safeFrontMatterEnd = Math.max(0, Math.min(safeMax, frontMatterEnd));
-		const safeScrollTop = Math.max(0, Math.min(safeMax, scrollTop));
-
-		if (safeFrontMatterEnd > 0 && safeScrollTop < safeFrontMatterEnd) {
-			return {
-				section: 'frontmatter',
-				ratio: clampScrollRatio(safeScrollTop / safeFrontMatterEnd),
-			};
-		}
-
-		const bodyRange = Math.max(0, safeMax - safeFrontMatterEnd);
-		return {
-			section: 'body',
-			ratio: bodyRange > 0 ? clampScrollRatio((safeScrollTop - safeFrontMatterEnd) / bodyRange) : 0,
-		};
-	}
-
-	function getScrollTopForSyncPosition(position: ScrollSyncPosition, scrollMax: number, frontMatterEnd: number) {
-		const safeMax = Math.max(0, scrollMax);
-		const safeFrontMatterEnd = Math.max(0, Math.min(safeMax, frontMatterEnd));
-		const ratio = clampScrollRatio(position.ratio);
-
-		if (position.section === 'frontmatter') {
-			return safeFrontMatterEnd * ratio;
-		}
-
-		const bodyRange = Math.max(0, safeMax - safeFrontMatterEnd);
-		return safeFrontMatterEnd + bodyRange * ratio;
-	}
 
 	function getFrontMatterBodyStartLine(content: string) {
 		const lines = content.split(/\r\n|\n|\r/);

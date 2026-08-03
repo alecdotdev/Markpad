@@ -80,6 +80,11 @@ import {
 import { tabManager, type Tab } from './stores/tabs.svelte.js';
 import { snapshotTab } from './utils/tabTransfer.js';
 import { adjustPreviewMaxWidth, getPreviewContentWidth, getStoredPreviewFullWidth } from './utils/previewWidth.js';
+import {
+	getScrollSyncPositionFromPixels,
+	getScrollTopForSyncPosition,
+	type ScrollSyncPosition,
+} from './utils/scrollSync.js';
 import { settings } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
 import { createWindowSession } from './sessions/windowSession.svelte.js';
@@ -122,11 +127,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		blue: 'rgba(67, 138, 243, 0.4)',
 		cyan: 'rgba(43, 185, 178, 0.4)',
 		green: 'rgba(77, 177, 88, 0.4)',
-	};
-
-	type ScrollSyncPosition = {
-		section: 'frontmatter' | 'body';
-		ratio: number;
 	};
 
 	let editorPane = $state<{ 
@@ -1173,45 +1173,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	});
 
-	function clampScrollRatio(value: number) {
-		if (!Number.isFinite(value)) return 0;
-		return Math.max(0, Math.min(1, value));
-	}
-
 	function getPreviewScrollMax(target: HTMLElement) {
 		return Math.max(0, target.scrollHeight - target.clientHeight);
-	}
-
-	function getScrollSyncPositionFromPixels(scrollTop: number, scrollMax: number, frontMatterEnd: number): ScrollSyncPosition {
-		const safeMax = Math.max(0, scrollMax);
-		const safeFrontMatterEnd = Math.max(0, Math.min(safeMax, frontMatterEnd));
-		const safeScrollTop = Math.max(0, Math.min(safeMax, scrollTop));
-
-		if (safeFrontMatterEnd > 0 && safeScrollTop < safeFrontMatterEnd) {
-			return {
-				section: 'frontmatter',
-				ratio: clampScrollRatio(safeScrollTop / safeFrontMatterEnd),
-			};
-		}
-
-		const bodyRange = Math.max(0, safeMax - safeFrontMatterEnd);
-		return {
-			section: 'body',
-			ratio: bodyRange > 0 ? clampScrollRatio((safeScrollTop - safeFrontMatterEnd) / bodyRange) : 0,
-		};
-	}
-
-	function getScrollTopForSyncPosition(position: ScrollSyncPosition, scrollMax: number, frontMatterEnd: number) {
-		const safeMax = Math.max(0, scrollMax);
-		const safeFrontMatterEnd = Math.max(0, Math.min(safeMax, frontMatterEnd));
-		const ratio = clampScrollRatio(position.ratio);
-
-		if (position.section === 'frontmatter') {
-			return safeFrontMatterEnd * ratio;
-		}
-
-		const bodyRange = Math.max(0, safeMax - safeFrontMatterEnd);
-		return safeFrontMatterEnd + bodyRange * ratio;
 	}
 
 	function getPreviewFrontMatterScrollEnd(target: HTMLElement) {
