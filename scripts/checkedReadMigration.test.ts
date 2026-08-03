@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { readSourceFiles } from './sourceTree.js';
+import { readSourceFiles, sliceBetween } from './sourceTree.js';
 
 // Runes and the Tauri bridge, shimmed the way truncatedBufferGuard.test.ts
 // shims them: the stores are runes modules, and Node's test runner gives every
@@ -197,11 +197,18 @@ test('entering split view reads the fidelity and stores it', () => {
 
 test('the session can tell a refusal from a failure', () => {
 	// `saveContent` returns false for both, which is why the auto-save timer
-	// could not tell them apart.
-	assert.match(
+	// could not tell them apart. The predicate is no longer set membership on
+	// its own: the set records what was SAID, and whether the refusal still
+	// stands is asked of the tab. `lossySaveRefusalScope.test.ts` exercises
+	// both halves for real; this only pins that the tab is consulted at all,
+	// since a predicate that answers from memory alone is the defect.
+	const body = sliceBetween(
 		readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8'),
-		/function isLossySaveRefused\(tabId: string\): boolean \{\s*return lossySaveWarnedTabs\.has\(tabId\);/,
+		'function isLossySaveRefused(',
+		'function updateLoading',
 	);
+	assert.match(body, /lossySaveWarnedTabs\.has\(tabId\)/);
+	assert.match(body, /hasReplacementChars/, 'the live tab decides whether anything is still being refused');
 });
 
 test('a refused save does not add a generic toast to its own explanation', () => {

@@ -200,8 +200,8 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	}
 
 	/**
-	 * True once this tab has been told, in words, that its buffer cannot be
-	 * written back over its own file.
+	 * True when this tab's saves are being refused for the lossy-decode reason
+	 * RIGHT NOW, and it has already been told so in words.
 	 *
 	 * The explanation is deduplicated per tab above, but the callers' own
 	 * failure reporting was not: `saveContent` returns `false` for a refusal
@@ -210,9 +210,27 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	 * every keystroke, repeated it every 1.5s for as long as the user kept
 	 * typing. A refusal is not a failure to report again; it is a standing
 	 * condition the user has already been told about and given an exit from.
+	 *
+	 * Both halves are needed, and the second is why set membership alone was
+	 * not enough. `lossySaveWarnedTabs` records what was SAID; whether the
+	 * refusal still stands is a property of the tab, decided fresh by every
+	 * read that fills the buffer — `ensureFullContent`, entering the editor,
+	 * entering split view, a cross-window arrival. Any of those clears
+	 * `hasReplacementChars` for a file converted to UTF-8 since the load, and
+	 * none of them goes through `loadMarkdown`, the only place that empties the
+	 * set. A tab that had once been refused therefore went on suppressing the
+	 * generic message for the rest of its life, including for a genuine write
+	 * failure — a full disk, a revoked permission, a network volume that went
+	 * away — which is the opposite of "already explained".
+	 *
+	 * Asking the tab also answers for one that is gone: `closeTab` splices with
+	 * no dispose hook, so the set keeps closed ids, and a tab nobody can find
+	 * is refusing nothing.
 	 */
 	function isLossySaveRefused(tabId: string): boolean {
-		return lossySaveWarnedTabs.has(tabId);
+		if (!lossySaveWarnedTabs.has(tabId)) return false;
+		const tab = tabManager.tabs.find((item) => item.id === tabId);
+		return tab?.hasReplacementChars === true;
 	}
 
 	function updateLoading(tabId: string, loading: boolean) {
