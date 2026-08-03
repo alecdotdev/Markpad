@@ -312,18 +312,28 @@ const HEADING_FIXTURES = [
 
 const HEADING_SELECTOR = 'h1, h2, h3, h4, h5, h6';
 
-/** The ids comrak put on the inner `a.anchor` of each heading. */
-function rendererAnchorIds(name: FixtureName): string[] {
+/**
+ * The id comrak assigned to each heading, read from wherever comrak put it.
+ *
+ * comrak 0.18 put it on the empty inner `a.anchor`, which is why
+ * `processMarkdownHtml` promotes it onto the heading at all. comrak 0.54 puts
+ * it on the heading itself and leaves the anchor bare, so the promotion is now
+ * a no-op — but the invariant this test exists for is unchanged and is not
+ * about which element the renderer chose: the heading ends up carrying the id,
+ * and the anchor does not. Reading both keeps that assertion a live capture
+ * rather than a copy of one renderer's layout.
+ */
+function rendererHeadingIds(name: FixtureName): string[] {
 	return parseHtml(renderFixtures[name].html)
 		.body.querySelectorAll(HEADING_SELECTOR)
-		.map((heading) => heading.querySelectorAll('a.anchor')[0]?.id ?? '');
+		.map((heading) => heading.id || (heading.querySelectorAll('a.anchor')[0]?.id ?? ''));
 }
 
 test("each heading adopts comrak's anchor id and leaves the anchor without one", () => {
 	for (const name of HEADING_FIXTURES) {
 		const body = render(name);
 		const headings = body.querySelectorAll(HEADING_SELECTOR);
-		const expected = rendererAnchorIds(name);
+		const expected = rendererHeadingIds(name);
 
 		assert.equal(headings.length, expected.length, `${name}: heading count changed`);
 		assert.deepEqual(

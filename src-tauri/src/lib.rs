@@ -1,4 +1,4 @@
-use comrak::{markdown_to_html, Anchorizer, ComrakExtensionOptions, ComrakOptions};
+use comrak::{markdown_to_html, Anchorizer, Options};
 use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::fs;
@@ -42,9 +42,18 @@ static HIGHLIGHT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"==([^=\n]+)
 /// the newline also keeps the line contract: collapsing a wrapped `^[…]` into
 /// one `[^ifn-N]` reference renumbered every line below it.
 static INLINE_FOOTNOTE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\^\[([^\]\n]+)\]").unwrap());
+/// The rendered task-list `<input>` this pass is allowed to mark.
+///
+/// The boolean attributes are matched as an unordered set rather than in a
+/// fixed order. comrak 0.18 emitted `disabled="" checked=""` and 0.54 emits
+/// `checked="" disabled=""`; the old pattern spelled the 0.18 order out, so
+/// under 0.54 it stopped matching *completed* tasks only — every `- [x]` item
+/// silently lost `data-task-checkbox` and became untoggleable while every
+/// `- [ ]` item kept working. Nothing about the contract depends on the order,
+/// so the pattern no longer depends on it either.
 static TASK_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"<li data-sourcepos="(?<sourcepos>(?<line>\d+):\d+-\d+:\d+)">(?<input><input type="checkbox" disabled=""(?: checked="")? />)"#,
+        r#"<li data-sourcepos="(?<sourcepos>(?<line>\d+):\d+-\d+:\d+)">(?<input><input type="checkbox"(?: (?:checked|disabled)="")* />)"#,
     )
     .unwrap()
 });
@@ -342,7 +351,7 @@ fn escape_html_attribute(value: &str) -> String {
 /// appends `-1`, `-2`, … per *document*, and a link target can only ever
 /// address the first heading with a given text.
 fn heading_anchor_id(target: &str) -> String {
-    Anchorizer::new().anchorize(target.trim().to_string())
+    Anchorizer::new().anchorize(target.trim())
 }
 
 /// File extensions the viewer will open as a document. Mirrors
@@ -934,13 +943,20 @@ mod tests {
 
     #[test]
     fn task_list_checkbox_is_emitted_at_the_start_of_its_list_item() {
+        // The attribute order here is comrak's, captured, not a requirement:
+        // 0.18 wrote `disabled="" checked=""` and 0.54 writes them the other
+        // way round. What this pins is that `data-task-checkbox` is present on
+        // *both* items and that the marker sits at the start of the `<li>`.
+        // `TASK_ITEM_RE` deliberately no longer depends on the order, so a
+        // future reordering fails here — loudly — instead of quietly
+        // un-marking one of the two.
         let html = convert_markdown("- [ ] open task\n- [x] completed task\n");
         assert!(
             html.contains("<li data-sourcepos=\"1:1-1:15\"><input type=\"checkbox\" data-task-checkbox=\"\" disabled=\"\" /> open task</li>"),
             "unexpected task-list HTML: {html}",
         );
         assert!(
-            html.contains("<li data-sourcepos=\"2:1-2:20\"><input type=\"checkbox\" data-task-checkbox=\"\" disabled=\"\" checked=\"\" /> completed task</li>"),
+            html.contains("<li data-sourcepos=\"2:1-2:20\"><input type=\"checkbox\" data-task-checkbox=\"\" checked=\"\" disabled=\"\" /> completed task</li>"),
             "unexpected task-list HTML: {html}",
         );
     }
@@ -3228,7 +3244,7 @@ fn restore_math_spans(html: &str, masked: &MaskedMath) -> String {
         };
         match index.and_then(|index| masked.spans.get(index)) {
             Some(original) if anchored => {
-                out.push_str(&Anchorizer::new().anchorize(original.text.clone()));
+                out.push_str(&Anchorizer::new().anchorize(&original.text));
                 rest = &after[digits + suffix.len_utf8()..];
             }
             Some(original) => {
@@ -3276,21 +3292,19 @@ fn convert_markdown(content: &str) -> String {
     let processed_links = process_wikilinks(&processed_embeds);
     let masked_math = mask_math_spans(&processed_links);
 
-    let mut options = ComrakOptions {
-        extension: ComrakExtensionOptions {
-            strikethrough: true,
-            table: true,
-            autolink: true,
-            tasklist: true,
-            superscript: false,
-            footnotes: true,
-            description_lists: true,
-            header_ids: Some(String::new()),
-            ..ComrakExtensionOptions::default()
-        },
-        ..ComrakOptions::default()
-    };
-    options.render.unsafe_ = true;
+    let mut options = Options::default();
+    options.extension.strikethrough = true;
+    options.extension.table = true;
+    options.extension.autolink = true;
+    options.extension.tasklist = true;
+    options.extension.superscript = false;
+    options.extension.footnotes = true;
+    options.extension.description_lists = true;
+    // `header_ids` in 0.18; the option only ever set the *prefix* prepended to
+    // the anchorized heading text, and 0.52 renamed it to say so. `Some("")`
+    // means "ids on, no prefix" in both spellings.
+    options.extension.header_id_prefix = Some(String::new());
+    options.render.r#unsafe = true;
     options.render.hardbreaks = true;
     options.render.sourcepos = true;
 
@@ -3331,9 +3345,12 @@ fn annotate_task_checkboxes(html: String, markdown: &str) -> String {
                 return captures[0].to_string();
             }
 
+            // Anchored on the tag name, not on one of the boolean attributes,
+            // for the same reason `TASK_ITEM_RE` no longer spells their order
+            // out: `disabled` is not guaranteed to be the first one.
             let input = captures["input"].replacen(
-                " disabled=\"\"",
-                " data-task-checkbox=\"\" disabled=\"\"",
+                "<input type=\"checkbox\"",
+                "<input type=\"checkbox\" data-task-checkbox=\"\"",
                 1,
             );
             format!(

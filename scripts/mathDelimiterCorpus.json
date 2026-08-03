@@ -106,7 +106,7 @@
 		{
 			"name": "a span may not cross an inline code span",
 			"markdown": "$a `x` b$ and $c_1$.\n",
-			"html": "<p data-sourcepos=\"1:1-1:27\">$a <code data-sourcepos=\"1:5-1:5\">x</code> b$ and $c_1$.</p>\n",
+			"html": "<p data-sourcepos=\"1:1-1:27\">$a <code data-sourcepos=\"1:4-1:6\">x</code> b$ and $c_1$.</p>\n",
 			"math": [
 				{
 					"kind": "inline",
@@ -117,7 +117,7 @@
 		{
 			"name": "dollars inside inline code are not math",
 			"markdown": "Use `$a$` and $b_1$ here.\n",
-			"html": "<p data-sourcepos=\"1:1-1:32\">Use <code data-sourcepos=\"1:6-1:8\">$a$</code> and $b_1$ here.</p>\n",
+			"html": "<p data-sourcepos=\"1:1-1:32\">Use <code data-sourcepos=\"1:5-1:9\">$a$</code> and $b_1$ here.</p>\n",
 			"math": [
 				{
 					"kind": "inline",
