@@ -14,3 +14,39 @@ test('all Markpad webviews may invoke Tauri native printing', () => {
 		'macOS replaces window.print() with Tauri native printing, which requires this permission',
 	);
 });
+
+// Salvaged from `windowsPdfExport.test.ts`, which was deleted for asserting the
+// spelling of the Rust body (it stayed green with the `await` dropped from the
+// call below). This part is the opposite kind of claim: a Tauri command name is
+// a bare string on the JS side and an identifier inside a macro on the Rust
+// side, so nothing — not tsc, not `svelte-check`, not `cargo check` — notices
+// when one moves and the other does not. The failure is silent at build time
+// and total at runtime: "Export PDF" does nothing at all.
+test('both PDF commands the exporter invokes are registered with Tauri', () => {
+	const exporter = readFileSync('src/lib/utils/export.ts', 'utf8');
+	const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf8');
+
+	const handlerStart = tauriLib.indexOf('tauri::generate_handler![');
+	assert.notEqual(handlerStart, -1, 'lib.rs must keep a generate_handler! list');
+	const handlerEnd = tauriLib.indexOf(']', handlerStart);
+	const registered = new Set(
+		tauriLib
+			.slice(handlerStart, handlerEnd)
+			.split(',')
+			.map((entry) => entry.trim().replace(/^.*::/, '')),
+	);
+
+	// Read the names off the exporter rather than restating them, so a renamed
+	// command is checked at its new name instead of quietly passing.
+	const invoked = [...exporter.matchAll(/invoke\('([a-z_]*pdf[a-z_]*)'/g)].map((m) => m[1]);
+	assert.deepEqual(invoked.sort(), ['export_pdf_windows', 'print_pdf']);
+
+	for (const command of invoked) {
+		assert.ok(registered.has(command), `export.ts invokes '${command}', which lib.rs must register`);
+		assert.match(
+			tauriLib,
+			new RegExp(`#\\[tauri::command\\]\\n(?:async )?fn ${command}\\(`),
+			`${command} must be defined as a Tauri command`,
+		);
+	}
+});

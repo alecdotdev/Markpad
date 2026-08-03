@@ -371,6 +371,56 @@ test('the window-tag editor’s Save button is translated', () => {
 	}
 });
 
+// The two tests below moved here from `toolbarCustomizationWiring.test.ts`,
+// which was deleted for asserting the spelling of `Settings.svelte` rather than
+// any behaviour. These two were the exception: they import the dictionary and
+// look keys up in it, and they are the only thing in the suite that fails when
+// a *specific locale* silently falls back to English. The general rules above
+// cannot see that — (1) only requires the key in English, and per-locale
+// completeness is reported rather than enforced. These keys are the exception
+// to that leniency because they label controls whose meaning is carried by the
+// word alone: an untranslated "Move Up" on an icon button is unusable, not
+// merely unpolished.
+
+/** The value `lang` itself defines for `key`, ignoring the English fallback. */
+function directTranslation(lang: LanguageCode, key: string): string | undefined {
+	return dictionaries.get(lang)!.get(key);
+}
+
+test('interactive button labels are directly translated for every supported language', () => {
+	const interactiveLabelKeys = [
+		'common.close',
+		'common.decrease',
+		'common.increase',
+		'toc.resizeTableOfContents',
+		'settings.move',
+		'settings.moveUp',
+		'settings.moveDown',
+		'settings.resetToolbar',
+		'settings.toolbarOnBar',
+		'settings.toolbarInMenu',
+		'settings.resizeWindow',
+	];
+
+	const missing = languages.flatMap((lang) =>
+		interactiveLabelKeys
+			.filter((key) => directTranslation(lang, key) === undefined)
+			.map((key) => `${lang}:${key}`),
+	);
+
+	assert.deepEqual(missing, []);
+});
+
+test('Simplified Chinese directly translates the window organization labels', () => {
+	const keys = [
+		'menu.moveToWindow', 'menu.window', 'menu.mergeAllWindows', 'menu.setWindowTag',
+		'menu.windowTagPlaceholder', 'menu.windowTagClear', 'menu.pinWindowTag',
+		'menu.unpinWindowTag', 'toast.noOtherWindows', 'home.pinnedTags', 'home.pinnedFileCount',
+	];
+
+	assert.deepEqual(keys.filter((key) => directTranslation('zh-CN', key) === undefined), []);
+});
+
 test('every t() call resolves to a literal, a declared family, or a known indirection', () => {
 	assert.deepEqual(
 		[...indirectCalls].sort(),

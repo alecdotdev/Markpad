@@ -25,6 +25,22 @@ test('moving to an existing window uses the acknowledged transfer protocol', () 
 	assert.match(viewer, /invoke\('offer_tab_to_window', \{ targetLabel, token \}\)/);
 });
 
+// Salvaged from `tabContextMenuIsolation.test.ts`, which was deleted for pinning
+// the exact text of two inline Svelte event handlers. This assertion is not
+// about spelling: `WebviewWindowBuilder::build()` deadlocks when called from a
+// *synchronous* Tauri command on Windows/WebView2, because the main thread is
+// blocked inside the command while WebView2 waits for that same thread to pump
+// messages (tauri-apps/tauri#12521). Both forms compile everywhere, and CI's
+// `cargo test` runs on a host where the deadlock cannot happen, so dropping the
+// `async` is invisible until "Move to New Window" freezes a Windows user's app
+// hard enough to need a force-kill. Issue #356.
+test('create_transfer_window is async so window creation cannot deadlock the main thread', () => {
+	const lib = readFileSync('src-tauri/src/lib.rs', 'utf8');
+
+	assert.match(lib, /#\[tauri::command\]\nasync fn create_transfer_window\(/);
+	assert.doesNotMatch(lib, /#\[tauri::command\]\nfn create_transfer_window\(/);
+});
+
 test('window organization exposes move, merge, and carry actions', () => {
 	assert.match(tab, /list_viewer_windows/);
 	assert.match(tab, /menu-tab-move/);
