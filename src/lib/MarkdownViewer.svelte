@@ -85,7 +85,7 @@ import {
 	getScrollTopForSyncPosition,
 	type ScrollSyncPosition,
 } from './utils/scrollSync.js';
-import { settings } from './stores/settings.svelte.js';
+import { settings, TOC_WIDTH_RANGE } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
 import { createWindowSession } from './sessions/windowSession.svelte.js';
 import { createDocumentSession, type LoadMarkdownOptions } from './sessions/documentSession.svelte.js';
@@ -264,8 +264,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		localStorage.getItem('isFullWidth'),
 	));
 	let viewerWidth = $state(0);
-	const TOC_MIN_WIDTH = 180;
-	const TOC_MAX_WIDTH = 420;
+	// The bounds come from TOC_WIDTH_RANGE, the same object settings.setTocWidth
+	// clamps against, so the handle cannot offer a width persistence would shrink.
+	// The keyboard increment stays local: TOC_WIDTH_RANGE.step is 1, the spin-button
+	// granularity of the numeric settings input, and arrow keys move the splitter 16px.
 	const TOC_RESIZE_STEP = 16;
 	let isTocResizing = $state(false);
 	let previewContentWidth = $derived(getPreviewContentWidth(settings.previewMaxWidth, isFullWidth));
@@ -427,7 +429,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	}
 
 	function setTocWidth(width: number) {
-		settings.setTocWidth(Math.min(TOC_MAX_WIDTH, Math.max(TOC_MIN_WIDTH, width)));
+		settings.setTocWidth(Math.min(TOC_WIDTH_RANGE.max, Math.max(TOC_WIDTH_RANGE.min, width)));
 	}
 
 	function handleTocResizeKeyDown(e: KeyboardEvent) {
@@ -441,10 +443,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 		if (e.key === 'Home') {
 			e.preventDefault();
-			setTocWidth(TOC_MIN_WIDTH);
+			setTocWidth(TOC_WIDTH_RANGE.min);
 		} else if (e.key === 'End') {
 			e.preventDefault();
-			setTocWidth(TOC_MAX_WIDTH);
+			setTocWidth(TOC_WIDTH_RANGE.max);
 		}
 	}
 
@@ -3465,8 +3467,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 									role="separator"
 									aria-label={t('toc.resizeTableOfContents', settings.language)}
 									aria-orientation="vertical"
-									aria-valuemin={TOC_MIN_WIDTH}
-									aria-valuemax={TOC_MAX_WIDTH}
+									aria-valuemin={TOC_WIDTH_RANGE.min}
+									aria-valuemax={TOC_WIDTH_RANGE.max}
 									aria-valuenow={settings.tocWidth}
 									tabindex="0"
 									onpointerdown={startTocResize}

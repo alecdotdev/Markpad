@@ -137,6 +137,48 @@ const RULES: Rule[] = [
 		marker: /--highlight-color:/g,
 		allowed: ['src/lib/MarkdownViewer.svelte'],
 	},
+	{
+		name: 'the supported-language catalogue has one definition',
+		why: 'settings.svelte.ts carried a second { code, name, nativeName } table beside getSupportedLanguages(). Only its `code` column was read — SUPPORTED_LANGUAGE_CODES mapped it and nothing else touched it — so the display columns were dead data that nothing compared against the live catalogue, and they drifted: `pt` was "Portuguese" in the table the language <select> renders and "Portuguese (European)" in the dead one. A drift no user can see is a drift no bug report can find.',
+		// Pins `nativeName`, the column a catalogue exists to carry and the one
+		// the <select> renders, rather than `getSupportedLanguages` — a second
+		// table is by construction a site that does NOT call the accessor. The
+		// property is public: Settings.svelte reads `lang.nativeName` off the
+		// returned objects, so this is a cross-module field name, not a local.
+		// The read site spells it `lang.nativeName`, which the `:` excludes.
+		marker: /nativeName\s*:/g,
+		allowed: ['src/lib/utils/i18n.ts'],
+	},
+	{
+		name: 'the LanguageCode union has one definition',
+		why: 'The union was declared identically in i18n.ts and settings.svelte.ts. Two unions over the same 26 codes type-check against each other only while they agree; adding a language to one leaves the other rejecting it, and the compiler reports that as an unrelated assignability error far from either declaration.',
+		// The declaration, not a mention: `export type { LanguageCode }` (the
+		// re-export settings.svelte.ts keeps so its importers are unaffected) has
+		// a brace between the keyword and the name and is deliberately not matched.
+		marker: /export type LanguageCode\s*=/g,
+		allowed: ['src/lib/utils/i18n.ts'],
+	},
+	{
+		name: 'the TOC width bounds have one definition',
+		why: 'MarkdownViewer.svelte re-declared `const TOC_MIN_WIDTH = 180` / `TOC_MAX_WIDTH = 420` next to TOC_WIDTH_RANGE, the object NumericSettingRange documents as the single source of truth and the object settings.setTocWidth already clamps against. Bounds the drag handle enforces but persistence does not (or the reverse) are a width the user can set and not keep.',
+		// The defect shape, spelled as it was spelled. Allowed nowhere: the drag
+		// clamp, the Home/End jumps and the aria-valuemin/max on the separator all
+		// read TOC_WIDTH_RANGE now, so any reappearance of a locally named TOC
+		// bound is the second definition. `TOC_RESIZE_STEP` is *not* covered and
+		// must not be: it is the 16px arrow-key increment, not TOC_WIDTH_RANGE.step.
+		marker: /TOC_(?:MIN|MAX)_WIDTH/g,
+		allowed: [],
+	},
+	{
+		name: 'the TOC separator advertises the settings range',
+		why: 'aria-valuemin/max is the bound assistive tech reports; a literal there goes stale silently because no visual check can see it. This is the half of the TOC rule above that a differently-named copy would escape.',
+		marker: /aria-valuemin=/g,
+		allowed: ['src/lib/MarkdownViewer.svelte'],
+		requires: {
+			pattern: /aria-valuemin=\{TOC_WIDTH_RANGE\.min\}\s*\n\s*aria-valuemax=\{TOC_WIDTH_RANGE\.max\}/,
+			message: 'the resize separator must advertise TOC_WIDTH_RANGE.min/.max, not numbers of its own',
+		},
+	},
 ];
 
 const SOURCES = readSourceFiles('src');

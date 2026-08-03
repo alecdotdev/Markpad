@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { callbackBodies, sliceBetween } from './sourceTree.js';
+// Plain TypeScript, no runes: safe to import statically, unlike the store below.
+import { getSupportedLanguages, translations } from '../src/lib/utils/i18n.js';
 
 /*
  * `settings.svelte.ts` is a runes module, so it cannot be imported the way the
@@ -90,6 +92,7 @@ const {
 	clampToRange,
 	createSettingsPersistence,
 	detectSystemLanguage,
+	isSupportedLanguage,
 	isWithinRange,
 	parseStoredNumber,
 	resolveLanguageTag,
@@ -473,6 +476,32 @@ test('a stored language is validated against the catalogue', () => {
 	resetStorage();
 	assert.equal(new SettingsStore().language, 'ja'); // nothing stored -> detect
 	Object.defineProperty(globalThis, 'navigator', { value: { language: 'en-US' }, configurable: true });
+});
+
+test('the validator accepts exactly the languages the dialog offers', () => {
+	// SUPPORTED_LANGUAGE_CODES is derived from getSupportedLanguages(), so the
+	// first assertion is true by construction *today* — and that is the point.
+	// It is the assertion that fails the moment someone re-forks the catalogue
+	// into this module, which is how the two copies got here in the first place.
+	// The `pt` drift the fork produced was in `name`/`nativeName`, which codes
+	// cannot see; the `nativeName:` rule in singleImplementationConvention.test.ts
+	// covers that half.
+	const offered = getSupportedLanguages().map((entry) => entry.code);
+
+	// Not by construction: `translations` and LANGUAGE_BY_PRIMARY_SUBTAG (via
+	// resolveLanguageTag) are hand-maintained beside the catalogue. A language
+	// offered in the <select> with no dictionary renders as raw English, and a
+	// language the tag resolver can produce but the validator rejects makes
+	// detectSystemLanguage's result unstorable.
+	for (const code of offered) {
+		assert.ok(translations[code], `${code} is offered by the language <select> but has no dictionary`);
+	}
+	assert.deepEqual(Object.keys(translations).sort(), [...offered].sort());
+
+	for (const tag of ['nb', 'nn', 'pt-PT', 'pt-BR', 'zh-Hant', 'zh-Hans', 'en_GB']) {
+		const resolved = resolveLanguageTag(tag);
+		assert.ok(resolved && isSupportedLanguage(resolved), `${tag} resolves to ${resolved}, which will not survive a reload`);
+	}
 });
 
 /*

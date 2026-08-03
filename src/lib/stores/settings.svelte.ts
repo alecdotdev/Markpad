@@ -22,68 +22,26 @@ import {
 	DEFAULT_PREVIEW_MAX_WIDTH,
 	normalizePreviewMaxWidth,
 } from '../utils/previewWidth.js';
+import { getSupportedLanguages, type LanguageCode } from '../utils/i18n.js';
 
 export type OSType = 'macos' | 'windows' | 'linux' | 'unknown';
-export type LanguageCode =
-	| 'en' // English
-	| 'ja' // Japanese
-	| 'zh-CN' // Chinese (Simplified)
-	| 'zh-TW' // Chinese (Traditional)
-	| 'ko' // Korean
-	| 'ru' // Russian
-	| 'es' // Spanish
-	| 'fr' // French
-	| 'de' // German
-	| 'pt-BR' // Portuguese (Brazil)
-	| 'it' // Italian
-	| 'pl' // Polish
-	| 'nl' // Dutch
-	| 'sv' // Swedish
-	| 'vi' // Vietnamese
-	| 'pt' // Portuguese (European)
-	| 'ro' // Romanian
-	| 'hu' // Hungarian
-	| 'cs' // Czech
-	| 'sk' // Slovak
-	| 'el' // Greek
-	| 'fi' // Finnish
-	| 'da' // Danish
-	| 'no' // Norwegian
-	| 'id' // Indonesian
-	| 'tr'; // Turkish
 
-const SUPPORTED_LANGUAGES: { code: LanguageCode; name: string; nativeName: string }[] = [
-	{ code: 'cs', name: 'Czech', nativeName: 'Čeština' },
-	{ code: 'da', name: 'Danish', nativeName: 'Dansk' },
-	{ code: 'nl', name: 'Dutch', nativeName: 'Nederlands' },
-	{ code: 'en', name: 'English', nativeName: 'English' },
-	{ code: 'fi', name: 'Finnish', nativeName: 'Suomi' },
-	{ code: 'fr', name: 'French', nativeName: 'Français' },
-	{ code: 'de', name: 'German', nativeName: 'Deutsch' },
-	{ code: 'el', name: 'Greek', nativeName: 'Ελληνικά' },
-	{ code: 'hu', name: 'Hungarian', nativeName: 'Magyar' },
-	{ code: 'id', name: 'Indonesian', nativeName: 'Bahasa Indonesia' },
-	{ code: 'it', name: 'Italian', nativeName: 'Italiano' },
-	{ code: 'ja', name: 'Japanese', nativeName: '日本語' },
-	{ code: 'ko', name: 'Korean', nativeName: '한국어' },
-	{ code: 'no', name: 'Norwegian', nativeName: 'Norsk' },
-	{ code: 'pl', name: 'Polish', nativeName: 'Polski' },
-	{ code: 'pt', name: 'Portuguese (European)', nativeName: 'Português (Europeu)' },
-	{ code: 'pt-BR', name: 'Portuguese (Brazil)', nativeName: 'Português (Brasil)' },
-	{ code: 'ro', name: 'Romanian', nativeName: 'Română' },
-	{ code: 'ru', name: 'Russian', nativeName: 'Русский' },
-	{ code: 'sk', name: 'Slovak', nativeName: 'Slovenčina' },
-	{ code: 'es', name: 'Spanish', nativeName: 'Español' },
-	{ code: 'sv', name: 'Swedish', nativeName: 'Svenska' },
-	{ code: 'tr', name: 'Turkish', nativeName: 'Türkçe' },
-	{ code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt' },
-	{ code: 'zh-CN', name: 'Chinese (Simplified)', nativeName: '简体中文' },
-	{ code: 'zh-TW', name: 'Chinese (Traditional)', nativeName: '繁體中文' },
-];
+export type { LanguageCode };
 
-const SUPPORTED_LANGUAGE_CODES: readonly LanguageCode[] = SUPPORTED_LANGUAGES.map((entry) => entry.code);
+/**
+ * The codes `isSupportedLanguage` will accept out of persisted storage, taken
+ * from the same catalogue the language `<select>` renders.
+ *
+ * This module used to carry its own `{ code, name, nativeName }` table beside
+ * `getSupportedLanguages()`. Only the `code` column was ever read, so the two
+ * copies of the display columns drifted unnoticed: `pt` was "Portuguese" in
+ * the catalogue the dialog renders and "Portuguese (European)" in the copy
+ * here, and no user ever saw the second spelling. Deriving from the catalogue
+ * means a language can only be added, removed or renamed in one place.
+ */
+const SUPPORTED_LANGUAGE_CODES: readonly LanguageCode[] = getSupportedLanguages().map((entry) => entry.code);
 
-function isSupportedLanguage(value: unknown): value is LanguageCode {
+export function isSupportedLanguage(value: unknown): value is LanguageCode {
 	return typeof value === 'string' && (SUPPORTED_LANGUAGE_CODES as readonly string[]).includes(value);
 }
 
