@@ -368,7 +368,12 @@ test('the refresh is skipped when the DOM already matches the buffer', () => {
 
 test('the refresh actually lands before the print', () => {
 	const body_ = slice(viewer, 'async function syncPreviewForPrint', 'async function exportAsPdf');
-	assert.match(body_, /await renderMarkdownPreview\(rawContent, tab\.path\)/);
+	// What matters here is WHAT is rendered — this tab's buffer and this tab's
+	// path, not the disk — and that it is awaited before the content is
+	// swapped in. The trailing arguments are deliberately not pinned: fold
+	// state is one of them and it is the renderer's business, not the
+	// export's.
+	assert.match(body_, /await renderMarkdownPreview\(rawContent, tab\.path[,)]/);
 	assert.match(body_, /tabManager\.updateTabContent\(tabId, processed\)/);
 	// Mermaid, KaTeX and highlight.js all replace nodes asynchronously. The
 	// on-screen path fires and forgets; the export cannot.

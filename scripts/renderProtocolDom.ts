@@ -266,11 +266,18 @@ class ShimClassList {
 		return this.tokens().length;
 	}
 
-	toggle(name: string, force?: boolean) {
+	/**
+	 * Returns whether the token is present AFTERWARDS, like the real
+	 * `DOMTokenList`. The preview's fold handler reads exactly that value to
+	 * decide which way it just folded, so a `void` copy silently makes every
+	 * fold look like an unfold.
+	 */
+	toggle(name: string, force?: boolean): boolean {
 		const present = this.contains(name);
 		const next = force ?? !present;
 		if (next) this.add(name);
 		else this.remove(name);
+		return next;
 	}
 }
 

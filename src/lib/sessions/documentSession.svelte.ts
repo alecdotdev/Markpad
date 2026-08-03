@@ -41,7 +41,7 @@ type DocumentSessionOptions = {
 	setShowHome: (value: boolean) => void;
 	currentFile: () => string;
 	resetScrollHistory: () => void;
-	renderMarkdown: (raw: string, path: string) => Promise<string>;
+	renderMarkdown: (raw: string, path: string, collapsedHeaders: Set<string>) => Promise<string>;
 	afterLoad: () => Promise<unknown>;
 	saveRecentFile: (path: string) => void;
 	deleteRecentFile: (path: string) => void;
@@ -56,6 +56,18 @@ type DocumentSessionOptions = {
 	onCloseSaveNewerEdits: () => void;
 	onCloseAutoSaveFailed: () => void;
 };
+
+/**
+ * Which heading sections the tab being loaded has folded, read at render time
+ * rather than captured up front. A large file is rendered twice — the 50KB
+ * preview, then the whole document once the background read lands — and the
+ * user can fold something in between; the second render has to honour that.
+ * An unknown tab folds nothing, which is what a load of a tab that has since
+ * been closed should hand a renderer.
+ */
+function foldsForTab(tabId: string): Set<string> {
+	return tabManager.tabs.find((item) => item.id === tabId)?.collapsedHeaders ?? new Set<string>();
+}
 
 export function createDocumentSession(options: DocumentSessionOptions) {
 	const loadRevisionByTab = new Map<string, number>();
@@ -311,7 +323,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				tabManager.setTabDecodedLossy(activeId, lossy);
 				lossySaveWarnedTabs.delete(activeId);
 				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath, pathKey);
-				const processed = await options.renderMarkdown(content, filePath);
+				const processed = await options.renderMarkdown(content, filePath, foldsForTab(activeId));
 				tabManager.updateTabContent(activeId, processed);
 				// `isFull === false` means this is only the leading slice of a
 				// large file. Marking the tab keeps anything downstream from
@@ -331,7 +343,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 								try {
 									if (options.isScrolling()) return void setTimeout(applyFull, 100);
 									if (!canApplyFullLoad()) return updateLoading(activeId, false);
-									options.renderMarkdown(fullContent, filePath)
+									options.renderMarkdown(fullContent, filePath, foldsForTab(activeId))
 										.then((fullProcessed) => {
 											if (!canApplyFullLoad()) return updateLoading(activeId, false);
 											tabManager.updateTabContent(activeId, fullProcessed);

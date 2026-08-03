@@ -14,6 +14,13 @@ import { nextUntitledTitle } from './untitledTitle.js';
  * Excluded on purpose:
  * - `content` (rendered HTML): regenerated at the destination.
  * - `editorViewState`: a live Monaco object, not serializable.
+ * - `collapsedHeaders`: the destination re-renders the document from source,
+ *   and it re-renders it with everything open. Before fold state was per tab
+ *   the arriving document inherited whatever the DESTINATION window happened
+ *   to have folded, which is the bleed this field exists to stop; starting
+ *   open is the honest version of "this was rendered fresh here". Carrying it
+ *   would mean a new required entry in the strict validator below, which is a
+ *   change to make on its own terms.
  */
 export interface TransferableTab {
 	path: string;
@@ -179,6 +186,7 @@ export function buildTransferredTab(
 		isSplit: snap.isSplit,
 		splitRatio: snap.splitRatio,
 		isScrollSynced: snap.isScrollSynced,
+		collapsedHeaders: new Set<string>(),
 		hasReplacementChars: snap.hasReplacementChars,
 	};
 }

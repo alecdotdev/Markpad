@@ -202,11 +202,19 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	// in-page scroll position history for mouse 4/5 nav
 	let scrollHistory: number[] = [];
 	let scrollFuture: number[] = [];
-	let collapsedHeaders = $state(new Set<string>());
 	let zoomData = $state<{ src?: string; html?: string } | null>(null);
+
+	// What a document with no tab behind it has folded. Never written to — every
+	// write goes through `setCollapsedHeaders`, which needs an active tab.
+	const NO_COLLAPSED_HEADERS = new Set<string>();
 
 	// derived from tab manager
 	let activeTab = $derived(tabManager.activeTab);
+	// Fold state belongs to the document, so it lives on the tab (see
+	// `Tab.collapsedHeaders`). Reading it through a derived is what makes a tab
+	// switch swap the whole set: the preview render, the table of contents and
+	// find all see the folds of the document on screen and no other document's.
+	let collapsedHeaders = $derived(activeTab?.collapsedHeaders ?? NO_COLLAPSED_HEADERS);
 	let isEditing = $derived(activeTab?.isEditing ?? false);
 	let rawContent = $derived(activeTab?.rawContent ?? '');
 	let isSplit = $derived(activeTab?.isSplit ?? false);
@@ -477,7 +485,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			if (!tab) return;
 			tab.rawContent = raw;
 			tab.originalContent = raw;
-			const processed = await renderMarkdownPreview(raw, tab.path);
+			const processed = await renderMarkdownPreview(raw, tab.path, tab.collapsedHeaders);
 			if (isDisposed) return;
 			tabManager.updateTabContent(tab.id, processed);
 			if (tabManager.activeTabId === tab.id) tick().then(renderRichContent);
@@ -811,14 +819,21 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	// which means no parse/serialize round trip happens after the sanitizer has
 	// had its say. Moving the call here instead would inject a string the
 	// sanitizer never saw.
-	async function renderMarkdownPreview(raw: string, filePath: string) {
+	//
+	// `folds` is a parameter rather than a read of the active tab because this
+	// renders documents that are NOT on screen: a window restore renders every
+	// restored tab, a cross-window arrival renders itself, and the background
+	// completion of a large file lands long after the user may have switched
+	// away. Each of those must fold the document it is rendering, not whichever
+	// one happens to be active when the promise resolves.
+	async function renderMarkdownPreview(raw: string, filePath: string, folds: Set<string>) {
 		const body = getMarkdownBodyWithoutFrontMatter(raw);
 		const html = (await invoke('render_markdown', { content: body })) as string;
-		return processMarkdownHtml(html, filePath, collapsedHeaders);
+		return processMarkdownHtml(html, filePath, folds);
 	}
 
-	async function renderTabPreviewFromRaw(tab: { id: string; path: string; rawContent: string; [key: string]: any }) {
-		const processed = await renderMarkdownPreview(tab.rawContent, tab.path);
+	async function renderTabPreviewFromRaw(tab: { id: string; path: string; rawContent: string; collapsedHeaders: Set<string>; [key: string]: any }) {
+		const processed = await renderMarkdownPreview(tab.rawContent, tab.path, tab.collapsedHeaders);
 		tabManager.updateTabContent(tab.id, processed);
 		tab._lastRenderedRawContent = tab.rawContent;
 		await tick();
@@ -1318,15 +1333,22 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		syncEditorToPreviewScroll(target);
 	}
 
+	// The one place fold state is written. It goes to the tab the user is
+	// looking at, which is the document the fold is a fold OF — both toggle
+	// paths below act on the preview or the table of contents of that tab.
+	function setCollapsedHeaders(next: Set<string>) {
+		if (tabManager.activeTabId) tabManager.setTabCollapsedHeaders(tabManager.activeTabId, next);
+	}
+
 	function toggleFold(key: string) {
 		const isCurrentlyCollapsed = collapsedHeaders.has(key);
 
 		if (isCurrentlyCollapsed) {
 			const next = new Set(collapsedHeaders);
 			next.delete(key);
-			collapsedHeaders = next;
+			setCollapsedHeaders(next);
 		} else {
-			collapsedHeaders = new Set([...collapsedHeaders, key]);
+			setCollapsedHeaders(new Set([...collapsedHeaders, key]));
 		}
 
 		if (!markdownBody) return;
@@ -1430,11 +1452,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				const isCollapsed = foldableHeader.classList.toggle('is-collapsed');
 				wrapper.classList.toggle('is-collapsed', isCollapsed);
 				if (isCollapsed) {
-					collapsedHeaders = new Set([...collapsedHeaders, key]);
+					setCollapsedHeaders(new Set([...collapsedHeaders, key]));
 				} else {
 					const next = new Set(collapsedHeaders);
 					next.delete(key);
-					collapsedHeaders = next;
+					setCollapsedHeaders(next);
 				}
 			}
 			return;
@@ -1939,7 +1961,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		if (rawContent === undefined) return;
 		if ((tab as any)._lastRenderedRawContent === rawContent) return;
 		try {
-			const processed = await renderMarkdownPreview(rawContent, tab.path);
+			const processed = await renderMarkdownPreview(rawContent, tab.path, tab.collapsedHeaders);
 			const current = tabManager.activeTab;
 			if (tabManager.activeTabId !== tabId || current?.rawContent !== rawContent) return;
 			tabManager.updateTabContent(tabId, processed);
@@ -2343,7 +2365,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			if ((tab as any)._lastRenderedRawContent === rawContent) return;
 
 			const timer = setTimeout(() => {
-				renderMarkdownPreview(rawContent, tab.path)
+				renderMarkdownPreview(rawContent, tab.path, tab.collapsedHeaders)
 					.then((processed) => {
 						const currentTab = tabManager.activeTab;
 						if (

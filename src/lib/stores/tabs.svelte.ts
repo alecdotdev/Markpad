@@ -33,6 +33,30 @@ export interface Tab {
 	splitRatio: number;
 	isScrollSynced: boolean;
 	/**
+	 * Which heading sections are folded shut in THIS document. The entries are
+	 * the fold keys `processMarkdownHtml` writes and reads: the heading's id
+	 * (comrak's slug), falling back to its trimmed text.
+	 *
+	 * Per tab, not per window, because that key only identifies a heading
+	 * WITHIN a document. Every file with an `## Introduction` gets the key
+	 * `introduction`, so a single window-wide set folded that section in all of
+	 * them at once, kept the key after the document it was folded in was
+	 * closed, and pre-folded the next document to contain that heading with
+	 * nothing on screen to say why. It is the same class of state as
+	 * `scrollTop` / `anchorLine` / `editorViewState`, which live here for the
+	 * same reason.
+	 *
+	 * A tab field also covers untitled buffers, which have no path to key by.
+	 *
+	 * Replace the set to change it — never mutate in place. The preview render
+	 * reads this value, and Svelte cannot see a mutation of a Set it is already
+	 * holding.
+	 *
+	 * Required, like `hasReplacementChars`: every consumer calls `.has()` on
+	 * it, so a construction site that forgot it would hand them `undefined`.
+	 */
+	collapsedHeaders: Set<string>;
+	/**
 	 * True while `rawContent` holds only the leading slice of a large file
 	 * (the >50KB preview read) instead of the whole document. Such a buffer
 	 * looks clean and authoritative but writing it back truncates the file,
@@ -120,6 +144,15 @@ class TabManager {
 	 * then asked the backend to read a file called `HOME`, and the failure left
 	 * a permanently unreadable phantom tab — or, when HOME was the only tab, a
 	 * window that came back empty.
+	 *
+	 * `collapsedHeaders` is deliberately NOT in here. Every other field written
+	 * below describes the window and survives whatever happened to the file
+	 * while Markpad was closed; a fold key describes a heading in a particular
+	 * revision of the document. The restore reads the file fresh from disk, so
+	 * a document edited in the meantime would come back with sections hidden
+	 * that the user never folded in the text now on screen — the failure this
+	 * per-tab state exists to remove. Scroll degrades (you scroll); a fold
+	 * hides text.
 	 */
 	serializeState(): string {
 		const stateData = {
@@ -195,6 +228,8 @@ class TabManager {
 					isSplit: saved.isSplit === true,
 					splitRatio: typeof saved.splitRatio === 'number' ? saved.splitRatio : 0.5,
 					isScrollSynced: saved.isScrollSynced === true,
+					// Not persisted — see serializeState.
+					collapsedHeaders: new Set<string>(),
 					isTruncated: false,
 					hasReplacementChars: false
 				});
@@ -316,6 +351,7 @@ class TabManager {
 			isSplit: false,
 			splitRatio: 0.5,
 			isScrollSynced: false,
+			collapsedHeaders: new Set<string>(),
 			isTruncated: false,
 			hasReplacementChars: false,
 			pathKey
@@ -349,6 +385,7 @@ class TabManager {
 			isSplit: false,
 			splitRatio: 0.5,
 			isScrollSynced: false,
+			collapsedHeaders: new Set<string>(),
 			isTruncated: false,
 			hasReplacementChars: false
 		});
@@ -382,6 +419,7 @@ class TabManager {
 			isSplit: false,
 			splitRatio: 0.5,
 			isScrollSynced: false,
+			collapsedHeaders: new Set<string>(),
 			isTruncated: false,
 			hasReplacementChars: false
 		});
@@ -550,6 +588,17 @@ class TabManager {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
 			tab.scrollPercentage = percentage;
+		}
+	}
+
+	/**
+	 * Replace this tab's folded-heading set. Callers build a NEW set rather
+	 * than mutating the old one — see `Tab.collapsedHeaders`.
+	 */
+	setTabCollapsedHeaders(id: string, collapsedHeaders: Set<string>) {
+		const tab = this.tabs.find((t) => t.id === id);
+		if (tab) {
+			tab.collapsedHeaders = collapsedHeaders;
 		}
 	}
 
