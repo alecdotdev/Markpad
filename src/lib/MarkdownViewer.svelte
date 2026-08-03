@@ -37,6 +37,12 @@ import {
 } from './utils/richContent.js';
 import { observeFoldLayout } from './utils/foldLayout.js';
 import {
+	findAnchorElement,
+	getAnchorScrollTop,
+	parseSourceposLineRange,
+	PREVIEW_ANCHOR_OFFSET,
+} from './utils/previewAnchor.js';
+import {
 	addFrontMatterListItems,
 	getMarkdownBodyWithoutFrontMatter,
 	getFrontMatterListItems,
@@ -1108,34 +1114,24 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 					let scrolled = false;
 
 					if (tab.anchorLine > 0) {
-						// Interpolated Restore
-						// Find element containing the anchor line
-						const children = Array.from(body.children) as HTMLElement[];
-						for (const el of children) {
-							const sourcepos = el.dataset.sourcepos;
-							if (sourcepos) {
-								const [start, end] = sourcepos.split('-');
-								const startLine = parseInt(start.split(':')[0]);
-								const endLine = parseInt(end.split(':')[0]);
-
-								if (!isNaN(startLine) && !isNaN(endLine)) {
-									if (tab.anchorLine >= startLine && tab.anchorLine <= endLine) {
-										// Found the container
-										const totalLines = endLine - startLine; // Can be 0 for single line
-										let ratio = 0;
-										if (totalLines > 0) {
-											ratio = (tab.anchorLine - startLine) / totalLines;
-										}
-
-										// Calculate target pixel position
-										// We want the anchor line to be roughly at offset 60
-										const targetOffset = el.offsetTop + el.offsetHeight * ratio - 60;
-										body.scrollTop = Math.max(0, targetOffset);
-										scrolled = true;
-										break;
-									}
-								}
-							}
+						// Interpolated restore: find the rendered element that owns the
+						// saved source line and put that line back under the anchor
+						// offset. This has to descend — `processMarkdownHtml` re-parents
+						// every block after a heading into a `.foldable-content-wrapper`
+						// with no `data-sourcepos`, so a scan of `body.children` only
+						// ever matched an anchor sitting exactly on a top-level heading
+						// line (see scripts/previewAnchorRestore.test.ts for the rate).
+						const match = findAnchorElement(body, tab.anchorLine);
+						if (match) {
+							const el = match.element as HTMLElement;
+							body.scrollTop = getAnchorScrollTop(
+								el.offsetTop,
+								el.offsetHeight,
+								match,
+								tab.anchorLine,
+								PREVIEW_ANCHOR_OFFSET,
+							);
+							scrolled = true;
 						}
 					}
 
@@ -1242,19 +1238,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		ratio: number;
 	};
 
-	function parseSourceposLineRange(sourcepos: string | undefined) {
-		if (!sourcepos) return null;
-		const [start, end] = sourcepos.split('-');
-		const startLine = parseInt(start?.split(':')[0] ?? '', 10);
-		const endLine = parseInt(end?.split(':')[0] ?? '', 10);
-
-		if (Number.isNaN(startLine) || Number.isNaN(endLine)) return null;
-		return { startLine, endLine };
-	}
-
 	function getPreviewScrollAnchor(target: HTMLElement): PreviewScrollAnchor | null {
-		const anchorOffset = target.scrollTop + 60;
-		const viewportRatio = target.clientHeight > 0 ? Math.min(1, 60 / target.clientHeight) : 0;
+		const anchorOffset = target.scrollTop + PREVIEW_ANCHOR_OFFSET;
+		const viewportRatio =
+			target.clientHeight > 0 ? Math.min(1, PREVIEW_ANCHOR_OFFSET / target.clientHeight) : 0;
 		const candidates = Array.from(target.querySelectorAll<HTMLElement>('[data-sourcepos]'));
 
 		let best: { el: HTMLElement; startLine: number; endLine: number; distance: number } | null = null;

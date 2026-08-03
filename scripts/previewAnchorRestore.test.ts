@@ -1,0 +1,333 @@
+/**
+ * Preview scroll restore: does an anchor line actually resolve to an element?
+ *
+ * The restore path in `MarkdownViewer.svelte` takes the saved `tab.anchorLine`
+ * and looks for the rendered element whose `data-sourcepos` range contains that
+ * line. Before this fix it only walked `body.children`, but `processMarkdownHtml`
+ * moves everything after a heading into a JS-created `.foldable-content-wrapper`
+ * that carries no `data-sourcepos` — so the only top-level elements left with a
+ * source range are the *shallowest* headings. An anchor resolved only when it
+ * happened to land exactly on one of those heading lines.
+ *
+ * This file measures that as a rate rather than asserting "it runs":
+ *
+ *   - `legacyTopLevelMatch` is the pre-fix algorithm, restated verbatim over
+ *     the same DOM. It is kept here as the control; if the fix ever regresses
+ *     into a top-level-only scan the two rates collapse into each other.
+ *   - `findAnchorElement` is the shipped implementation.
+ *
+ * Both run over real `processMarkdownHtml` output (via the `renderProtocolDom`
+ * shim, same as `renderProtocol.test.ts`). The input HTML is generated in the
+ * shape comrak emits — the tag/attribute shape is taken from the recorded
+ * `convert_markdown` output in `renderProtocolFixtures.ts`.
+ */
+
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { installShimDom, parseHtml, NODE_ELEMENT, type ShimElement } from './renderProtocolDom.ts';
+
+installShimDom();
+
+const { processMarkdownHtml } = await import('../src/lib/utils/markdown.ts');
+const { findAnchorElement, getAnchorScrollTop, parseSourceposLineRange } = await import(
+	'../src/lib/utils/previewAnchor.ts'
+);
+
+const FILE_PATH = '/documents/notes.md';
+
+/* ------------------------------------------------------------------ */
+/* comrak-shaped document generator                                    */
+/* ------------------------------------------------------------------ */
+
+type Block = { startLine: number; endLine: number };
+
+class DocumentBuilder {
+	private line = 1;
+	private readonly parts: string[] = [];
+	readonly blocks: Block[] = [];
+
+	blank() {
+		this.line += 1;
+	}
+
+	heading(level: number, text: string, slug: string) {
+		const line = this.line;
+		this.line += 1;
+		this.blocks.push({ startLine: line, endLine: line });
+		this.parts.push(
+			`<h${level} data-sourcepos="${line}:1-${line}:${level + 1 + text.length}">` +
+				`<a href="#${slug}" aria-hidden="true" class="anchor" id="${slug}"></a>${text}</h${level}>`,
+		);
+	}
+
+	paragraph(text: string) {
+		const line = this.line;
+		this.line += 1;
+		this.blocks.push({ startLine: line, endLine: line });
+		this.parts.push(`<p data-sourcepos="${line}:1-${line}:${text.length}">${text}</p>`);
+	}
+
+	list(items: string[]) {
+		const start = this.line;
+		const end = start + items.length - 1;
+		const itemHtml = items.map((item, index) => {
+			const itemLine = start + index;
+			return `<li data-sourcepos="${itemLine}:1-${itemLine}:${item.length + 2}">${item}</li>`;
+		});
+		this.blocks.push({ startLine: start, endLine: end });
+		this.parts.push(`<ul data-sourcepos="${start}:1-${end}:${items[items.length - 1].length + 2}">\n${itemHtml.join('\n')}\n</ul>`);
+		this.line = end + 1;
+	}
+
+	code(lines: string[]) {
+		const start = this.line;
+		const end = start + lines.length + 1;
+		this.blocks.push({ startLine: start, endLine: end });
+		this.parts.push(
+			`<pre data-sourcepos="${start}:1-${end}:3"><code class="language-sh">${lines.join('\n')}\n</code></pre>`,
+		);
+		this.line = end + 1;
+	}
+
+	get lineCount() {
+		return this.line - 1;
+	}
+
+	html() {
+		return this.parts.join('\n') + '\n';
+	}
+}
+
+/**
+ * One section body: the block mix a real document repeats between headings.
+ * Sized at 20 source lines so a 477-heading document lands near the 10k lines
+ * the audit measured.
+ */
+function sectionBody(doc: DocumentBuilder, seed: number) {
+	doc.blank();
+	doc.paragraph(`Prose paragraph ${seed} explaining the section in a sentence.`);
+	doc.blank();
+	doc.list([`item ${seed} alpha`, `item ${seed} beta`, `item ${seed} gamma`]);
+	doc.blank();
+	doc.paragraph(`Second prose paragraph ${seed} with a little more detail.`);
+	doc.blank();
+	doc.code([`echo section-${seed}`, `run --flag ${seed}`]);
+	doc.blank();
+	doc.paragraph(`Third prose paragraph ${seed}, the one after the code block.`);
+	doc.blank();
+	doc.list([`follow-up ${seed} one`, `follow-up ${seed} two`, `follow-up ${seed} three`]);
+	doc.blank();
+}
+
+/** A flat document: every heading is an `h2`, so all of them stay top level. */
+function buildFlatDocument(sections: number) {
+	const doc = new DocumentBuilder();
+	doc.paragraph('Intro paragraph before the first heading.');
+	doc.blank();
+	for (let i = 1; i <= sections; i += 1) {
+		doc.heading(2, `Section ${i}`, `section-${i}`);
+		sectionBody(doc, i);
+	}
+	return doc;
+}
+
+/** A nested document: `h1 > h2 > h3`, so only the `h1`s stay top level. */
+function buildNestedDocument(chapters: number) {
+	const doc = new DocumentBuilder();
+	doc.paragraph('Intro paragraph before the first heading.');
+	doc.blank();
+	for (let c = 1; c <= chapters; c += 1) {
+		doc.heading(1, `Chapter ${c}`, `chapter-${c}`);
+		sectionBody(doc, c * 100);
+		doc.heading(2, `Chapter ${c} Section`, `chapter-${c}-section`);
+		sectionBody(doc, c * 100 + 1);
+		doc.heading(3, `Chapter ${c} Unit`, `chapter-${c}-unit`);
+		sectionBody(doc, c * 100 + 2);
+	}
+	return doc;
+}
+
+/* ------------------------------------------------------------------ */
+/* measurement                                                         */
+/* ------------------------------------------------------------------ */
+
+function elementChildren(node: ShimElement): ShimElement[] {
+	return node.childNodes.filter((child): child is ShimElement => child.nodeType === NODE_ELEMENT);
+}
+
+/**
+ * The pre-fix restore loop, restated: scan `body.children` only, take the first
+ * child whose own `data-sourcepos` range contains the line.
+ */
+function legacyTopLevelMatch(body: ShimElement, line: number) {
+	for (const el of elementChildren(body)) {
+		const sourcepos = el.getAttribute('data-sourcepos');
+		if (!sourcepos) continue;
+		const [start, end] = sourcepos.split('-');
+		const startLine = parseInt(start.split(':')[0], 10);
+		const endLine = parseInt(end.split(':')[0], 10);
+		if (Number.isNaN(startLine) || Number.isNaN(endLine)) continue;
+		if (line >= startLine && line <= endLine) return { startLine, endLine };
+	}
+	return null;
+}
+
+/** Every source line the renderer attributed to some block, sampled evenly. */
+function sampleAnchorLines(blocks: Block[], count: number): number[] {
+	const lines = new Set<number>();
+	for (const block of blocks) {
+		for (let line = block.startLine; line <= block.endLine; line += 1) lines.add(line);
+	}
+	const all = [...lines].sort((a, b) => a - b);
+	const step = all.length / count;
+	const sampled: number[] = [];
+	for (let i = 0; i < count; i += 1) sampled.push(all[Math.floor(i * step)]);
+	return sampled;
+}
+
+type Rate = { hits: number; total: number; percent: number };
+
+function rate(hits: number, total: number): Rate {
+	return { hits, total, percent: Math.round((hits / total) * 1000) / 10 };
+}
+
+function measure(doc: DocumentBuilder, sampleSize: number) {
+	const body = parseHtml(processMarkdownHtml(doc.html(), FILE_PATH, new Set())).body;
+	const anchors = sampleAnchorLines(doc.blocks, sampleSize);
+
+	let legacyHits = 0;
+	let fixedHits = 0;
+	for (const line of anchors) {
+		const legacy = legacyTopLevelMatch(body, line);
+		if (legacy && line >= legacy.startLine && line <= legacy.endLine) legacyHits += 1;
+
+		const fixed = findAnchorElement(body, line);
+		if (fixed && line >= fixed.startLine && line <= fixed.endLine) fixedHits += 1;
+	}
+
+	const topLevel = elementChildren(body);
+	return {
+		body,
+		anchors,
+		annotatedElements: body.querySelectorAll('[data-sourcepos]').length,
+		topLevelChildren: topLevel.length,
+		topLevelWithSourcepos: topLevel.filter((el) => el.getAttribute('data-sourcepos') !== null).length,
+		legacy: rate(legacyHits, anchors.length),
+		fixed: rate(fixedHits, anchors.length),
+	};
+}
+
+/* ------------------------------------------------------------------ */
+/* tests                                                               */
+/* ------------------------------------------------------------------ */
+
+test('flat h2 document: anchor lines resolve to an element', (t) => {
+	const doc = buildFlatDocument(477);
+	const result = measure(doc, 300);
+
+	t.diagnostic(`flat: ${doc.lineCount} source lines, ${result.annotatedElements} elements with data-sourcepos`);
+	t.diagnostic(`flat: ${result.topLevelChildren} top-level children, ` +
+		`${result.topLevelWithSourcepos} of them with data-sourcepos`);
+	t.diagnostic(`flat: legacy top-level scan ${result.legacy.hits}/${result.legacy.total} (${result.legacy.percent}%)`);
+	t.diagnostic(`flat: findAnchorElement ${result.fixed.hits}/${result.fixed.total} (${result.fixed.percent}%)`);
+
+	// The control: the pre-fix scan only ever matched a top-level heading line.
+	assert.ok(
+		result.legacy.percent < 15,
+		`the pre-fix top-level scan is expected to miss almost everything, got ${result.legacy.percent}%`,
+	);
+	// The fix: every sampled anchor line resolves.
+	assert.equal(result.fixed.hits, result.fixed.total);
+});
+
+test('nested h1/h2/h3 document: anchor lines resolve to an element', (t) => {
+	const doc = buildNestedDocument(159);
+	const result = measure(doc, 300);
+
+	t.diagnostic(`nested: ${doc.lineCount} source lines, ${result.annotatedElements} elements with data-sourcepos`);
+	t.diagnostic(`nested: ${result.topLevelChildren} top-level children, ` +
+		`${result.topLevelWithSourcepos} of them with data-sourcepos`);
+	t.diagnostic(`nested: legacy top-level scan ${result.legacy.hits}/${result.legacy.total} (${result.legacy.percent}%)`);
+	t.diagnostic(`nested: findAnchorElement ${result.fixed.hits}/${result.fixed.total} (${result.fixed.percent}%)`);
+
+	assert.ok(
+		result.legacy.percent < 15,
+		`the pre-fix top-level scan is expected to miss almost everything, got ${result.legacy.percent}%`,
+	);
+	assert.equal(result.fixed.hits, result.fixed.total);
+});
+
+test('the resolved element is the narrowest block containing the line', () => {
+	const doc = new DocumentBuilder();
+	doc.heading(2, 'Heading', 'heading');
+	doc.blank();
+	doc.list(['first', 'second', 'third']);
+	const body = parseHtml(processMarkdownHtml(doc.html(), FILE_PATH, new Set())).body;
+
+	// The list occupies lines 3-5; the anchor for line 4 must be that `li`,
+	// not the enclosing `ul` and not the heading's fold wrapper.
+	const match = findAnchorElement(body, 4);
+	assert.ok(match);
+	assert.equal((match.element as ShimElement).tagName, 'LI');
+	assert.deepEqual({ startLine: match.startLine, endLine: match.endLine }, { startLine: 4, endLine: 4 });
+});
+
+test('a collapsed fold resolves to the collapsed wrapper, not to its hidden contents', () => {
+	const doc = new DocumentBuilder();
+	doc.heading(2, 'Heading', 'heading');
+	doc.blank();
+	doc.paragraph('Hidden body text.');
+	const body = parseHtml(processMarkdownHtml(doc.html(), FILE_PATH, new Set(['heading']))).body;
+
+	// Line 3 is the paragraph inside the collapsed section. Its geometry is
+	// meaningless while the wrapper is `height: 0; overflow: hidden`, so the
+	// wrapper itself — which sits at the right scroll offset — is the answer.
+	const match = findAnchorElement(body, 3);
+	assert.ok(match);
+	const element = match.element as ShimElement;
+	assert.ok(element.classList.contains('foldable-content-wrapper'));
+	assert.ok(element.classList.contains('is-collapsed'));
+});
+
+test('an anchor line past the end of the document does not resolve', () => {
+	const doc = buildFlatDocument(3);
+	const body = parseHtml(processMarkdownHtml(doc.html(), FILE_PATH, new Set())).body;
+	assert.equal(findAnchorElement(body, doc.lineCount + 500), null);
+});
+
+test('scroll target interpolates inside the resolved element', () => {
+	const range = { startLine: 10, endLine: 20 };
+	assert.equal(getAnchorScrollTop(1000, 200, range, 10, 60), 940);
+	assert.equal(getAnchorScrollTop(1000, 200, range, 15, 60), 1040);
+	assert.equal(getAnchorScrollTop(1000, 200, range, 20, 60), 1140);
+	// Single-line blocks have no interior to interpolate over.
+	assert.equal(getAnchorScrollTop(1000, 200, { startLine: 7, endLine: 7 }, 7, 60), 940);
+	// Never scrolls above the top of the document.
+	assert.equal(getAnchorScrollTop(10, 20, { startLine: 1, endLine: 1 }, 1, 60), 0);
+});
+
+test('source position ranges parse the way comrak writes them', () => {
+	assert.deepEqual(parseSourceposLineRange('12:1-14:9'), { startLine: 12, endLine: 14 });
+	assert.equal(parseSourceposLineRange(''), null);
+	assert.equal(parseSourceposLineRange(null), null);
+	assert.equal(parseSourceposLineRange('nonsense'), null);
+});
+
+/**
+ * The two assertions below are source assertions, not behavior assertions: the
+ * restore effect lives inside a Svelte component and cannot be imported. They
+ * pin the wiring — that the component calls the measured resolver, and that the
+ * top-level-only scan the rates above were measured against does not come back.
+ */
+test('the viewer restores through the measured resolver', async () => {
+	const { readFileSync } = await import('node:fs');
+	const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+
+	assert.match(viewer, /import \{[\s\S]*findAnchorElement[\s\S]*\} from '\.\/utils\/previewAnchor\.js'/);
+	assert.match(
+		viewer,
+		/const match = findAnchorElement\(body, tab\.anchorLine\);[\s\S]*body\.scrollTop = getAnchorScrollTop\(/,
+	);
+	assert.doesNotMatch(viewer, /Array\.from\(body\.children\)/);
+});
