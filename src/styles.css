@@ -15,6 +15,7 @@ body {
 	overflow: hidden;
 	user-select: none;
 	-webkit-user-select: none;
+	font-family: var(--win-font);
 }
 
 #app {

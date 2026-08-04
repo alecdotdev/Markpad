@@ -4056,6 +4056,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		justify-content: center;
 		box-shadow: inset 0 0 0 3px var(--color-accent-fg);
 		border-radius: 8px;
+		font-family: var(--win-font);
 	}
 
 	.identify-flash span {
@@ -4066,6 +4067,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		font-size: 20px;
 		font-weight: 600;
 		box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+		font-family: var(--win-font);
 	}
 
 	/*

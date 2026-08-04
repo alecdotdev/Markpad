@@ -410,9 +410,10 @@ pub fn create_transfer_window(app: AppHandle, token: String) -> Result<(), Strin
     }
     #[cfg(not(target_os = "macos"))]
     {
-        builder = builder.decorations(false).shadow(false);
+        builder = builder.decorations(false);
     }
-    builder.build().map_err(|e| e.to_string())?;
+    let window = builder.build().map_err(|e| e.to_string())?;
+    let _ = window.set_shadow(true);
     Ok(())
 }
 
