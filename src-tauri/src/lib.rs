@@ -586,8 +586,13 @@ fn list_viewer_windows(state: State<'_, AppState>) -> Vec<window_runtime::Window
 }
 
 #[tauri::command]
-fn offer_tab_to_window(app: AppHandle, target_label: String, token: String) -> Result<(), String> {
-    window_runtime::offer_tab_to_window(app, target_label, token)
+fn offer_tab_to_window(
+    app: AppHandle,
+    state: State<'_, tab_transfer::TabTransferBroker>,
+    target_label: String,
+    token: String,
+) -> Result<(), String> {
+    window_runtime::offer_tab_to_window(app, state, target_label, token)
 }
 
 #[tauri::command]

@@ -20,6 +20,7 @@ const CLAIM_GRACE: Duration = Duration::from_secs(60);
 pub struct PendingTransfer {
     pub payload: String,
     pub source_label: String,
+    pub target_label: Option<String>,
     /// Set the first time the destination window claims the payload. The
     /// broker uses it to tell "nobody picked this up" apart from "picked up,
     /// still rendering", which the source's timeout must not cancel.
@@ -42,7 +43,7 @@ pub struct CancelOutcome {
 enum CancelAuthority {
     /// The window that staged the tab: cancels only while unclaimed.
     Source,
-    /// The `window-<token>` destination: releases its own claim (rollback).
+    /// The `window-<token>` or explicit target destination: releases its own claim (rollback).
     Destination,
     /// Any other window has no business touching this transfer.
     Forbidden,
@@ -95,10 +96,19 @@ fn is_destination_label(caller_label: &str, token: &str) -> bool {
     caller_label == destination_label(token)
 }
 
-fn cancel_authority(caller_label: &str, source_label: &str, token: &str) -> CancelAuthority {
+fn is_destination_authority(caller_label: &str, token: &str, target_label: Option<&str>) -> bool {
+    is_destination_label(caller_label, token) || target_label == Some(caller_label)
+}
+
+fn cancel_authority(
+    caller_label: &str,
+    source_label: &str,
+    token: &str,
+    target_label: Option<&str>,
+) -> CancelAuthority {
     if caller_label == source_label {
         CancelAuthority::Source
-    } else if is_destination_label(caller_label, token) {
+    } else if is_destination_authority(caller_label, token, target_label) {
         CancelAuthority::Destination
     } else {
         CancelAuthority::Forbidden
@@ -145,6 +155,7 @@ impl TabTransferBroker {
             PendingTransfer {
                 payload,
                 source_label,
+                target_label: None,
                 claimed_at: None,
             },
         );
@@ -157,6 +168,16 @@ impl TabTransferBroker {
             inner.entries.remove(&victim);
         }
         token
+    }
+
+    pub fn set_target_label(&self, token: &str, target_label: String) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap();
+        let entry = inner
+            .entries
+            .get_mut(token)
+            .ok_or_else(|| "TRANSFER_NOT_FOUND".to_string())?;
+        entry.target_label = Some(target_label);
+        Ok(())
     }
 
     /// Reserves the payload for the destination window without removing it:
@@ -240,7 +261,12 @@ pub fn claim_detached_tab(
     state: State<'_, TabTransferBroker>,
     token: String,
 ) -> Result<Option<String>, String> {
-    if !is_destination_label(window.label(), &token) {
+    let entry = state.peek(&token);
+    let is_authorized = entry
+        .as_ref()
+        .map_or(false, |e| is_destination_authority(window.label(), &token, e.target_label.as_deref()));
+
+    if !is_authorized {
         return Err(format!(
             "TRANSFER_FORBIDDEN: window '{}' may not claim this tab transfer",
             window.label()
@@ -258,7 +284,12 @@ pub fn complete_detached_tab(
     state: State<'_, TabTransferBroker>,
     token: String,
 ) -> Result<(), String> {
-    if !is_destination_label(window.label(), &token) {
+    let entry = state.peek(&token);
+    let is_authorized = entry
+        .as_ref()
+        .map_or(false, |e| is_destination_authority(window.label(), &token, e.target_label.as_deref()));
+
+    if !is_authorized {
         return Err(format!(
             "TRANSFER_FORBIDDEN: window '{}' may not complete this tab transfer",
             window.label()
@@ -285,7 +316,7 @@ pub fn cancel_detached_tab(
             claimed: false,
         });
     };
-    match cancel_authority(window.label(), &entry.source_label, &token) {
+    match cancel_authority(window.label(), &entry.source_label, &token, entry.target_label.as_deref()) {
         CancelAuthority::Source => Ok(state.cancel_from_source(&token, Instant::now())),
         CancelAuthority::Destination => Ok(state.cancel_from_destination(&token)),
         CancelAuthority::Forbidden => Err(format!(
@@ -364,30 +395,36 @@ mod tests {
 
     #[test]
     fn only_the_matching_destination_window_may_claim() {
-        assert!(is_destination_label("window-abc", "abc"));
-        assert!(!is_destination_label("main", "abc"));
-        assert!(!is_destination_label("window-abcd", "abc"));
-        assert!(!is_destination_label("window-abc", "abcd"));
+        assert!(is_destination_authority("window-abc", "abc", None));
+        assert!(!is_destination_authority("main", "abc", None));
+        assert!(is_destination_authority("main", "abc", Some("main")));
+        assert!(!is_destination_authority("other", "abc", Some("main")));
+        assert!(!is_destination_authority("window-abcd", "abc", None));
+        assert!(!is_destination_authority("window-abc", "abcd", None));
     }
 
     #[test]
     fn cancel_authority_rejects_third_party_windows() {
         assert_eq!(
-            cancel_authority("main", "main", "abc"),
+            cancel_authority("main", "main", "abc", None),
             CancelAuthority::Source
         );
         assert_eq!(
-            cancel_authority("window-abc", "main", "abc"),
+            cancel_authority("window-abc", "main", "abc", None),
+            CancelAuthority::Destination
+        );
+        assert_eq!(
+            cancel_authority("other", "main", "abc", Some("other")),
             CancelAuthority::Destination
         );
         // The window of some *other* transfer must not be able to tear this
         // one down.
         assert_eq!(
-            cancel_authority("window-zzz", "main", "abc"),
+            cancel_authority("window-zzz", "main", "abc", None),
             CancelAuthority::Forbidden
         );
         assert_eq!(
-            cancel_authority("window-7", "window-9", "abc"),
+            cancel_authority("window-7", "window-9", "abc", None),
             CancelAuthority::Forbidden
         );
     }
