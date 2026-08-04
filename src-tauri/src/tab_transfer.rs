@@ -244,6 +244,73 @@ impl TabTransferBroker {
             },
         }
     }
+
+    /// The gate in front of `claim` and `complete`. A window is a destination
+    /// if the token names it (`create_transfer_window` built it) or if
+    /// `offer_tab_to_window` recorded it as the target; an unknown token has
+    /// no destination at all, so it is refused here rather than later.
+    fn authorize_destination(
+        &self,
+        caller_label: &str,
+        token: &str,
+        action: &str,
+    ) -> Result<(), String> {
+        let authorized = self.peek(token).is_some_and(|entry| {
+            is_destination_authority(caller_label, token, entry.target_label.as_deref())
+        });
+        if authorized {
+            Ok(())
+        } else {
+            Err(format!(
+                "TRANSFER_FORBIDDEN: window '{caller_label}' may not {action} this tab transfer"
+            ))
+        }
+    }
+
+    fn claim_as(
+        &self,
+        caller_label: &str,
+        token: &str,
+        now: Instant,
+    ) -> Result<Option<String>, String> {
+        self.authorize_destination(caller_label, token, "claim")?;
+        Ok(self.claim(token, now).map(|transfer| transfer.payload))
+    }
+
+    fn complete_as(&self, caller_label: &str, token: &str) -> Result<PendingTransfer, String> {
+        self.authorize_destination(caller_label, token, "complete")?;
+        self.take(token).ok_or_else(|| {
+            "TRANSFER_NOT_FOUND: the staged tab is gone; the source window kept it".to_string()
+        })
+    }
+
+    fn cancel_as(
+        &self,
+        caller_label: &str,
+        token: &str,
+        now: Instant,
+    ) -> Result<CancelOutcome, String> {
+        let Some(entry) = self.peek(token) else {
+            // Already completed, cancelled or never staged: cancelling is a
+            // no-op, so stay idempotent rather than erroring on a late timeout.
+            return Ok(CancelOutcome {
+                cancelled: false,
+                claimed: false,
+            });
+        };
+        match cancel_authority(
+            caller_label,
+            &entry.source_label,
+            token,
+            entry.target_label.as_deref(),
+        ) {
+            CancelAuthority::Source => Ok(self.cancel_from_source(token, now)),
+            CancelAuthority::Destination => Ok(self.cancel_from_destination(token)),
+            CancelAuthority::Forbidden => Err(format!(
+                "TRANSFER_FORBIDDEN: window '{caller_label}' may not cancel this tab transfer"
+            )),
+        }
+    }
 }
 
 #[tauri::command]
@@ -261,20 +328,7 @@ pub fn claim_detached_tab(
     state: State<'_, TabTransferBroker>,
     token: String,
 ) -> Result<Option<String>, String> {
-    let entry = state.peek(&token);
-    let is_authorized = entry
-        .as_ref()
-        .map_or(false, |e| is_destination_authority(window.label(), &token, e.target_label.as_deref()));
-
-    if !is_authorized {
-        return Err(format!(
-            "TRANSFER_FORBIDDEN: window '{}' may not claim this tab transfer",
-            window.label()
-        ));
-    }
-    Ok(state
-        .claim(&token, Instant::now())
-        .map(|transfer| transfer.payload))
+    state.claim_as(window.label(), &token, Instant::now())
 }
 
 #[tauri::command]
@@ -284,20 +338,7 @@ pub fn complete_detached_tab(
     state: State<'_, TabTransferBroker>,
     token: String,
 ) -> Result<(), String> {
-    let entry = state.peek(&token);
-    let is_authorized = entry
-        .as_ref()
-        .map_or(false, |e| is_destination_authority(window.label(), &token, e.target_label.as_deref()));
-
-    if !is_authorized {
-        return Err(format!(
-            "TRANSFER_FORBIDDEN: window '{}' may not complete this tab transfer",
-            window.label()
-        ));
-    }
-    let transfer = state.take(&token).ok_or_else(|| {
-        "TRANSFER_NOT_FOUND: the staged tab is gone; the source window kept it".to_string()
-    })?;
+    let transfer = state.complete_as(window.label(), &token)?;
     app.emit_to(transfer.source_label.as_str(), "tab-transfer-claimed", token)
         .map_err(|e| format!("TRANSFER_HANDOFF_FAILED: {e}"))
 }
@@ -308,22 +349,7 @@ pub fn cancel_detached_tab(
     state: State<'_, TabTransferBroker>,
     token: String,
 ) -> Result<CancelOutcome, String> {
-    let Some(entry) = state.peek(&token) else {
-        // Already completed, cancelled or never staged: cancelling is a
-        // no-op, so stay idempotent rather than erroring on a late timeout.
-        return Ok(CancelOutcome {
-            cancelled: false,
-            claimed: false,
-        });
-    };
-    match cancel_authority(window.label(), &entry.source_label, &token, entry.target_label.as_deref()) {
-        CancelAuthority::Source => Ok(state.cancel_from_source(&token, Instant::now())),
-        CancelAuthority::Destination => Ok(state.cancel_from_destination(&token)),
-        CancelAuthority::Forbidden => Err(format!(
-            "TRANSFER_FORBIDDEN: window '{}' may not cancel this tab transfer",
-            window.label()
-        )),
-    }
+    state.cancel_as(window.label(), &token, Instant::now())
 }
 
 #[cfg(test)]
@@ -596,5 +622,133 @@ mod tests {
         // Memory stays bounded even in the pathological all-claimed case.
         assert!(broker.peek(&tokens[0]).is_none());
         assert!(broker.peek(&tokens[MAX_PENDING_TRANSFERS]).is_some());
+    }
+
+    // The tests above take the broker and the authorisation predicates apart.
+    // These four put them back together and run a transfer from `stage` to
+    // `complete`, because the defect #452 fixed was in the composition: the
+    // gate matched the predicate it was written against, the broker held the
+    // payload it was asked to hold, and the path between them was closed.
+
+    /// A window that already exists when the transfer starts. Either `main`
+    /// or, as here, a window some earlier transfer created — so its label
+    /// derives from a *different* token. `window-<token>` for the token being
+    /// transferred is the one label such a window can never have.
+    const EXISTING_WINDOW: &str = "window-1f0e9d8c7b6a5948372615043f2e1d0c";
+
+    // Move to Window > (an open window). `offer_tab_to_window` records the
+    // target before it notifies it; without that record the destination is
+    // not `window-<token>` and every step below is TRANSFER_FORBIDDEN.
+    #[test]
+    fn a_transfer_to_an_existing_window_runs_end_to_end() {
+        let broker = TabTransferBroker::new();
+        let token = broker.stage("{\"tab\":\"notes.md\"}".to_string(), "main".to_string());
+        broker
+            .set_target_label(&token, EXISTING_WINDOW.to_string())
+            .expect("a staged transfer should accept the target it is offered to");
+
+        let payload = broker
+            .claim_as(EXISTING_WINDOW, &token, Instant::now())
+            .expect("the window offer_tab_to_window named is a destination and may claim")
+            .expect("the staged payload should still be there");
+        assert_eq!(payload, "{\"tab\":\"notes.md\"}");
+
+        let transfer = broker
+            .complete_as(EXISTING_WINDOW, &token)
+            .expect("the window that claimed the payload must be able to complete the hand-off");
+        assert_eq!(
+            transfer.source_label, "main",
+            "completion names the source so it is the window told to drop its tab"
+        );
+        assert!(
+            broker.peek(&token).is_none(),
+            "a completed transfer must leave nothing behind for a second claim"
+        );
+    }
+
+    // Move to New Window. `create_transfer_window` builds `window-<token>`
+    // and nothing records a target, so this path must keep working off the
+    // derived label alone.
+    #[test]
+    fn a_transfer_to_a_new_window_runs_end_to_end() {
+        let broker = TabTransferBroker::new();
+        let token = broker.stage("{\"tab\":\"draft.md\"}".to_string(), "main".to_string());
+        let destination = destination_label(&token);
+
+        let payload = broker
+            .claim_as(&destination, &token, Instant::now())
+            .expect("the window the token names is a destination and may claim")
+            .expect("the staged payload should still be there");
+        assert_eq!(payload, "{\"tab\":\"draft.md\"}");
+
+        let transfer = broker
+            .complete_as(&destination, &token)
+            .expect("the window the token names must be able to complete the hand-off");
+        assert_eq!(transfer.source_label, "main");
+        assert!(broker.peek(&token).is_none());
+    }
+
+    // Widening the gate to the recorded target must not widen it to everyone:
+    // the payload is a document the source window had open.
+    #[test]
+    fn a_third_party_window_is_refused_at_every_step() {
+        const BYSTANDER: &str = "window-00000000000000000000000000000000";
+
+        let broker = TabTransferBroker::new();
+        let token = broker.stage("{\"tab\":\"private.md\"}".to_string(), "main".to_string());
+        broker
+            .set_target_label(&token, EXISTING_WINDOW.to_string())
+            .expect("a staged transfer should accept the target it is offered to");
+
+        for refusal in [
+            broker.claim_as(BYSTANDER, &token, Instant::now()).err(),
+            broker.complete_as(BYSTANDER, &token).err(),
+            broker.cancel_as(BYSTANDER, &token, Instant::now()).err(),
+        ] {
+            let message = refusal.expect(
+                "neither the source, nor window-<token>, nor the recorded target: refuse it",
+            );
+            assert!(message.starts_with("TRANSFER_FORBIDDEN"), "{message}");
+        }
+
+        // The refusals are inert: the transfer is untouched and its actual
+        // destination can still take it.
+        assert_eq!(
+            broker
+                .claim_as(EXISTING_WINDOW, &token, Instant::now())
+                .expect("the real destination must not be affected by the refusals")
+                .as_deref(),
+            Some("{\"tab\":\"private.md\"}")
+        );
+    }
+
+    // A claim makes the source's timeout a no-op, so the window holding it is
+    // the only party that can end it. If the recorded target were refused
+    // here, a failed render would strand the tab in both windows.
+    #[test]
+    fn the_recorded_destination_may_release_its_own_claim() {
+        let broker = TabTransferBroker::new();
+        let token = broker.stage("{\"tab\":\"notes.md\"}".to_string(), "main".to_string());
+        broker
+            .set_target_label(&token, EXISTING_WINDOW.to_string())
+            .expect("a staged transfer should accept the target it is offered to");
+        broker
+            .claim_as(EXISTING_WINDOW, &token, Instant::now())
+            .expect("the recorded target may claim");
+
+        let outcome = broker
+            .cancel_as(EXISTING_WINDOW, &token, Instant::now())
+            .expect("the window holding the claim must be able to release it");
+        assert_eq!(
+            outcome,
+            CancelOutcome {
+                cancelled: true,
+                claimed: true
+            }
+        );
+        assert!(
+            broker.peek(&token).is_none(),
+            "a released claim must free the transfer, not leave it claimed forever"
+        );
     }
 }
