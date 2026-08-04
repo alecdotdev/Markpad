@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { SANITIZER_FILES, filesMatching, readSourceFiles } from './sourceTree.js';
+import { SANITIZER_FILES, type SourceFile, filesMatching, readSourceFiles } from './sourceTree.js';
 
 // A fixed behavior must have exactly one implementation.
 //
@@ -35,6 +35,8 @@ type Rule = {
 	why: string;
 	marker: RegExp;
 	allowed: string[];
+	// The tree to scan, repo-relative. `src` unless the rule is about the suite.
+	dir?: string;
 	// Optional: every allowed file that matches `marker` must also match this.
 	requires?: { pattern: RegExp; message: string };
 };
@@ -175,17 +177,44 @@ const RULES: Rule[] = [
 		marker: /aria-valuemin=/g,
 		allowed: ['src/lib/MarkdownViewer.svelte'],
 		requires: {
-			pattern: /aria-valuemin=\{TOC_WIDTH_RANGE\.min\}\s*\r?\n\s*aria-valuemax=\{TOC_WIDTH_RANGE\.max\}/,
+			pattern: /aria-valuemin=\{TOC_WIDTH_RANGE\.min\}\s*\n\s*aria-valuemax=\{TOC_WIDTH_RANGE\.max\}/,
 			message: 'the resize separator must advertise TOC_WIDTH_RANGE.min/.max, not numbers of its own',
 		},
 	},
+	{
+		name: 'this suite reads a file through one function',
+		why: "A test that reads source with its own readFileSync gets the bytes Git checked out, and on Windows `core.autocrlf` makes those CRLF. Every `\\n` in a pattern then matches nothing and every anchor containing one is 'not found' — fifteen files were red on the maintainer's Windows checkout while cutting v2.7.0 and were hand-patched assertion by assertion (#452). `readSource` in sourceTree.ts decides the line ending once, on read, so the assertions stay written against `\\n` and a new test cannot re-open the hole by accident. Read the file with `readSource(path)` from './sourceTree.js' — it takes a cwd-relative string or a `new URL(…, import.meta.url)` — and write the assertion against `\\n`.",
+		// The call, not the import: `import { readFileSync }` on its own reads
+		// nothing, and a file may legitimately keep the import for another member.
+		marker: /readFileSync\s*\(/g,
+		allowed: ['scripts/sourceTree.ts'],
+		dir: 'scripts',
+	},
+	{
+		name: 'this suite walks a directory through one function',
+		why: "The other half of the same story. A private directory walk misses the `\\\\`→`/` normalization `walkSourceFiles` does, so on Windows every path it reports is spelled with backslashes and every allowlist compared against it is a list of strings that cannot match. i18nCoverage.test.ts carried exactly that copy and needed the identical hand-patch in #452; monacoStartupGraph.test.ts carried a second one that happened to be spelled with a template literal and so escaped by luck rather than by design. Use `walkSourceFiles(dir)` for the paths or `readSourceFiles(dir)` for paths plus text, both from './sourceTree.js'.",
+		marker: /readdirSync\s*\(/g,
+		allowed: ['scripts/sourceTree.ts'],
+		dir: 'scripts',
+	},
 ];
 
-const SOURCES = readSourceFiles('src');
+// One walk per tree, shared by the rules that name it. `scripts` is a tree here
+// too: the last two rules are about the suite reading `src`, not about `src`.
+const TREES = new Map<string, SourceFile[]>();
+
+function sourcesIn(dir: string): SourceFile[] {
+	const cached = TREES.get(dir);
+	if (cached) return cached;
+	const sources = readSourceFiles(dir);
+	TREES.set(dir, sources);
+	return sources;
+}
 
 for (const rule of RULES) {
 	test(`single implementation: ${rule.name}`, () => {
-		const matched = filesMatching(SOURCES, rule.marker);
+		const sources = sourcesIn(rule.dir ?? 'src');
+		const matched = filesMatching(sources, rule.marker);
 
 		const unexpected = matched.filter((path) => !rule.allowed.includes(path));
 		assert.deepEqual(
@@ -196,7 +225,7 @@ for (const rule of RULES) {
 
 		if (rule.requires) {
 			for (const path of matched) {
-				const text = SOURCES.find((source) => source.path === path)!.text;
+				const text = sources.find((source) => source.path === path)!.text;
 				assert.match(text, rule.requires.pattern, `${path}: ${rule.requires.message}`);
 			}
 		}
@@ -209,8 +238,8 @@ test('every rule keeps at least one live implementation', () => {
 	for (const rule of RULES) {
 		if (rule.allowed.length === 0) continue;
 		assert.ok(
-			filesMatching(SOURCES, rule.marker).length > 0,
-			`rule "${rule.name}" matches nothing in src — update its marker or drop the rule`,
+			filesMatching(sourcesIn(rule.dir ?? 'src'), rule.marker).length > 0,
+			`rule "${rule.name}" matches nothing in ${rule.dir ?? 'src'} — update its marker or drop the rule`,
 		);
 	}
 });
