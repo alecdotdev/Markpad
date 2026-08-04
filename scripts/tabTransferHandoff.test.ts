@@ -44,8 +44,8 @@ test('a failed render undoes the inserted tab', () => {
 	// The tab must exist before it can be rendered, so the destination owns a
 	// document the source still shows until the render succeeds.
 	const accept = sliceBetween(viewer, 'acceptTransferredTab: async (snapshot)', 'onError: (message, error)');
-	assert.match(accept, /\} catch \(error\) \{\s*\n\s*tabManager\.closeTab\(id\);\s*\n\s*throw error;/);
-	assert.match(accept, /if \(isDisposed\) \{\s*\n\s*tabManager\.closeTab\(id\);/);
+	assert.match(accept, /\} catch \(error\) \{\s*\r?\n\s*tabManager\.closeTab\(id\);\s*\r?\n\s*throw error;/);
+	assert.match(accept, /if \(isDisposed\) \{\s*\r?\n\s*tabManager\.closeTab\(id\);/);
 });
 
 test('a second transfer of the same tab is refused while one is in flight', () => {
@@ -53,7 +53,7 @@ test('a second transfer of the same tab is refused while one is in flight', () =
 	// resolves; two payloads for one tab means two windows each build it.
 	assert.match(session, /const transfersInFlight = new Set<string>\(\);/);
 	assert.match(session, /if \(transfersInFlight\.has\(tabId\)\) return false;/);
-	assert.match(session, /\} finally \{\s*\n\s*transfersInFlight\.delete\(tabId\);/);
+	assert.match(session, /\} finally \{\s*\r?\n\s*transfersInFlight\.delete\(tabId\);/);
 });
 
 test('the broker binds every operation to the window that may perform it', () => {

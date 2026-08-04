@@ -124,7 +124,7 @@ function pluckFunction(source: string, name: string, required = true): string {
 type Declaration = { declare: string; refresh: string };
 
 function pluckDeclaration(source: string, name: string, required = true): Declaration | null {
-	const match = new RegExp(`\\n\\t(let|const) ${name} = ([^\\n]*);\\n`).exec(source);
+	const match = new RegExp(`\\r?\\n\\t(let|const) ${name} = ([^\\r\\n]*);\\r?\\n`).exec(source);
 	if (!match) {
 		assert.ok(!required, `expected the component to declare ${name} on one line`);
 		return null;

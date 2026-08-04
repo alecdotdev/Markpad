@@ -55,7 +55,7 @@ test('startup restore reads content from disk, not from the snapshot', () => {
 	assert.match(restore, /tabManager\.markTabContentUnavailable\(tab\.id\);/);
 	// dropping is reserved for an entry that is not a file at all — a legacy
 	// 'HOME' sentinel (homeSentinelSnapshot.test.ts)
-	assert.match(restore, /if \(!hasRealFilePath\(tab\.path\)\) \{\s*\n\s*options\.dropRestoredTab\(tab\.id\);/);
+	assert.match(restore, /if \(!hasRealFilePath\(tab\.path\)\) \{\s*\r?\n\s*options\.dropRestoredTab\(tab\.id\);/);
 	assert.match(viewer, /await windowSession\.restore\(\);/);
 });
 
@@ -94,17 +94,19 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 	assert.match(session, /invoke\('load_window_state'\)/);
 	assert.match(
 		session,
-		/localStorage\.getItem\(options\.windowStateKey\) \?\?\n?\s*localStorage\.getItem\(options\.legacyStateKey\)/,
+		/localStorage\.getItem\(options\.windowStateKey\) \?\?\r?\n?\s*localStorage\.getItem\(options\.legacyStateKey\)/,
 	);
 	// The shared helper clears the Rust snapshot and both localStorage keys.
 	// Only explicit exit uses it: a restore that goes wrong must never delete
 	// the record of which documents were open (interruptedSessionRestore.test.ts).
-	const discardScope = sliceBetween(session, 'async function discardPersistedState', '\n\t}\n\n\tfunction readProgress');
+	const endMarker = session.includes('\r\n') ? '\r\n\t}\r\n\r\n\tfunction readProgress' : '\n\t}\n\n\tfunction readProgress';
+	const discardScope = sliceBetween(session, 'async function discardPersistedState', endMarker);
 	assert.match(discardScope, /clear_window_state/);
 	assert.match(discardScope, /removeItem\(options\.windowStateKey\)/);
 	assert.match(discardScope, /removeItem\(options\.legacyStateKey\)/);
 	// Explicit exit delegates to the same cleanup path.
-	const exitScope = sliceBetween(viewer, 'async function appExit', '\n\t}');
+	const exitEndMarker = viewer.includes('\r\n') ? '\r\n\t}' : '\n\t}';
+	const exitScope = sliceBetween(viewer, 'async function appExit', exitEndMarker);
 	assert.match(exitScope, /await discardPersistedWindowState\(\)/);
 });
 

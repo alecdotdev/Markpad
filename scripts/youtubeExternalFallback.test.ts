@@ -37,6 +37,6 @@ test('linked YouTube thumbnails are not intercepted by image zoom', () => {
 	assert.ok(anchorGuard < imageZoom, 'the anchor branch claims the click before image zoom sees it');
 	assert.match(
 		linkHandler,
-		/if \(a\) \{[\s\S]*?if \(relativeMarkdownTarget\) \{[\s\S]*?return;[\s\S]*?\}\n\s*return;\n\s*\}\n\n\s*\/\/ media zoom handling/,
+		/if \(a\) \{[\s\S]*?if \(relativeMarkdownTarget\) \{[\s\S]*?return;[\s\S]*?\}\r?\n\s*return;\r?\n\s*\}\r?\n\r?\n\s*\/\/ media zoom handling/,
 	);
 });

@@ -65,7 +65,7 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 	for (const entry of readdirSync(dir)) {
 		const path = join(dir, entry);
 		if (statSync(path).isDirectory()) sourceFiles(path, out);
-		else if (path.endsWith('.svelte') || path.endsWith('.ts')) out.push(path);
+		else if (path.endsWith('.svelte') || path.endsWith('.ts')) out.push(path.replace(/\\/g, '/'));
 	}
 	return out;
 }

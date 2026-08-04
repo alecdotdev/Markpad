@@ -96,6 +96,6 @@ test('the media caps do not undo the existing print handling', () => {
 	// to the next page instead of cropping them.
 	assert.match(
 		printBlock,
-		/\.markdown-body img,\s*\n\s*\.markdown-body \.mermaid-diagram,[\s\S]*?break-inside:\s*avoid;/,
+		/\.markdown-body img,\s*\r?\n\s*\.markdown-body \.mermaid-diagram,[\s\S]*?break-inside:\s*avoid;/,
 	);
 });

@@ -43,7 +43,7 @@ test('both PDF commands the exporter invokes are registered with Tauri', () => {
 		assert.ok(registered.has(command), `export.ts invokes '${command}', which lib.rs must register`);
 		assert.match(
 			tauriLib,
-			new RegExp(`#\\[tauri::command\\]\\n(?:async )?fn ${command}\\(`),
+			new RegExp(`#\\[tauri::command\\]\\r?\\n(?:async )?fn ${command}\\(`),
 			`${command} must be defined as a Tauri command`,
 		);
 	}

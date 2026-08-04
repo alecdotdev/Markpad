@@ -23,7 +23,8 @@ test('the runtime registers live viewer windows in stable creation order', () =>
 	// the two to be one statement. Measured — deleting the registry removal from
 	// the `Destroyed` arm left the suite green, and every closed window stayed in
 	// `list_viewer_windows` as a transfer target that no longer exists.
-	const destroyed = sliceBetween(runtime, 'tauri::WindowEvent::Destroyed => {', '\n        }');
+	const destroyedMarker = runtime.includes('\r\n') ? '\r\n        }' : '\n        }';
+	const destroyed = sliceBetween(runtime, 'tauri::WindowEvent::Destroyed => {', destroyedMarker);
 	assert.match(
 		destroyed,
 		/window_registry\)\.remove\(window\.label\(\)\)/,
@@ -51,8 +52,8 @@ test('moving to an existing window uses the acknowledged transfer protocol', () 
 test('create_transfer_window is async so window creation cannot deadlock the main thread', () => {
 	const lib = readFileSync('src-tauri/src/lib.rs', 'utf8');
 
-	assert.match(lib, /#\[tauri::command\]\nasync fn create_transfer_window\(/);
-	assert.doesNotMatch(lib, /#\[tauri::command\]\nfn create_transfer_window\(/);
+	assert.match(lib, /#\[tauri::command\]\r?\nasync fn create_transfer_window\(/);
+	assert.doesNotMatch(lib, /#\[tauri::command\]\r?\nfn create_transfer_window\(/);
 });
 
 test('window organization exposes move, merge, and carry actions', () => {

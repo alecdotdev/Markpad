@@ -175,7 +175,7 @@ const RULES: Rule[] = [
 		marker: /aria-valuemin=/g,
 		allowed: ['src/lib/MarkdownViewer.svelte'],
 		requires: {
-			pattern: /aria-valuemin=\{TOC_WIDTH_RANGE\.min\}\s*\n\s*aria-valuemax=\{TOC_WIDTH_RANGE\.max\}/,
+			pattern: /aria-valuemin=\{TOC_WIDTH_RANGE\.min\}\s*\r?\n\s*aria-valuemax=\{TOC_WIDTH_RANGE\.max\}/,
 			message: 'the resize separator must advertise TOC_WIDTH_RANGE.min/.max, not numbers of its own',
 		},
 	},

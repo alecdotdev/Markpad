@@ -22,7 +22,7 @@ test('Live Mode routes a watcher notification to its watched path', () => {
 });
 
 test('Live Mode follows the active file instead of retaining a previous tab watcher', () => {
-	assert.match(viewer, /if \(liveMode && currentFile\) \{\n\t\t\tinvoke\('watch_file', \{ path: currentFile \}\)/);
+	assert.match(viewer, /if \(liveMode && currentFile\) \{\r?\n\t\t\tinvoke\('watch_file', \{ path: currentFile \}\)/);
 
 	// The defect #296 fixed was `documentSession` re-issuing `watch_file` on
 	// every load, so the watcher followed whichever document loaded last rather

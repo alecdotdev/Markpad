@@ -9,7 +9,7 @@ const modal = readFileSync(new URL('../src/lib/components/Modal.svelte', import.
 test('document context menus do not open while a modal is active', () => {
 	assert.match(
 		viewer,
-		/function handleContextMenu\(e: MouseEvent\) \{\n\t\tif \(modalState\.show\) return;/,
+		/function handleContextMenu\(e: MouseEvent\) \{\r?\n\t\tif \(modalState\.show\) return;/,
 	);
 });
 

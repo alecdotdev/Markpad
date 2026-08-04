@@ -530,8 +530,8 @@ test('the open effect neither reads the app version nor re-enters itself', () =>
 
 	// `loaded` and `previousActiveElement` are read and written by this effect,
 	// so they must not be reactive.
-	assert.match(componentSource, /\n\tlet loaded = false;/);
-	assert.match(componentSource, /\n\tlet previousActiveElement: HTMLElement \| null = null;/);
+	assert.match(componentSource, /\r?\n\tlet loaded = false;/);
+	assert.match(componentSource, /\r?\n\tlet previousActiveElement: HTMLElement \| null = null;/);
 });
 
 /*

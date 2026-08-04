@@ -8,11 +8,11 @@ const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf8');
 const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
 
 test('macOS native menu keeps only application-level actions', () => {
-	const menuSetup = sliceBetween(
-		tauriLib,
-		'#[cfg(target_os = "macos")]\n            {\n                use tauri::menu',
-		'\n            let config_dir',
-	);
+	const startMarker = tauriLib.includes('\r\n')
+		? '#[cfg(target_os = "macos")]\r\n            {\r\n                use tauri::menu'
+		: '#[cfg(target_os = "macos")]\n            {\n                use tauri::menu';
+	const endMarker = tauriLib.includes('\r\n') ? '\r\n            let config_dir' : '\n            let config_dir';
+	const menuSetup = sliceBetween(tauriLib, startMarker, endMarker);
 
 	assert.match(menuSetup, /MenuItemBuilder::with_id\("menu-app-settings", "Settings…"\)\s*\.accelerator\("CmdOrCtrl\+,"\)/);
 	assert.match(menuSetup, /MenuItemBuilder::with_id\("check-updates", "Check for Updates…"\)/);

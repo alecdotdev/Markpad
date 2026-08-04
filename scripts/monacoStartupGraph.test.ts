@@ -105,7 +105,7 @@ function walkStaticGraph(entry: string): Map<string, string[]> {
 test('the parser sees the imports it is supposed to see', () => {
 	// A graph walk that silently resolves nothing would pass this file forever.
 	const graph = walkStaticGraph(ENTRY);
-	const files = [...graph.keys()].map((f) => relative(process.cwd(), f));
+	const files = [...graph.keys()].map((f) => relative(process.cwd(), f).replace(/\\/g, '/'));
 
 	assert.ok(files.includes('src/lib/MarkdownViewer.svelte'), 'reached the viewer from the entry');
 	assert.ok(files.includes('src/lib/components/Editor.svelte'), 'reached Editor.svelte, which is still statically imported');
