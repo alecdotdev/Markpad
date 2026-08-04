@@ -567,9 +567,9 @@
 						<button class:selected={tagDraftColor === color} style:--tag-color={color} onclick={() => (tagDraftColor = color)} aria-label={color}></button>
 					{/each}
 				</div>
-				<button onclick={applyTag}>{t('settings.save', currentLanguage)}</button>
-				{#if tabManager.windowTag}<button onclick={togglePinnedTag}>{t(tabManager.windowTag.pinned ? 'menu.unpinWindowTag' : 'menu.pinWindowTag', currentLanguage)}</button>{/if}
-				{#if tabManager.windowTag}<button onclick={clearTag}>{t('menu.windowTagClear', currentLanguage)}</button>{/if}
+				<button class="tag-save-btn" onclick={applyTag}>{t('settings.save', currentLanguage)}</button>
+				{#if tabManager.windowTag}<button class="tag-action-btn" onclick={togglePinnedTag}>{t(tabManager.windowTag.pinned ? 'menu.unpinWindowTag' : 'menu.pinWindowTag', currentLanguage)}</button>{/if}
+				{#if tabManager.windowTag}<button class="tag-action-btn danger" onclick={clearTag}>{t('menu.windowTagClear', currentLanguage)}</button>{/if}
 			</div>
 		{/if}
 	</div>
@@ -1583,11 +1583,18 @@
 
 	.window-tag-container { position: relative; display: flex; align-items: center; margin-left: 4px; }
 	.window-tag-chip { border: 0; border-radius: 10px; background: var(--tag-color); color: #fff; padding: 3px 10px; font: 600 11px var(--win-font); cursor: pointer; }
-	.tag-editor { position: absolute; top: 28px; left: 0; z-index: 20000; width: 180px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--color-canvas-default); border: 1px solid var(--color-border-default); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); }
-	.tag-editor input { box-sizing: border-box; width: 100%; padding: 5px; color: var(--color-fg-default); background: var(--color-canvas-default); border: 1px solid var(--color-border-default); border-radius: 4px; }
-	.tag-colors { display: flex; justify-content: space-between; }
-	.tag-colors button { width: 17px; height: 17px; padding: 0; border: 2px solid transparent; border-radius: 50%; background: var(--tag-color); cursor: pointer; }
-	.tag-colors button.selected { border-color: var(--color-fg-default); }
+	.tag-editor { position: absolute; top: 28px; left: 0; z-index: 20000; width: 180px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--color-canvas-default); border: 1px solid var(--color-border-default); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); font-family: var(--win-font); }
+	.tag-editor input { box-sizing: border-box; width: 100%; padding: 6px 8px; color: var(--color-fg-default); background: var(--color-canvas-default); border: 1px solid var(--color-border-default); border-radius: 6px; font-family: var(--win-font); font-size: 12px; outline: none; }
+	.tag-editor input:focus { border-color: var(--color-accent-fg); }
+	.tag-colors { display: flex; justify-content: space-between; padding: 2px 0; }
+	.tag-colors button { width: 18px; height: 18px; padding: 0; border: 2px solid transparent; border-radius: 50%; background: var(--tag-color); cursor: pointer; transition: transform 0.1s ease, border-color 0.1s ease; }
+	.tag-colors button:hover { transform: scale(1.15); }
+	.tag-colors button.selected { border-color: var(--color-fg-default); transform: scale(1.15); }
+	.tag-save-btn { width: 100%; padding: 6px 12px; background: var(--color-accent-emphasis); color: #ffffff; border: none; border-radius: 6px; font-family: var(--win-font); font-size: 12px; font-weight: 600; cursor: pointer; transition: background-color 0.15s ease; }
+	.tag-save-btn:hover { background: color-mix(in srgb, var(--color-accent-emphasis) 85%, #000); }
+	.tag-action-btn { width: 100%; padding: 5px 10px; background: transparent; color: var(--color-fg-muted); border: 1px solid var(--color-border-default); border-radius: 6px; font-family: var(--win-font); font-size: 11px; cursor: pointer; transition: background-color 0.15s ease, color 0.15s ease; }
+	.tag-action-btn:hover { background: var(--color-canvas-subtle); color: var(--color-fg-default); }
+	.tag-action-btn.danger:hover { background: color-mix(in srgb, var(--color-danger-fg) 15%, transparent); color: var(--color-danger-fg); border-color: var(--color-danger-fg); }
 
 	.home-menu-item {
 		display: flex;
