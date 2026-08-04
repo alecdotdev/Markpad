@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
+
+import { readSource } from './sourceTree.js';
 
 import {
 	adjustPreviewMaxWidth,
@@ -12,9 +13,9 @@ import {
 	normalizePreviewMaxWidth,
 } from '../src/lib/utils/previewWidth.js';
 
-const settingsSource = readFileSync(new URL('../src/lib/stores/settings.svelte.ts', import.meta.url), 'utf8');
-const viewerSource = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
-const settingsComponentSource = readFileSync(new URL('../src/lib/components/Settings.svelte', import.meta.url), 'utf8');
+const settingsSource = readSource(new URL('../src/lib/stores/settings.svelte.ts', import.meta.url));
+const viewerSource = readSource(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url));
+const settingsComponentSource = readSource(new URL('../src/lib/components/Settings.svelte', import.meta.url));
 
 test('preview width defaults and clamps persisted numeric values', () => {
 	assert.equal(DEFAULT_PREVIEW_MAX_WIDTH, 880);

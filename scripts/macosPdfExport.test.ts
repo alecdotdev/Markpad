@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { sliceBetween } from './sourceTree.js';
+import { readSource, sliceBetween } from './sourceTree.js';
 
 test('all Markpad webviews may invoke Tauri native printing', () => {
-	const capability = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf8')) as {
+	const capability = JSON.parse(readSource('src-tauri/capabilities/default.json')) as {
 		windows: string[];
 		permissions: string[];
 	};
@@ -25,8 +24,8 @@ test('all Markpad webviews may invoke Tauri native printing', () => {
 // when one moves and the other does not. The failure is silent at build time
 // and total at runtime: "Export PDF" does nothing at all.
 test('both PDF commands the exporter invokes are registered with Tauri', () => {
-	const exporter = readFileSync('src/lib/utils/export.ts', 'utf8');
-	const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf8');
+	const exporter = readSource('src/lib/utils/export.ts');
+	const tauriLib = readSource('src-tauri/src/lib.rs');
 
 	const registered = new Set(
 		sliceBetween(tauriLib, 'tauri::generate_handler![', ']')
@@ -43,7 +42,7 @@ test('both PDF commands the exporter invokes are registered with Tauri', () => {
 		assert.ok(registered.has(command), `export.ts invokes '${command}', which lib.rs must register`);
 		assert.match(
 			tauriLib,
-			new RegExp(`#\\[tauri::command\\]\\r?\\n(?:async )?fn ${command}\\(`),
+			new RegExp(`#\\[tauri::command\\]\\n(?:async )?fn ${command}\\(`),
 			`${command} must be defined as a Tauri command`,
 		);
 	}

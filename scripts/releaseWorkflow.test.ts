@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const workflow = readFileSync('.github/workflows/build.yml', 'utf8');
-const snapcraft = readFileSync('snapcraft.yaml', 'utf8');
-const cargoToml = readFileSync('src-tauri/Cargo.toml', 'utf8');
-const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as {
+import { readSource } from './sourceTree.js';
+
+const workflow = readSource('.github/workflows/build.yml');
+const snapcraft = readSource('snapcraft.yaml');
+const cargoToml = readSource('src-tauri/Cargo.toml');
+const packageJson = JSON.parse(readSource('package.json')) as {
 	scripts: Record<string, string>;
 	version: string;
 };

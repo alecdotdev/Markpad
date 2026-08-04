@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { offsetOf } from './sourceTree.js';
+import { offsetOf, readSource } from './sourceTree.js';
 
-const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
-const runtime = readFileSync('src-tauri/src/window_runtime.rs', 'utf8');
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
-const titleBar = readFileSync('src/lib/components/TitleBar.svelte', 'utf8');
-const home = readFileSync('src/lib/components/HomePage.svelte', 'utf8');
+const tabs = readSource('src/lib/stores/tabs.svelte.ts');
+const runtime = readSource('src-tauri/src/window_runtime.rs');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
+const titleBar = readSource('src/lib/components/TitleBar.svelte');
+const home = readSource('src/lib/components/HomePage.svelte');
 
 test('window tags persist with the v2 window snapshot', () => {
 	assert.match(tabs, /windowTag = \$state/);

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import test from 'node:test';
 
-import { offsetOf, sliceBetween, sliceFrom } from './sourceTree.js';
+import { offsetOf, readSource, sliceBetween, sliceFrom } from './sourceTree.js';
 
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
 const documentSessionPath = 'src/lib/sessions/documentSession.svelte.ts';
-const documentSession = existsSync(documentSessionPath) ? readFileSync(documentSessionPath, 'utf8') : '';
+const documentSession = existsSync(documentSessionPath) ? readSource(documentSessionPath) : '';
 
 // Window close (issue #189): instead of one aggregate "you have N unsaved
 // files" modal, the red close button walks the dirty tabs one at a time —

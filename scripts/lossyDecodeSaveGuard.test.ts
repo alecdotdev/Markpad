@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import type { Tab } from '../src/lib/stores/tabs.svelte.js';
 import { buildTransferredTab, snapshotTab, validateTransferPayload } from '../src/lib/utils/tabTransfer.js';
-import { offsetOf, sliceBetween } from './sourceTree.js';
+import { offsetOf, readSource, sliceBetween } from './sourceTree.js';
 
 // Every read path decodes leniently (#371): a file in a legacy encoding
 // (GBK, Big5, Shift-JIS, EUC-KR, CP1251 ...) opens as U+FFFD mojibake instead
@@ -20,10 +19,10 @@ import { offsetOf, sliceBetween } from './sourceTree.js';
 // stays open: the new file is genuinely UTF-8, so writing it is correct, and
 // it is the user's only way out.
 
-const session = readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8');
-const windowSession = readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8');
-const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
-const rust = readFileSync('src-tauri/src/lib.rs', 'utf8');
+const session = readSource('src/lib/sessions/documentSession.svelte.ts');
+const windowSession = readSource('src/lib/sessions/windowSession.svelte.ts');
+const tabs = readSource('src/lib/stores/tabs.svelte.ts');
+const rust = readSource('src-tauri/src/lib.rs');
 
 const loadMarkdown = () => sliceBetween(session, 'async function loadMarkdown', 'async function saveContent');
 const saveContent = () => sliceBetween(session, 'async function saveContent(', 'async function saveContentAs');
@@ -142,7 +141,7 @@ test('saveContent is the choke point auto-save and the close dialogs share', () 
 	// flow in canCloseTab; both call saveContent, so guarding it covers them
 	// without touching either.
 	assert.match(session, /const success = await saveContent\(tabId\);/);
-	const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+	const viewer = readSource('src/lib/MarkdownViewer.svelte');
 	assert.match(viewer, /saveContent\(s\.id\)\.then\(/);
 });
 
@@ -174,7 +173,7 @@ test('the refusal tells the user what to do and is not repeated per keystroke', 
 	const body = guard();
 	assert.match(body, /toast\.lossySaveBlocked/);
 	assert.match(body, /lossySaveWarnedTabs\.has\(tab\.id\)/);
-	const i18n = readFileSync('src/lib/utils/i18n.ts', 'utf8');
+	const i18n = readSource('src/lib/utils/i18n.ts');
 	assert.match(i18n, /lossySaveBlocked: 'Not saved: this file is not UTF-8/);
 	assert.match(i18n, /use "Save As" to write a copy/);
 });

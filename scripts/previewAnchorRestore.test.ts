@@ -26,6 +26,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { installShimDom, parseHtml, NODE_ELEMENT, type ShimElement } from './renderProtocolDom.ts';
+import { readSource } from './sourceTree.js';
 
 installShimDom();
 
@@ -321,8 +322,7 @@ test('source position ranges parse the way comrak writes them', () => {
  * top-level-only scan the rates above were measured against does not come back.
  */
 test('the viewer restores through the measured resolver', async () => {
-	const { readFileSync } = await import('node:fs');
-	const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+	const viewer = readSource('src/lib/MarkdownViewer.svelte');
 
 	// Read out of the one import statement rather than matched across the whole
 	// file: `import \{[\s\S]*findAnchorElement[\s\S]*\} from '…previewAnchor.js'`

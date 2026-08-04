@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { parse } from 'svelte/compiler';
+
+import { readSource } from './sourceTree.js';
 
 /*
  * Issue #392, second half (reported by @PathGao): "the Home tab it opens
@@ -76,7 +77,7 @@ const { getSupportedLanguages, t } = await import('../src/lib/utils/i18n.js');
 // ------------------------------------------------------- the gate, as written
 
 const VIEWER = 'src/lib/MarkdownViewer.svelte';
-const source = readFileSync(VIEWER, 'utf8');
+const source = readSource(VIEWER);
 
 type Node = Record<string, any>;
 

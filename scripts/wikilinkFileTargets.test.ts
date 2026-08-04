@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
+
+import { readSource } from './sourceTree.js';
 
 import {
 	getMarkdownLinkTarget,
@@ -25,8 +26,8 @@ import {
 // only prove the href is recognized as a local markdown target and decodes
 // back to the path and anchor the document asked for.
 
-const rustSource = readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
-const viewerSource = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
+const rustSource = readSource(new URL('../src-tauri/src/lib.rs', import.meta.url));
+const viewerSource = readSource(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url));
 
 // href values as produced by process_wikilinks() in src-tauri/src/lib.rs.
 // Only the heading-bearing forms appear: a wikilink with no `#` is

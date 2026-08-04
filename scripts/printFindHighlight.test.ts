@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { offsetOf, sliceBetween, sliceFrom } from './sourceTree.js';
+import { offsetOf, readSource, sliceBetween, sliceFrom } from './sourceTree.js';
 
-const styles = readFileSync('src/styles.css', 'utf8');
-const findBar = readFileSync('src/lib/components/FindBar.svelte', 'utf8');
+const styles = readSource('src/styles.css');
+const findBar = readSource('src/lib/components/FindBar.svelte');
 
 /** The `@media print` block only — not everything that follows it in the file. */
 function extractPrintBlock(source: string): string {

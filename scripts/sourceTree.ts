@@ -14,8 +14,51 @@ import { parse } from 'svelte/compiler';
 // Three copies of `walk()` used to live in singleImplementationConvention,
 // renderPipelineConvention and previewSanitize; the DOMPurify allowlist was
 // maintained twice. One copy each, here.
+//
+// The same argument is why `readSource` exists rather than a `readFileSync` per
+// call site: reading a file as text is a decision about line endings and path
+// separators, and a decision made 135 times is a decision made differently.
+// `singleImplementationConvention.test.ts` holds both to one copy.
 
 export type SourceFile = { path: string; text: string };
+
+/**
+ * A repo file as text, with CRLF collapsed to LF.
+ *
+ * Every assertion below that matches source against a pattern containing `\n`,
+ * and every anchor handed to `sliceFrom` / `sliceBetween` that spells a line
+ * break, is a claim about bytes Git checked out. On Windows `core.autocrlf`
+ * defaults to true, so the whole working tree arrives CRLF, none of those
+ * patterns match, and `sliceBetween` throws `expected to find "…"` for an anchor
+ * that is sitting right there in the file.
+ *
+ * Not hypothetical: fifteen test files were red on the maintainer's Windows
+ * checkout while cutting v2.7.0, and were hand-patched one assertion at a time
+ * in #452 — `[^\r\n]` here, `source.includes('\r\n') ? … : …` there. Those
+ * patches are correct and they do not scale. 60 files in this suite read a repo
+ * file as text across 135 call sites, every new one re-rolls the same dice on a
+ * Unix machine, and the loss is only discovered by a maintainer running the
+ * suite on Windows.
+ *
+ * So the line ending is decided once, here, and every assertion downstream is
+ * written against `\n` — the form the files have in the repository.
+ *
+ * This does not make CRLF untestable, because no test that cares about CRLF
+ * reads it off the disk. `frontMatter.test.ts`, `frontMatterProseBlock.test.ts`
+ * and `pasteUrlContext.test.ts` all assert on the parser's handling of a CRLF
+ * *document*, and each spells the document as a literal in the test — which is
+ * the right way round: a fixture whose bytes matter should not be at the mercy
+ * of what Git decided to check out.
+ *
+ * `path` is `string | URL` because both spellings are already in use: a
+ * cwd-relative string (`npm test` runs from the repo root) and
+ * `new URL('../src/…', import.meta.url)`, which resolves against the test file
+ * rather than the cwd. `readFileSync` takes either, so no call site has to
+ * change shape to get normalized.
+ */
+export function readSource(path: string | URL): string {
+	return readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+}
 
 /**
  * `source` from the first occurrence of `start` onwards.
@@ -80,7 +123,7 @@ export function walkSourceFiles(dir: string): string[] {
 }
 
 export function readSourceFiles(dir: string): SourceFile[] {
-	return walkSourceFiles(dir).map((path) => ({ path, text: readFileSync(path, 'utf8') }));
+	return walkSourceFiles(dir).map((path) => ({ path, text: readSource(path) }));
 }
 
 /** src-relative paths of the files that contain `marker`, sorted. */

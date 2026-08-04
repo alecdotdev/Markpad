@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { offsetOf, sliceBetween } from './sourceTree.js';
+import { offsetOf, readSource, sliceBetween } from './sourceTree.js';
 
-const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
-const session = readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8');
-const documentSession = readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8');
+const tabs = readSource('src/lib/stores/tabs.svelte.ts');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
+const session = readSource('src/lib/sessions/windowSession.svelte.ts');
+const documentSession = readSource('src/lib/sessions/documentSession.svelte.ts');
 
 // Session restore persists WINDOW state only: which files are open, the
 // active tab, and per-tab UI (edit mode, split, scroll). Document content
@@ -55,7 +54,7 @@ test('startup restore reads content from disk, not from the snapshot', () => {
 	assert.match(restore, /tabManager\.markTabContentUnavailable\(tab\.id\);/);
 	// dropping is reserved for an entry that is not a file at all — a legacy
 	// 'HOME' sentinel (homeSentinelSnapshot.test.ts)
-	assert.match(restore, /if \(!hasRealFilePath\(tab\.path\)\) \{\s*\r?\n\s*options\.dropRestoredTab\(tab\.id\);/);
+	assert.match(restore, /if \(!hasRealFilePath\(tab\.path\)\) \{\s*\n\s*options\.dropRestoredTab\(tab\.id\);/);
 	assert.match(viewer, /await windowSession\.restore\(\);/);
 });
 
@@ -94,19 +93,17 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 	assert.match(session, /invoke\('load_window_state'\)/);
 	assert.match(
 		session,
-		/localStorage\.getItem\(options\.windowStateKey\) \?\?\r?\n?\s*localStorage\.getItem\(options\.legacyStateKey\)/,
+		/localStorage\.getItem\(options\.windowStateKey\) \?\?\n?\s*localStorage\.getItem\(options\.legacyStateKey\)/,
 	);
 	// The shared helper clears the Rust snapshot and both localStorage keys.
 	// Only explicit exit uses it: a restore that goes wrong must never delete
 	// the record of which documents were open (interruptedSessionRestore.test.ts).
-	const endMarker = session.includes('\r\n') ? '\r\n\t}\r\n\r\n\tfunction readProgress' : '\n\t}\n\n\tfunction readProgress';
-	const discardScope = sliceBetween(session, 'async function discardPersistedState', endMarker);
+	const discardScope = sliceBetween(session, 'async function discardPersistedState', '\n\t}\n\n\tfunction readProgress');
 	assert.match(discardScope, /clear_window_state/);
 	assert.match(discardScope, /removeItem\(options\.windowStateKey\)/);
 	assert.match(discardScope, /removeItem\(options\.legacyStateKey\)/);
 	// Explicit exit delegates to the same cleanup path.
-	const exitEndMarker = viewer.includes('\r\n') ? '\r\n\t}' : '\n\t}';
-	const exitScope = sliceBetween(viewer, 'async function appExit', exitEndMarker);
+	const exitScope = sliceBetween(viewer, 'async function appExit', '\n\t}');
 	assert.match(exitScope, /await discardPersistedWindowState\(\)/);
 });
 

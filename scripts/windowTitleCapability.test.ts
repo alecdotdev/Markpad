@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { readSource } from './sourceTree.js';
+
 test('all Markpad windows may update their native title', () => {
-	const capability = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf8')) as {
+	const capability = JSON.parse(readSource('src-tauri/capabilities/default.json')) as {
 		permissions: string[];
 	};
 

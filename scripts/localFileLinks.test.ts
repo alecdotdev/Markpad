@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { resolveLocalFileLinkPath } from '../src/lib/utils/localFileLinks.js';
-import { offsetOf, sliceBetween } from './sourceTree.js';
+import { offsetOf, readSource, sliceBetween } from './sourceTree.js';
 
 /*
  * `[data](./data.csv)` did nothing on macOS and Linux, and opened a dead page
@@ -90,7 +89,7 @@ test('a markdown link still resolves to a path, so branch order is what keeps it
 
 // --- wiring ------------------------------------------------------------------
 
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
 const handler = sliceBetween(viewer, 'async function handleDocumentClick', 'let zoomLevel');
 
 test('markdown targets are still claimed before the local-file branch', () => {
@@ -118,7 +117,7 @@ test('the capability still grants the command this depends on', () => {
 	// `askToOpenExportedFile` (#399, fixed in #403). Asserted here so the grant
 	// cannot quietly disappear; the scope's shape is deliberately not asserted,
 	// so narrowing it later is not a test failure.
-	const capability = readFileSync('src-tauri/capabilities/default.json', 'utf8');
+	const capability = readSource('src-tauri/capabilities/default.json');
 	assert.match(capability, /opener:allow-open-path/);
 });
 

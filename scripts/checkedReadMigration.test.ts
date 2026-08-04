@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { offsetOf, readSourceFiles, sliceBetween } from './sourceTree.js';
+import { offsetOf, readSource, readSourceFiles, sliceBetween } from './sourceTree.js';
 
 // Runes and the Tauri bridge, shimmed the way truncatedBufferGuard.test.ts
 // shims them: the stores are runes modules, and Node's test runner gives every
@@ -152,7 +151,7 @@ test('the completed buffer is refused or accepted according to that verdict', as
 
 // --- the two component call sites -------------------------------------------
 
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
 
 test('the unchecked read command is gone, and nothing calls it', () => {
 	// This was a three-file allowlist — the files #379 migrated. That is the
@@ -168,7 +167,7 @@ test('the unchecked read command is gone, and nothing calls it', () => {
 		.map(({ path }) => path);
 	assert.deepEqual(offenders, [], 'read_file_content no longer exists; read_file_content_checked is the read');
 
-	const rust = readFileSync('src-tauri/src/lib.rs', 'utf8');
+	const rust = readSource('src-tauri/src/lib.rs');
 	assert.doesNotMatch(rust, /\basync fn read_file_content\(/, 'the unchecked command must stay deleted');
 	assert.doesNotMatch(rust, /^\s*read_file_content,\s*$/m, 'and must not be registered again');
 });
@@ -200,7 +199,7 @@ test('the session can tell a refusal from a failure', () => {
 	// both halves for real; this only pins that the tab is consulted at all,
 	// since a predicate that answers from memory alone is the defect.
 	const body = sliceBetween(
-		readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8'),
+		readSource('src/lib/sessions/documentSession.svelte.ts'),
 		'function isLossySaveRefused(',
 		'function updateLoading',
 	);
@@ -228,7 +227,7 @@ test('a tab that can only be refused stops re-arming the timer', () => {
 	// only drops afterwards — and "Save As" to a new file clears
 	// `hasReplacementChars`, which restores it.
 	assert.match(
-		readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8'),
+		readSource('src/lib/sessions/documentSession.svelte.ts'),
 		/lossySaveWarnedTabs\.delete\(tab\.id\)/,
 	);
 });

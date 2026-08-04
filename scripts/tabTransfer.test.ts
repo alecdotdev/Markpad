@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { sliceBetween } from './sourceTree.js';
+import { readSource, sliceBetween } from './sourceTree.js';
 
 import type { Tab } from '../src/lib/stores/tabs.svelte.js';
 import {
@@ -209,7 +208,7 @@ test('file-backed arrivals keep their title', () => {
 // in node), so — like windowStateRestore.test.ts — the thin store wrapper is
 // checked statically; all decision logic above is exercised directly.
 test('insertTransferredTab is a thin wrapper: build, push, activate, return the id', () => {
-	const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
+	const tabs = readSource('src/lib/stores/tabs.svelte.ts');
 	const fn = sliceBetween(tabs, 'insertTransferredTab(', 'closeTab(');
 
 	assert.match(fn, /buildTransferredTab\(/);
@@ -223,15 +222,15 @@ test('insertTransferredTab is a thin wrapper: build, push, activate, return the 
 });
 
 test('serializeState still persists window shape only (untouched by transfer)', () => {
-	const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
+	const tabs = readSource('src/lib/stores/tabs.svelte.ts');
 	const fn = sliceBetween(tabs, 'serializeState()', 'restoreState(');
 	assert.doesNotMatch(fn, /rawContent/);
 	assert.doesNotMatch(fn, /TransferableTab/);
 });
 
 test('source removal waits for destination completion', () => {
-	const broker = readFileSync('src-tauri/src/tab_transfer.rs', 'utf8');
-	const session = readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8');
+	const broker = readSource('src-tauri/src/tab_transfer.rs');
+	const session = readSource('src/lib/sessions/windowSession.svelte.ts');
 
 	assert.match(broker, /pub fn complete_detached_tab/);
 	const claim = sliceBetween(broker, 'pub fn claim_detached_tab', 'pub fn complete_detached_tab');

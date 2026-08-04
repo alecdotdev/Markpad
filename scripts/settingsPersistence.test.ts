@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { callbackBodies, sliceBetween } from './sourceTree.js';
+import { callbackBodies, readSource, sliceBetween } from './sourceTree.js';
 // Plain TypeScript, no runes: safe to import statically, unlike the store below.
 import { getSupportedLanguages, translations } from '../src/lib/utils/i18n.js';
 
@@ -102,8 +101,8 @@ const {
 
 type PersistedEntry = ReturnType<typeof createSettingsPersistence>[number];
 
-const storeSource = readFileSync(new URL('../src/lib/stores/settings.svelte.ts', import.meta.url), 'utf8');
-const componentSource = readFileSync(new URL('../src/lib/components/Settings.svelte', import.meta.url), 'utf8');
+const storeSource = readSource(new URL('../src/lib/stores/settings.svelte.ts', import.meta.url));
+const componentSource = readSource(new URL('../src/lib/components/Settings.svelte', import.meta.url));
 
 function resetStorage(seed: Record<string, string> = {}) {
 	storageBacking.clear();
@@ -530,8 +529,8 @@ test('the open effect neither reads the app version nor re-enters itself', () =>
 
 	// `loaded` and `previousActiveElement` are read and written by this effect,
 	// so they must not be reactive.
-	assert.match(componentSource, /\r?\n\tlet loaded = false;/);
-	assert.match(componentSource, /\r?\n\tlet previousActiveElement: HTMLElement \| null = null;/);
+	assert.match(componentSource, /\n\tlet loaded = false;/);
+	assert.match(componentSource, /\n\tlet previousActiveElement: HTMLElement \| null = null;/);
 });
 
 /*

@@ -1,15 +1,13 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { offsetOf, sliceBetween, sliceFrom } from './sourceTree.js';
+import { offsetOf, readSource, sliceBetween, sliceFrom } from './sourceTree.js';
 
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
-const styles = readFileSync('src/styles.css', 'utf8');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
+const styles = readSource('src/styles.css');
 
 test('editor context menu is not intercepted by the document menu', () => {
-	const endMarker = viewer.includes('\r\n') ? '\r\n\tfunction handleMouseOver' : '\n\tfunction handleMouseOver';
-	const handler = sliceBetween(viewer, 'function handleContextMenu(e: MouseEvent)', endMarker);
+	const handler = sliceBetween(viewer, 'function handleContextMenu(e: MouseEvent)', '\n\tfunction handleMouseOver');
 	const editorReturn = offsetOf(handler, 'if (isInsideEditor) return;');
 	const preventDefault = offsetOf(handler, 'e.preventDefault();');
 
@@ -46,8 +44,7 @@ test('print layout lets the viewer pane escape the interactive split flex ratio'
 });
 
 test('floating toc toggle keeps a visible translucent surface outside edit mode', () => {
-	const endMarker = viewer.includes('\r\n') ? '\r\n\t.toc-toggle-floating.expanded {' : '\n\t.toc-toggle-floating.expanded {';
-	const selector = sliceBetween(viewer, '\t.toc-toggle-floating {', endMarker);
+	const selector = sliceBetween(viewer, '\t.toc-toggle-floating {', '\n\t.toc-toggle-floating.expanded {');
 
 	assert.match(selector, /background-color:\s*color-mix\(in srgb, var\(--color-canvas-default\) 82%, transparent\);/);
 	assert.match(selector, /border:\s*1px solid var\(--color-border-default\);/);

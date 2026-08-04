@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { readSource } from './sourceTree.js';
+
 test('fold layout observes rendered content and publishes its measured height', () => {
-	const source = readFileSync('src/lib/utils/foldLayout.ts', 'utf8');
+	const source = readSource('src/lib/utils/foldLayout.ts');
 
 	assert.match(source, /new ResizeObserver/);
 	assert.match(source, /--fold-content-height/);
@@ -11,7 +12,7 @@ test('fold layout observes rendered content and publishes its measured height', 
 });
 
 test('fold wrapper animates an explicit measured height instead of a fractional grid track', () => {
-	const styles = readFileSync('src/styles.css', 'utf8');
+	const styles = readSource('src/styles.css');
 	const expandedRule = styles.match(/\.foldable-content-wrapper\s*\{([^}]*)\}/)?.[1] || '';
 
 	assert.match(expandedRule, /height:\s*var\(--fold-content-height/);
@@ -27,8 +28,8 @@ test('fold wrapper animates an explicit measured height instead of a fractional 
 // lands on a target that is still moving — a defect that only shows up as "find
 // sometimes scrolls to the wrong place".
 test('the find-bar fold re-aim delay outlasts the CSS fold transition', () => {
-	const findBar = readFileSync('src/lib/components/FindBar.svelte', 'utf8');
-	const styles = readFileSync('src/styles.css', 'utf8');
+	const findBar = readSource('src/lib/components/FindBar.svelte');
+	const styles = readSource('src/styles.css');
 
 	const declared = findBar.match(/const FOLD_TRANSITION_MS = (\d+);/);
 	assert.ok(declared, 'FindBar.svelte must declare the delay it waits for the fold to settle');
@@ -44,14 +45,14 @@ test('the find-bar fold re-aim delay outlasts the CSS fold transition', () => {
 });
 
 test('preview lifecycle starts and cleans up fold observation', () => {
-	const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+	const viewer = readSource('src/lib/MarkdownViewer.svelte');
 
 	assert.match(viewer, /observeFoldLayout\((?:markdownBody|body)\)/);
 	assert.match(viewer, /stopObservingFoldLayout\?\.\(\)/);
 });
 
 test('fold measurement pauses while the preview pane is hidden by edit mode', () => {
-	const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+	const viewer = readSource('src/lib/MarkdownViewer.svelte');
 
 	assert.match(viewer, /if \(!html \|\| !body \|\| \(isEditing && !isSplit\)\) return;/);
 });

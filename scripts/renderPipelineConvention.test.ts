@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { callSiteOffsets, enclosingFunctionName } from './sourceTree.js';
+import { callSiteOffsets, enclosingFunctionName, readSource } from './sourceTree.js';
 
 // Every preview render must go through renderMarkdownPreview, which strips
 // YAML front matter before invoking the Rust renderer. Calling the raw
@@ -22,7 +21,7 @@ const VIEWER = 'src/lib/MarkdownViewer.svelte';
 const WRAPPER = 'renderMarkdownPreview';
 
 test('every raw render_markdown call in the viewer sits inside renderMarkdownPreview', () => {
-	const viewer = readFileSync(VIEWER, 'utf8');
+	const viewer = readSource(VIEWER);
 	const offsets = callSiteOffsets(viewer, 'invoke').filter((offset) =>
 		/^invoke\(\s*'render_markdown'/.test(viewer.slice(offset)),
 	);

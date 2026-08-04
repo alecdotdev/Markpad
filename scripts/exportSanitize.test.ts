@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -8,9 +7,10 @@ import {
 	MARKDOWN_SANITIZE_CONFIG,
 } from '../src/lib/utils/sanitize.js';
 import { hasMarkdownLinkExtension } from '../src/lib/utils/markdownLinks.js';
+import { readSource } from './sourceTree.js';
 
-const exportSource = readFileSync('src/lib/utils/export.ts', 'utf8');
-const sanitizeSource = readFileSync('src/lib/utils/sanitize.ts', 'utf8');
+const exportSource = readSource('src/lib/utils/export.ts');
+const sanitizeSource = readSource('src/lib/utils/sanitize.ts');
 
 // The report's proof of concept. A document containing this line renders as
 // nothing in the preview (the viewer sanitizes), so the user sees no sign of

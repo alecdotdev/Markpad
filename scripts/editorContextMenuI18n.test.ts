@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { getSupportedLanguages, t, translations, type LanguageCode, type Translation } from '../src/lib/utils/i18n.js';
+import { readSource } from './sourceTree.js';
 
 // WHAT THIS FILE COVERS, AND WHAT IT DOES NOT
 //
@@ -16,7 +16,7 @@ import { getSupportedLanguages, t, translations, type LanguageCode, type Transla
 // Monaco behaves that way when the effect re-runs — verifying that needs a
 // running editor.
 
-const editor = readFileSync('src/lib/components/Editor.svelte', 'utf8');
+const editor = readSource('src/lib/components/Editor.svelte');
 
 const supported = getSupportedLanguages().map((l) => l.code);
 

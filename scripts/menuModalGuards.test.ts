@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const viewer = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
-const titleBar = readFileSync(new URL('../src/lib/components/TitleBar.svelte', import.meta.url), 'utf8');
-const modal = readFileSync(new URL('../src/lib/components/Modal.svelte', import.meta.url), 'utf8');
+import { readSource } from './sourceTree.js';
+
+const viewer = readSource(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url));
+const titleBar = readSource(new URL('../src/lib/components/TitleBar.svelte', import.meta.url));
+const modal = readSource(new URL('../src/lib/components/Modal.svelte', import.meta.url));
 
 test('document context menus do not open while a modal is active', () => {
 	assert.match(
 		viewer,
-		/function handleContextMenu\(e: MouseEvent\) \{\r?\n\t\tif \(modalState\.show\) return;/,
+		/function handleContextMenu\(e: MouseEvent\) \{\n\t\tif \(modalState\.show\) return;/,
 	);
 });
 

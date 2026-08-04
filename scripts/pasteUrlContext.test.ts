@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { compile } from 'monaco-editor/esm/vs/editor/standalone/common/monarch/monarchCompile.js';
 import { MonarchTokenizer } from 'monaco-editor/esm/vs/editor/standalone/common/monarch/monarchLexer.js';
 import { language as markdownLanguage } from 'monaco-editor/esm/vs/basic-languages/markdown/markdown.js';
+
+import { readSource } from './sourceTree.js';
 
 import {
 	buildPasteProbe,
@@ -214,7 +215,7 @@ test('the caret lands in the token that starts at or before it', () => {
 test('the paste path consults the context guard before building a link', () => {
 	// Source-text only: this proves Editor.svelte reads this way, not that it
 	// behaves this way at runtime.
-	const editor = readFileSync('src/lib/components/Editor.svelte', 'utf8');
+	const editor = readSource('src/lib/components/Editor.svelte');
 
 	assert.match(
 		editor,

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { parse } from 'svelte/compiler';
 import ts from 'typescript';
+
+import { readSource } from './sourceTree.js';
 
 /*
  * The Home menu decided whether to offer "Export as HTML" / "Export as PDF" by
@@ -135,7 +136,7 @@ function compileGate(source: string, expression: Node, available: Record<string,
 // ------------------------------------------- 1. the export gate, as written
 
 const TITLE_BAR = 'src/lib/components/TitleBar.svelte';
-const titleBarSource = readFileSync(TITLE_BAR, 'utf8');
+const titleBarSource = readSource(TITLE_BAR);
 
 const exportMenuGate = (() => {
 	const ast = parse(titleBarSource, { modern: true, filename: TITLE_BAR });
@@ -174,7 +175,7 @@ const exportsOffered = compileGate(
 // ------------------------------- 2. the condition that refreshes tab.content
 
 const VIEWER = 'src/lib/MarkdownViewer.svelte';
-const viewerSource = readFileSync(VIEWER, 'utf8');
+const viewerSource = readSource(VIEWER);
 
 const previewCacheRefreshes = (() => {
 	const ast = parse(viewerSource, { modern: true, filename: VIEWER });
@@ -208,7 +209,7 @@ const previewCacheRefreshes = (() => {
 // ------------------------------------- 3. exportAsHtml's own precondition
 
 const EXPORT = 'src/lib/utils/export.ts';
-const exportSource = readFileSync(EXPORT, 'utf8');
+const exportSource = readSource(EXPORT);
 
 /** `if (!ctx.rawContent) return null;` — evaluated, not matched. */
 const exportWouldRun = (() => {

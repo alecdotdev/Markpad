@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import test from 'node:test';
 
+import { readSource } from './sourceTree.js';
+
 const sessionPath = new URL('../src/lib/sessions/documentSession.svelte.ts', import.meta.url);
-const session = existsSync(sessionPath) ? readFileSync(sessionPath, 'utf8') : '';
+const session = existsSync(sessionPath) ? readSource(sessionPath) : '';
 
 test('large-file completion requires the current clean load revision and unchanged view mode', () => {
 	assert.match(session, /const loadRevisionByTab = new Map<string, number>\(\);/);

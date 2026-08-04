@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { sliceBetween, sliceFrom } from './sourceTree.js';
+import { readSource, sliceBetween, sliceFrom } from './sourceTree.js';
 
-const session = readFileSync(new URL('../src/lib/sessions/windowSession.svelte.ts', import.meta.url), 'utf8');
-const viewer = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
-const broker = readFileSync(new URL('../src-tauri/src/tab_transfer.rs', import.meta.url), 'utf8');
+const session = readSource(new URL('../src/lib/sessions/windowSession.svelte.ts', import.meta.url));
+const viewer = readSource(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url));
+const broker = readSource(new URL('../src-tauri/src/tab_transfer.rs', import.meta.url));
 
 // A tab transfer is only ever allowed to end in one of two states: the source
 // still has the tab, or the destination does. Every defect below produced the
@@ -44,8 +43,8 @@ test('a failed render undoes the inserted tab', () => {
 	// The tab must exist before it can be rendered, so the destination owns a
 	// document the source still shows until the render succeeds.
 	const accept = sliceBetween(viewer, 'acceptTransferredTab: async (snapshot)', 'onError: (message, error)');
-	assert.match(accept, /\} catch \(error\) \{\s*\r?\n\s*tabManager\.closeTab\(id\);\s*\r?\n\s*throw error;/);
-	assert.match(accept, /if \(isDisposed\) \{\s*\r?\n\s*tabManager\.closeTab\(id\);/);
+	assert.match(accept, /\} catch \(error\) \{\s*\n\s*tabManager\.closeTab\(id\);\s*\n\s*throw error;/);
+	assert.match(accept, /if \(isDisposed\) \{\s*\n\s*tabManager\.closeTab\(id\);/);
 });
 
 test('a second transfer of the same tab is refused while one is in flight', () => {
@@ -53,7 +52,7 @@ test('a second transfer of the same tab is refused while one is in flight', () =
 	// resolves; two payloads for one tab means two windows each build it.
 	assert.match(session, /const transfersInFlight = new Set<string>\(\);/);
 	assert.match(session, /if \(transfersInFlight\.has\(tabId\)\) return false;/);
-	assert.match(session, /\} finally \{\s*\r?\n\s*transfersInFlight\.delete\(tabId\);/);
+	assert.match(session, /\} finally \{\s*\n\s*transfersInFlight\.delete\(tabId\);/);
 });
 
 test('the broker binds every operation to the window that may perform it', () => {

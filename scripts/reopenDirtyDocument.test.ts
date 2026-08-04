@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { sliceBetween } from './sourceTree.js';
+import { readSource, sliceBetween } from './sourceTree.js';
 
 // Opening a file that is ALREADY open in a tab with unsaved edits must not
 // re-read it from disk. `setTabRawContent` replaces rawContent AND
@@ -60,7 +59,7 @@ g.window.__TAURI_INTERNALS__ = {
 const { tabManager } = await import('../src/lib/stores/tabs.svelte.js');
 const { createDocumentSession } = await import('../src/lib/sessions/documentSession.svelte.js');
 
-const viewer = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
+const viewer = readSource(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url));
 
 function makeSession() {
 	return createDocumentSession({

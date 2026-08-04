@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { isHexColor, isSafeCssColor, sanitizeThemeColors } from '../src/lib/utils/theme.js';
+import { readSource } from './sourceTree.js';
 
 // P1-C-3: an imported VS Code theme's colour values are interpolated into a
 // global <style> block that is replayed on every launch (the theme name is
@@ -85,7 +85,7 @@ test('[P1-C-3] sanitizeThemeColors survives a hostile theme.json shape', () => {
 });
 
 test('[P1-C-3] the injected style tag is built only from validated values', () => {
-	const source = readFileSync('src/lib/utils/theme.ts', 'utf8');
+	const source = readSource('src/lib/utils/theme.ts');
 
 	assert.match(source, /const colors = sanitizeThemeColors\(theme\.colors\)/);
 	assert.match(

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { buildExportDocument, exportThemeAttribute } from '../src/lib/utils/export.js';
+import { readSource } from './sourceTree.js';
 
-const styles = readFileSync('src/styles.css', 'utf8');
-const exportSource = readFileSync('src/lib/utils/export.ts', 'utf8');
+const styles = readSource('src/styles.css');
+const exportSource = readSource('src/lib/utils/export.ts');
 
 /** The opening `<html …>` tag of a built export. */
 function htmlTag(document: string): string {

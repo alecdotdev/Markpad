@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+
+import { readSource } from './sourceTree.js';
 
 // An explicit save and the 1.5s auto-save debounce can both be aimed at one
 // tab. The debounce is armed on the last keystroke and disarmed by the
@@ -166,7 +167,7 @@ test('no call site takes the cancel duty back from saveContent', async () => {
 	// forget it again. A cancel immediately before a `saveContent` is the
 	// shape that says someone stopped trusting the function to do it.
 	for (const path of ['src/lib/MarkdownViewer.svelte', 'src/lib/sessions/documentSession.svelte.ts']) {
-		const body = readFileSync(path, 'utf8');
+		const body = readSource(path);
 		assert.doesNotMatch(
 			body,
 			/cancelPendingAutoSave\([^)]*\);\s*(?:\/\/[^\n]*\n\s*)*(?:const \w+ = )?(?:await |return )*saveContent\(/,
@@ -177,7 +178,7 @@ test('no call site takes the cancel duty back from saveContent', async () => {
 	// And the duty is discharged before the write, not after — the source-level
 	// mirror of the ordering test above, so a refactor that reorders the two
 	// inside `saveContent` is caught even if the stub harness stops seeing it.
-	const session = readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8');
+	const session = readSource('src/lib/sessions/documentSession.svelte.ts');
 	const saveContentBody = session.slice(session.indexOf('async function saveContent('));
 	const cancel = saveContentBody.indexOf('options.cancelPendingAutoSave(');
 	const write = saveContentBody.indexOf("invoke('save_file_content'");

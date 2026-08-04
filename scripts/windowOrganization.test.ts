@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { sliceBetween } from './sourceTree.js';
+import { readSource, sliceBetween } from './sourceTree.js';
 
-const runtime = readFileSync('src-tauri/src/window_runtime.rs', 'utf8');
-const session = readFileSync('src/lib/sessions/windowSession.svelte.ts', 'utf8');
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
-const tab = readFileSync('src/lib/components/Tab.svelte', 'utf8');
-const titleBar = readFileSync('src/lib/components/TitleBar.svelte', 'utf8');
+const runtime = readSource('src-tauri/src/window_runtime.rs');
+const session = readSource('src/lib/sessions/windowSession.svelte.ts');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
+const tab = readSource('src/lib/components/Tab.svelte');
+const titleBar = readSource('src/lib/components/TitleBar.svelte');
 
 test('the runtime registers live viewer windows in stable creation order', () => {
 	assert.match(runtime, /window_counter/);
@@ -23,8 +22,7 @@ test('the runtime registers live viewer windows in stable creation order', () =>
 	// the two to be one statement. Measured — deleting the registry removal from
 	// the `Destroyed` arm left the suite green, and every closed window stayed in
 	// `list_viewer_windows` as a transfer target that no longer exists.
-	const destroyedMarker = runtime.includes('\r\n') ? '\r\n        }' : '\n        }';
-	const destroyed = sliceBetween(runtime, 'tauri::WindowEvent::Destroyed => {', destroyedMarker);
+	const destroyed = sliceBetween(runtime, 'tauri::WindowEvent::Destroyed => {', '\n        }');
 	assert.match(
 		destroyed,
 		/window_registry\)\.remove\(window\.label\(\)\)/,
@@ -50,10 +48,10 @@ test('moving to an existing window uses the acknowledged transfer protocol', () 
 // `async` is invisible until "Move to New Window" freezes a Windows user's app
 // hard enough to need a force-kill. Issue #356.
 test('create_transfer_window is async so window creation cannot deadlock the main thread', () => {
-	const lib = readFileSync('src-tauri/src/lib.rs', 'utf8');
+	const lib = readSource('src-tauri/src/lib.rs');
 
-	assert.match(lib, /#\[tauri::command\]\r?\nasync fn create_transfer_window\(/);
-	assert.doesNotMatch(lib, /#\[tauri::command\]\r?\nfn create_transfer_window\(/);
+	assert.match(lib, /#\[tauri::command\]\nasync fn create_transfer_window\(/);
+	assert.doesNotMatch(lib, /#\[tauri::command\]\nfn create_transfer_window\(/);
 });
 
 test('window organization exposes move, merge, and carry actions', () => {

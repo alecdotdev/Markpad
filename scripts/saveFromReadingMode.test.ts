@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { offsetOf, sliceBetween } from './sourceTree.js';
+import { offsetOf, readSource, sliceBetween } from './sourceTree.js';
 
-const viewer = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
+const viewer = readSource(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url));
 
 function keydownSaveBranch(): string {
 	return sliceBetween(viewer, "if (cmdOrCtrl && key === 's') {", "if (cmdOrCtrl && e.shiftKey && key === 't')");

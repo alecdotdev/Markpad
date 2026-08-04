@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { sliceFrom } from './sourceTree.js';
+import { readSource, sliceFrom } from './sourceTree.js';
 
-const session = readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8');
+const session = readSource('src/lib/sessions/documentSession.svelte.ts');
 
 test('self writes suppress watcher reloads only during their grace period', () => {
 	const handler = sliceFrom(session, 'function shouldReloadExternalChange');

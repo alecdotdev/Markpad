@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const runtime = readFileSync('src-tauri/src/window_runtime.rs', 'utf8');
-const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf8');
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+import { readSource } from './sourceTree.js';
+
+const runtime = readSource('src-tauri/src/window_runtime.rs');
+const tauriLib = readSource('src-tauri/src/lib.rs');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
 
 test('macOS open-document events preserve every delivered file path', () => {
 	assert.match(runtime, /startup_files: Mutex<Vec<String>>/);

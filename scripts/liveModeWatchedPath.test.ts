@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { callbackBodies, filesMatching, readSourceFiles, sliceBetween } from './sourceTree.js';
+import { callbackBodies, filesMatching, readSource, readSourceFiles, sliceBetween } from './sourceTree.js';
 
-const runtime = readFileSync('src-tauri/src/window_runtime.rs', 'utf8');
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+const runtime = readSource('src-tauri/src/window_runtime.rs');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
 
 test('Live Mode routes a watcher notification to its watched path', () => {
 	assert.match(runtime, /emit_to\(event_label\.as_str\(\), "file-changed", watched_path\.clone\(\)\)/);
@@ -17,12 +16,12 @@ test('Live Mode routes a watcher notification to its watched path', () => {
 	// externalChangeReload.test.ts for the routing behaviour.
 	assert.match(viewer, /if \(!liveMode\) return;/);
 	assert.match(viewer, /documentSession\.resolveExternalChange\(changedPath\)/);
-	const session = readFileSync('src/lib/sessions/documentSession.svelte.ts', 'utf8');
+	const session = readSource('src/lib/sessions/documentSession.svelte.ts');
 	assert.match(session, /tabManager\.tabs\.find\(\(tab\) => tab\.path === changedPath\)/);
 });
 
 test('Live Mode follows the active file instead of retaining a previous tab watcher', () => {
-	assert.match(viewer, /if \(liveMode && currentFile\) \{\r?\n\t\t\tinvoke\('watch_file', \{ path: currentFile \}\)/);
+	assert.match(viewer, /if \(liveMode && currentFile\) \{\n\t\t\tinvoke\('watch_file', \{ path: currentFile \}\)/);
 
 	// The defect #296 fixed was `documentSession` re-issuing `watch_file` on
 	// every load, so the watcher followed whichever document loaded last rather

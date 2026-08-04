@@ -28,12 +28,11 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 
 import { installShimDom, parseHtml, type ShimElement } from './renderProtocolDom.ts';
-import { offsetOf } from './sourceTree.js';
+import { offsetOf, readSource } from './sourceTree.js';
 
 // ---------------------------------------------------------------- environment
 
@@ -67,9 +66,9 @@ installShimDom();
 const { tabManager } = await import('../src/lib/stores/tabs.svelte.js');
 const { processMarkdownHtml } = await import('../src/lib/utils/markdown.ts');
 
-const viewer = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
-const toc = readFileSync(new URL('../src/lib/components/Toc.svelte', import.meta.url), 'utf8');
-const session = readFileSync(new URL('../src/lib/sessions/documentSession.svelte.ts', import.meta.url), 'utf8');
+const viewer = readSource(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url));
+const toc = readSource(new URL('../src/lib/components/Toc.svelte', import.meta.url));
+const session = readSource(new URL('../src/lib/sessions/documentSession.svelte.ts', import.meta.url));
 
 // ------------------------------------------------------------ source plucking
 
@@ -124,7 +123,7 @@ function pluckFunction(source: string, name: string, required = true): string {
 type Declaration = { declare: string; refresh: string };
 
 function pluckDeclaration(source: string, name: string, required = true): Declaration | null {
-	const match = new RegExp(`\\r?\\n\\t(let|const) ${name} = ([^\\r\\n]*);\\r?\\n`).exec(source);
+	const match = new RegExp(`\\n\\t(let|const) ${name} = ([^\\n]*);\\n`).exec(source);
 	if (!match) {
 		assert.ok(!required, `expected the component to declare ${name} on one line`);
 		return null;

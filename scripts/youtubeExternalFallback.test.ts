@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { offsetOf, sliceBetween } from './sourceTree.js';
+import { offsetOf, readSource, sliceBetween } from './sourceTree.js';
 
-const markdown = readFileSync('src/lib/utils/markdown.ts', 'utf8');
-const markdownViewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
-const tauriConfig = readFileSync('src-tauri/tauri.conf.json', 'utf8');
+const markdown = readSource('src/lib/utils/markdown.ts');
+const markdownViewer = readSource('src/lib/MarkdownViewer.svelte');
+const tauriConfig = readSource('src-tauri/tauri.conf.json');
 
 test('YouTube links render as browser-opening thumbnail anchors', () => {
 	assert.match(markdown, /function replaceWithYoutubeLink\(element: Element, videoId: string, href: string\)/);
@@ -37,6 +36,6 @@ test('linked YouTube thumbnails are not intercepted by image zoom', () => {
 	assert.ok(anchorGuard < imageZoom, 'the anchor branch claims the click before image zoom sees it');
 	assert.match(
 		linkHandler,
-		/if \(a\) \{[\s\S]*?if \(relativeMarkdownTarget\) \{[\s\S]*?return;[\s\S]*?\}\r?\n\s*return;\r?\n\s*\}\r?\n\r?\n\s*\/\/ media zoom handling/,
+		/if \(a\) \{[\s\S]*?if \(relativeMarkdownTarget\) \{[\s\S]*?return;[\s\S]*?\}\n\s*return;\n\s*\}\n\n\s*\/\/ media zoom handling/,
 	);
 });

@@ -38,8 +38,6 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 import {
 	installShimDom,
@@ -50,6 +48,7 @@ import {
 	type ShimNode,
 	type ShimText,
 } from './renderProtocolDom.ts';
+import { readSource } from './sourceTree.js';
 
 installShimDom();
 (globalThis as any).window = globalThis;
@@ -67,7 +66,7 @@ type ContractCase = {
 };
 
 const corpus: { cases: ContractCase[] } = JSON.parse(
-	readFileSync(fileURLToPath(new URL('./mathDelimiterCorpus.json', import.meta.url)), 'utf8'),
+	readSource(new URL('./mathDelimiterCorpus.json', import.meta.url)),
 );
 
 const FILE_PATH = '/documents/notes.md';

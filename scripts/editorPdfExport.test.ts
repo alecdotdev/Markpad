@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { compile } from 'svelte/compiler';
 
-import { offsetOf, sliceBetween, sliceFrom } from './sourceTree.js';
+import { offsetOf, readSource, sliceBetween, sliceFrom } from './sourceTree.js';
 
 /*
  * Export PDF from plain edit mode produced a blank page, for two independent
@@ -33,8 +32,8 @@ import { offsetOf, sliceBetween, sliceFrom } from './sourceTree.js';
  *    the note on those tests for what that does and does not establish.
  */
 
-const styles = readFileSync('src/styles.css', 'utf8');
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+const styles = readSource('src/styles.css');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
 
 const componentCss = (() => {
 	const compiled = compile(viewer, { filename: 'MarkdownViewer.svelte', css: 'external' });

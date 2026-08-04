@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { sliceBetween } from './sourceTree.js';
+import { readSource, sliceBetween } from './sourceTree.js';
 
 import { nextUntitledTitle } from '../src/lib/utils/untitledTitle.js';
 
@@ -39,7 +38,7 @@ test('works with localized bases', () => {
 });
 
 test('new tabs are created with numbered untitled titles', () => {
-	const tabs = readFileSync('src/lib/stores/tabs.svelte.ts', 'utf8');
+	const tabs = readSource('src/lib/stores/tabs.svelte.ts');
 	assert.match(tabs, /nextUntitledTitle\(/);
 	// both creation paths go through the helper
 	const addNewTab = sliceBetween(tabs, 'addNewTab()', 'addHomeTab()');

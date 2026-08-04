@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { callbackBodies } from './sourceTree.js';
+import { callbackBodies, readSource } from './sourceTree.js';
 
 // The effect is identified by what it does — it is the one that reads
 // `onscrollsync` — not by where its text starts and stops.
@@ -16,7 +15,7 @@ import { callbackBodies } from './sourceTree.js';
 // anchor never got that guard, and it depends on the *next* effect being
 // tab-indented and spelled `$effect(() => {`; write it any other way and this
 // file silently starts asserting about the rest of the component.
-const editor = readFileSync('src/lib/components/Editor.svelte', 'utf8');
+const editor = readSource('src/lib/components/Editor.svelte');
 const syncEffects = callbackBodies(editor, '$effect').filter((body) => body.includes('onscrollsync'));
 assert.equal(syncEffects.length, 1, `expected exactly one $effect reading onscrollsync (got ${syncEffects.length})`);
 const syncEffect = syncEffects[0];

@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { functionSource, sliceBetween, sliceFrom } from './sourceTree.js';
+import { functionSource, readSource, sliceBetween, sliceFrom } from './sourceTree.js';
 
 // A markdown file larger than 50KB is opened twice: `open_markdown_preview`
 // returns the first 50KB so something renders immediately, and a background
@@ -47,7 +46,7 @@ g.window.__TAURI_INTERNALS__ = {
 const { tabManager } = await import('../src/lib/stores/tabs.svelte.js');
 const { createDocumentSession } = await import('../src/lib/sessions/documentSession.svelte.js');
 
-const viewer = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
+const viewer = readSource(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url));
 
 const errors: string[] = [];
 /** What the close dialog answers next. Set per test. */

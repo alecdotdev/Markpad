@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { MARKDOWN_SANITIZE_CONFIG, ALLOWED_MARKDOWN_URI_REGEXP } from '../src/lib/utils/sanitize.js';
-import { SANITIZER_FILES, callSiteOffsets, enclosingFunctionName, filesMatching, readSourceFiles, sliceBetween } from './sourceTree.js';
+import { SANITIZER_FILES, callSiteOffsets, enclosingFunctionName, filesMatching, readSource, readSourceFiles, sliceBetween } from './sourceTree.js';
 
 // The preview is the path the `<style>` clause in the shared policy was written
 // for, and it was the one path not using it. `tab.content` (the rendered,
@@ -42,9 +41,9 @@ import { SANITIZER_FILES, callSiteOffsets, enclosingFunctionName, filesMatching,
 // gets, and that is what these tests pin.
 
 const SOURCES = readSourceFiles('src');
-const viewerSource = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
-const sanitizeSource = readFileSync('src/lib/utils/sanitize.ts', 'utf8');
-const richContentSource = readFileSync('src/lib/utils/richContent.ts', 'utf8');
+const viewerSource = readSource('src/lib/MarkdownViewer.svelte');
+const sanitizeSource = readSource('src/lib/utils/sanitize.ts');
+const richContentSource = readSource('src/lib/utils/richContent.ts');
 
 /**
  * The identifier the preview injects with `{@html}`, proved to be the shared

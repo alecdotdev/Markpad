@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { sliceBetween } from './sourceTree.js';
+import { readSource, sliceBetween } from './sourceTree.js';
 
 // Editor.svelte translates the settings store into Monaco options and
 // keybindings. Every regression locked here came from that translation layer
@@ -10,8 +9,8 @@ import { sliceBetween } from './sourceTree.js';
 // modifier that macOS never delivers, one key bound twice, and a native
 // behaviour dropped by the action that replaced it.
 
-const editor = readFileSync('src/lib/components/Editor.svelte', 'utf8');
-const settingsStore = readFileSync('src/lib/stores/settings.svelte.ts', 'utf8');
+const editor = readSource('src/lib/components/Editor.svelte');
+const settingsStore = readSource('src/lib/stores/settings.svelte.ts');
 
 function count(source: string, pattern: RegExp): number {
 	return source.match(pattern)?.length ?? 0;

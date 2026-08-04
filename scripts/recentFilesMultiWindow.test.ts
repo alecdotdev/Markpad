@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
+
+import { readSource } from './sourceTree.js';
 
 /*
  * The recent-file list was written back as `JSON.stringify(recentFiles)` from
@@ -237,7 +238,7 @@ test('only this key, and a wholesale clear, count as a remote change', () => {
 
 // --- wiring ------------------------------------------------------------------
 
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
 
 test('every mutation goes through the read-modify-write helper', () => {
 	assert.match(viewer, /recentFiles = updateStoredRecentFiles\(\((\w+)\) => promoteRecentFile\(\1, path\)\)/);

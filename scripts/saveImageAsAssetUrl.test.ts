@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { normalizeAssetPath } from '../src/lib/utils/exportHtml.js';
-import { offsetOf, sliceBetween } from './sourceTree.js';
+import { offsetOf, readSource, sliceBetween } from './sourceTree.js';
 
 /*
  * "Save image as" could never save a remote image, and on Windows it could not
@@ -28,7 +27,7 @@ import { offsetOf, sliceBetween } from './sourceTree.js';
  * site — plus the two properties the reuse buys, run against the real function.
  */
 
-const viewer = readFileSync('src/lib/MarkdownViewer.svelte', 'utf8');
+const viewer = readSource('src/lib/MarkdownViewer.svelte');
 const body = sliceBetween(viewer, 'async function saveImageAs', 'async function saveDiagramAs');
 
 test('a Windows asset URL names the same file as the asset: form', () => {
@@ -84,6 +83,6 @@ test('the CSP that makes the remote case impossible is still the one described',
 	// If `connect-src` is ever widened, the comment above stops being true and
 	// a JS download becomes possible again. Fail here rather than leave a
 	// stale explanation in the source.
-	const conf = readFileSync('src-tauri/tauri.conf.json', 'utf8');
+	const conf = readSource('src-tauri/tauri.conf.json');
 	assert.match(conf, /"connect-src":\s*"'self'"/);
 });

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
+
+import { readSource } from './sourceTree.js';
 
 import {
 	findRestorableDiagrams,
@@ -10,8 +11,8 @@ import {
 	resolveMermaidTheme,
 } from '../src/lib/utils/mermaidPrint.js';
 
-const viewer = readFileSync(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url), 'utf8');
-const richContent = readFileSync(new URL('../src/lib/utils/richContent.ts', import.meta.url), 'utf8');
+const viewer = readSource(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url));
+const richContent = readSource(new URL('../src/lib/utils/richContent.ts', import.meta.url));
 
 /**
  * Minimal stand-ins for the DOM pieces the helper touches. Enough to drive

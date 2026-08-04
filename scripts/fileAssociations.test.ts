@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const config = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8')) as {
+import { readSource } from './sourceTree.js';
+
+const config = JSON.parse(readSource('src-tauri/tauri.conf.json')) as {
 	bundle: { fileAssociations: Array<{ ext: string[] }> };
 };
 
