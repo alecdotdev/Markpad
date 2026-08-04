@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -10,6 +8,7 @@ import {
 	type LanguageCode,
 	type Translation,
 } from '../src/lib/utils/i18n.js';
+import { readSource, walkSourceFiles } from './sourceTree.js';
 
 // WHAT THIS FILE COVERS, AND WHY IT EXISTS
 //
@@ -60,15 +59,6 @@ const dictionaries = new Map<LanguageCode, Map<string, string>>(
 const english = dictionaries.get('en')!;
 
 // ------------------------------------------------------------------- source
-
-function sourceFiles(dir: string, out: string[] = []): string[] {
-	for (const entry of readdirSync(dir)) {
-		const path = join(dir, entry);
-		if (statSync(path).isDirectory()) sourceFiles(path, out);
-		else if (path.endsWith('.svelte') || path.endsWith('.ts')) out.push(path.replace(/\\/g, '/'));
-	}
-	return out;
-}
 
 // Prose in a doc comment can mention `t('foo')`. Drop whole comment lines
 // rather than trying to parse comments out of the middle of code — this only
@@ -147,9 +137,9 @@ const dynamicPrefixes = new Map<string, Set<string>>();
 /** `t(someVariable, lang)` — the key is computed elsewhere. */
 const indirectCalls = new Set<string>();
 
-for (const file of sourceFiles(SOURCE_ROOT)) {
+for (const file of walkSourceFiles(SOURCE_ROOT)) {
 	if (file === DICTIONARY) continue;
-	const src = stripCommentLines(readFileSync(file, 'utf8'));
+	const src = stripCommentLines(readSource(file));
 
 	// `t(` but not `format(`, `.at(`, `assert(` …
 	for (const match of src.matchAll(/(?<![\w$.])t\(/g)) {
@@ -313,7 +303,7 @@ test('every template-literal key family is declared and resolvable', () => {
 	);
 
 	for (const [prefix, { file, member, why }] of Object.entries(DYNAMIC_FAMILIES)) {
-		const source = readFileSync(file, 'utf8');
+		const source = readSource(file);
 		// A member may legitimately appear at several call sites (`tk('close')`),
 		// so this is a set, not a list.
 		const members = new Set([...source.matchAll(member)].map((m) => m[1]));
@@ -333,7 +323,7 @@ test('t() never echoes a key back for a reachable string', () => {
 	// rather than through the tables.
 	const reachable = new Set(staticKeys.map((r) => r.key));
 	for (const [prefix, { file, member }] of Object.entries(DYNAMIC_FAMILIES)) {
-		const source = readFileSync(file, 'utf8');
+		const source = readSource(file);
 		for (const m of source.matchAll(member)) reachable.add(`${prefix}${m[1]}`);
 	}
 	for (const key of reachable) {
@@ -362,7 +352,7 @@ test('the tag-colour names reach the UI in every language', () => {
 
 test('the window-tag editor’s Save button is translated', () => {
 	// The button that shipped reading "common.save".
-	const titleBar = readFileSync('src/lib/components/TitleBar.svelte', 'utf8');
+	const titleBar = readSource('src/lib/components/TitleBar.svelte');
 	const match = titleBar.match(/onclick=\{applyTag\}>\{t\('([^']+)', currentLanguage\)\}/);
 	assert.ok(match, 'the tag editor still labels its confirm button through t()');
 	assert.ok(english.has(match[1]), `${match[1]} is defined in English`);

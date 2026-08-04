@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import test from 'node:test';
 
-import { callbackBodies } from './sourceTree.js';
+import { callbackBodies, readSource, walkSourceFiles } from './sourceTree.js';
 
 // Monaco is ~86% of Markpad's startup JavaScript (measured: a 4.4 MB chunk out
 // of 4.7 MB on first paint, ~360ms of parse+eval, paid once per window because
@@ -37,8 +37,15 @@ const STATIC_IMPORT = /(?:^|[\s;}])(?:import|export)\s+(?!type\s)(?:[^'"();]*?\s
 /** `import type ... from 'x'` / `export type ... from 'x'` — erased at compile time. */
 const TYPE_IMPORT = /\b(?:import|export)\s+type\s[^'"();]*?from\s*['"][^'"]+['"]/g;
 
-function readSource(file: string): string {
-	const raw = readFileSync(file, 'utf8');
+/**
+ * The part of `file` that can carry an import, read through `readSource`.
+ *
+ * A filter on top of the shared reader rather than a reader of its own — it was
+ * spelled `readSource` here first, with its own `readFileSync` inside, which is
+ * how this file ended up with a private copy of the line-ending decision.
+ */
+function importableSource(file: string): string {
+	const raw = readSource(file);
 	if (!file.endsWith('.svelte')) return raw;
 	// Only the <script> blocks can import; the markup and <style> cannot.
 	return [...raw.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join('\n');
@@ -90,7 +97,7 @@ function walkStaticGraph(entry: string): Map<string, string[]> {
 		const file = queue.pop()!;
 		if (reached.has(file)) continue;
 
-		const specifiers = staticSpecifiers(readSource(file));
+		const specifiers = staticSpecifiers(importableSource(file));
 		reached.set(file, specifiers);
 
 		for (const specifier of specifiers) {
@@ -166,7 +173,7 @@ test('Monaco is not reachable by static import from the app entry', () => {
 });
 
 test('Editor.svelte loads Monaco with a dynamic import', () => {
-	const editor = readFileSync('src/lib/components/Editor.svelte', 'utf8');
+	const editor = readSource('src/lib/components/Editor.svelte');
 
 	assert.match(
 		editor,
@@ -190,7 +197,7 @@ test('every effect that drives the editor waits for editorReady', () => {
 	// `editor` is a plain `let`, assigned after an await. An effect gated on it
 	// alone runs once against nothing and is never re-triggered, which silently
 	// drops scroll sync, the zoom-aware font size, the theme and Vim mode.
-	const editor = readFileSync('src/lib/components/Editor.svelte', 'utf8');
+	const editor = readSource('src/lib/components/Editor.svelte');
 
 	// The bodies come from the parsed component, not from
 	// `/\$effect\(\(\) => \{([\s\S]*?)\n\t\}\);/`. That pattern needed a
@@ -224,22 +231,14 @@ test('no source file outside Editor.svelte reintroduces a static Monaco import',
 	// only pulled in through a dynamic import elsewhere): grep the whole tree.
 	const offenders: string[] = [];
 
-	const visit = (dir: string) => {
-		for (const entry of readdirSync(dir, { withFileTypes: true })) {
-			const path = `${dir}/${entry.name}`;
-			if (entry.isDirectory()) {
-				visit(path);
-			} else if (/\.(svelte|ts|js)$/.test(entry.name)) {
-				for (const specifier of staticSpecifiers(readSource(path))) {
-					if (specifier.endsWith('?worker')) continue;
-					if (FORBIDDEN.some((pkg) => specifier === pkg || specifier.startsWith(`${pkg}/`))) {
-						offenders.push(`${path} -> ${specifier}`);
-					}
-				}
+	for (const path of walkSourceFiles('src')) {
+		for (const specifier of staticSpecifiers(importableSource(path))) {
+			if (specifier.endsWith('?worker')) continue;
+			if (FORBIDDEN.some((pkg) => specifier === pkg || specifier.startsWith(`${pkg}/`))) {
+				offenders.push(`${path} -> ${specifier}`);
 			}
 		}
-	};
+	}
 
-	visit('src');
 	assert.deepEqual(offenders, []);
 });
