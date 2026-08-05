@@ -2589,32 +2589,8 @@ fn copy_file_to_img_blocking(
 }
 
 #[tauri::command]
-fn delete_file(path: String) -> Result<(), String> {
-    let p = Path::new(&path);
-    if p.exists() {
-        fs::remove_file(p).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
 fn copy_file(src: String, dest: String) -> Result<(), String> {
     fs::copy(src, dest).map(|_| ()).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn cleanup_empty_img_dir(parent_dir: String, image_directory: String) -> Result<(), String> {
-    let img_dir = Path::new(&parent_dir).join(&image_directory);
-    if img_dir.exists() && img_dir.is_dir() {
-        if fs::read_dir(&img_dir)
-            .map_err(|e| e.to_string())?
-            .next()
-            .is_none()
-        {
-            fs::remove_dir(img_dir).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
 }
 
 #[tauri::command]
@@ -2856,9 +2832,7 @@ pub fn run() {
             delete_vscode_theme,
             save_image,
             copy_file_to_img,
-            delete_file,
             copy_file,
-            cleanup_empty_img_dir,
             list_directory_contents,
             tab_transfer::stage_detached_tab,
             tab_transfer::claim_detached_tab,

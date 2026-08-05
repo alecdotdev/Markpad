@@ -3,7 +3,6 @@
 	import { tabManager } from "../stores/tabs.svelte.js";
 	import { settings } from "../stores/settings.svelte.js";
 	import { t, type LanguageCode } from '../utils/i18n.js';
-	import { managedImageFromCopy, type ManagedImage } from '../utils/managedImages.js';
 	import { MARKDOWN_LANGUAGE_ID, shouldLinkifyPastedUrl } from '../utils/pasteContext.js';
 	import { toggleLineMarker, type LineMarkerToolId } from '../utils/editorToolbar.js';
 	import {
@@ -81,7 +80,6 @@
 	let monaco: typeof Monaco;
 	let editor: Monaco.editor.IStandaloneCodeEditor;
 	let isApplyingExternalScroll = false;
-	const managedImages: ManagedImage[] = $state([]);
 
 	let cursorPosition = $state<Monaco.Position | null>(null);
 	let selectionCount = $state(0);
@@ -380,22 +378,6 @@
 
 		container.addEventListener("wheel", wheelListener, { capture: true });
 
-		const contentChangeListener = editor.onDidChangeModelContent((e) => {
-			if (e.isUndoing && managedImages.length > 0) {
-				const currentContent = editor.getValue();
-				const last = managedImages[managedImages.length - 1];
-				if (!currentContent.includes(last.embed)) {
-					managedImages.pop();
-						const imgPath = `${last.parentDir}/${last.imageDirectory}/${last.filename}`;
-						invoke("delete_file", { path: imgPath })
-							.then(() => {
-								invoke("cleanup_empty_img_dir", { parentDir: last.parentDir, imageDirectory: last.imageDirectory });
-							})
-							.catch(console.error);
-				}
-			}
-		});
-
 		const completionProvider = monaco.languages.registerCompletionItemProvider(
 			"markdown",
 			{
@@ -511,7 +493,6 @@
 								},
 							]);
 
-							managedImages.push(managedImageFromCopy({ embed, parentDir, imageDirectory: imgDirName, relativePath: relPath }));
 							return;
 						}
 					}
@@ -620,7 +601,6 @@
 			window.open = originalOpen;
 			mediaQuery.removeEventListener("change", updateTheme);
 			container.removeEventListener("wheel", wheelListener, { capture: true });
-			contentChangeListener.dispose();
 			completionProvider.dispose();
 
 			if (editor && currentTabId) {
@@ -1374,8 +1354,6 @@
 					),
 				],
 			);
-
-			managedImages.push(managedImageFromCopy({ embed, parentDir, imageDirectory: imgDirName, relativePath: relPath }));
 		} catch (err) {
 			console.error("Failed to copy dropped file:", err);
 		}
