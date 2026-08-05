@@ -160,6 +160,44 @@
 	let appVersion = $state<string>('');
 	let osType = $state<OSType>('unknown');
 	let defaultFonts = $derived(DEFAULT_FONTS[osType] || DEFAULT_FONTS.unknown);
+
+	/**
+	 * Which rows still hold their shipped default, decided once.
+	 *
+	 * The rows used to print `· 12–48 · Default 16` after every stepper. That
+	 * text was the only place a default was discoverable, and it was also what
+	 * pushed the controls out of alignment — the trailing string is as wide as
+	 * the numbers in it, so no two rows ended at the same place. Dropping it
+	 * without replacement would hide the defaults entirely, so the marker below
+	 * takes over the job: a row that differs from its default gets a gutter bar,
+	 * the way VS Code marks a modified setting.
+	 *
+	 * The two "Reset … settings" buttons ask the same question for a whole pane,
+	 * and they used to answer it with their own inline comparison chain. That is
+	 * one behaviour with two implementations, so the buttons now read this
+	 * record instead: a row can never disagree with the button that resets it.
+	 */
+	let modified = $derived({
+		editorFont: settings.editorFont !== defaultFonts.editorFont,
+		editorFontSize: settings.editorFontSize !== EDITOR_FONT_SIZE_RANGE.default,
+		editorMaxWidth: settings.editorMaxWidth !== EDITOR_MAX_WIDTH_RANGE.default,
+		previewMaxWidth: settings.previewMaxWidth !== DEFAULT_PREVIEW_MAX_WIDTH,
+		previewFont: settings.previewFont !== defaultFonts.previewFont,
+		previewFontSize: settings.previewFontSize !== PREVIEW_FONT_SIZE_RANGE.default,
+		codeFont: settings.codeFont !== defaultFonts.codeFont,
+		codeFontSize: settings.codeFontSize !== CODE_FONT_SIZE_RANGE.default,
+	});
+	let editorSettingsModified = $derived(
+		modified.editorFont || modified.editorFontSize || modified.editorMaxWidth,
+	);
+	let previewSettingsModified = $derived(
+		modified.previewMaxWidth ||
+			modified.previewFont ||
+			modified.previewFontSize ||
+			modified.codeFont ||
+			modified.codeFontSize,
+	);
+
 	let savedVscodeThemes = $state<string[]>([]);
 	let themeImportUrl = $state('');
 	let importingTheme = $state(false);
@@ -170,7 +208,8 @@
 	let titlebarToolbarDragOverId = $state<string | null>(null);
 	let titlebarToolbarDragState = $state<ToolbarSettingsDragState | null>(null);
 	let settingsModalFrame = $state<SettingsModalFrame>({
-		width: 560,
+		// Placeholder until the modal is measured; matches `.settings-modal`.
+		width: 600,
 		height: 420,
 		left: null,
 		top: null,
@@ -823,13 +862,13 @@
 								<h2>{t('settings.editorSettings', settings.language)}</h2>
 								<button
 									class="reset-text-btn"
-									class:disabled={settings.editorFont === defaultFonts.editorFont && settings.editorFontSize === EDITOR_FONT_SIZE_RANGE.default && settings.editorMaxWidth === EDITOR_MAX_WIDTH_RANGE.default}
+									class:disabled={!editorSettingsModified}
 									onclick={() => { settings.resetEditorFont(); settings.resetEditorMaxWidth(); }}>
 									{t('settings.resetEditorSettings', settings.language)}
 								</button>
 							</div>
 
-							<div class="setting-item">
+							<div class="setting-item" class:modified={modified.editorFont}>
 								<label for="editor-font">{t('settings.font', settings.language)}</label>
 								<div class="select-wrapper">
 									<select id="editor-font" bind:value={settings.editorFont}>
@@ -850,7 +889,7 @@
 								</div>
 							</div>
 
-							<div class="setting-item">
+							<div class="setting-item" class:modified={modified.editorFontSize}>
 								<label for="editor-font-size">{t('settings.fontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
@@ -876,11 +915,11 @@
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 									</div>
-									<span class="slider-value">px · {EDITOR_FONT_SIZE_RANGE.min}–{EDITOR_FONT_SIZE_RANGE.max} · {t('settings.default', settings.language)} {EDITOR_FONT_SIZE_RANGE.default}</span>
+									<span class="unit-label">px</span>
 								</div>
 							</div>
 
-							<div class="setting-item">
+							<div class="setting-item" class:modified={modified.editorMaxWidth}>
 								<label for="editor-max-width">{t('settings.wrapColumn', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
@@ -900,14 +939,13 @@
 											onblur={(e) => commitNumberInput(e, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)}
 											onkeydown={(e) => handleNumberKeydown(e, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)}
 											class="number-input"
-											style="width: 50px"
 										/>
 										<button class="spin-btn plus" onclick={() => stepSetting(settings.editorMaxWidth, EDITOR_MAX_WIDTH_RANGE.step, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 									</div>
-									<span class="slider-value">chars · {EDITOR_MAX_WIDTH_RANGE.min}–{EDITOR_MAX_WIDTH_RANGE.max} · {t('settings.default', settings.language)} {EDITOR_MAX_WIDTH_RANGE.default}</span>
+									<span class="unit-label">chars</span>
 								</div>
 							</div>
 
@@ -997,7 +1035,6 @@
 								bind:value={settings.imageDirectory}
 								placeholder="img"
 							/>
-							<span class="slider-value" style="margin-left: 8px;">{t('settings.default', settings.language)}: img</span>
 						</div>
 
 						{#if settings.osType === 'macos'}
@@ -1007,7 +1044,7 @@
 									<input id="macos-image-scaling" type="checkbox" checked={settings.macosImageScaling} onchange={() => settings.toggleMacosImageScaling()} />
 									<span class="toggle-slider"></span>
 								</label>
-								<span class="slider-value" style="margin-left: 8px;">{t('settings.reduceSizeBy50', settings.language)}</span>
+								<span class="slider-value">{t('settings.reduceSizeBy50', settings.language)}</span>
 							</div>
 						{/if}
 					</div>
@@ -1017,7 +1054,7 @@
 								<h2>{t('settings.previewSettings', settings.language)}</h2>
 								<button
 									class="reset-text-btn"
-									class:disabled={settings.previewFont === defaultFonts.previewFont && settings.previewFontSize === PREVIEW_FONT_SIZE_RANGE.default && settings.codeFont === defaultFonts.codeFont && settings.codeFontSize === CODE_FONT_SIZE_RANGE.default && settings.previewMaxWidth === DEFAULT_PREVIEW_MAX_WIDTH}
+									class:disabled={!previewSettingsModified}
 									onclick={() => {
 										settings.resetPreviewFont();
 										settings.resetPreviewMaxWidth();
@@ -1026,7 +1063,7 @@
 								</button>
 							</div>
 
-							<div class="setting-item">
+							<div class="setting-item" class:modified={modified.previewMaxWidth}>
 								<label for="preview-max-width">{t('settings.previewMaxWidth', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
@@ -1043,19 +1080,18 @@
 											bind:value={settings.previewMaxWidth}
 											onchange={() => updatePreviewMaxWidth(settings.previewMaxWidth)}
 											class="number-input"
-											style="width: 62px"
 										/>
 										<button class="spin-btn plus" onclick={() => updatePreviewMaxWidth(settings.previewMaxWidth + 40)} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 									</div>
-									<span class="slider-value">px · {MIN_PREVIEW_MAX_WIDTH}–{MAX_PREVIEW_MAX_WIDTH} · {t('settings.default', settings.language)} {DEFAULT_PREVIEW_MAX_WIDTH}</span>
+									<span class="unit-label">px</span>
 								</div>
 							</div>
 
-							<div class="setting-item">
-								<label for="preview-font">{t('settings.font', settings.language)}</label>
+							<div class="setting-item" class:modified={modified.previewFont}>
+								<label for="preview-font">{t('settings.previewBodyFont', settings.language)}</label>
 								<div class="select-wrapper">
 									<select id="preview-font" bind:value={settings.previewFont}>
 										{#each systemFonts as font}
@@ -1075,8 +1111,8 @@
 								</div>
 							</div>
 
-							<div class="setting-item">
-								<label for="preview-font-size">{t('settings.fontSize', settings.language)}</label>
+							<div class="setting-item" class:modified={modified.previewFontSize}>
+								<label for="preview-font-size">{t('settings.previewBodyFontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
 										<button class="spin-btn minus" onclick={() => stepSetting(settings.previewFontSize, -PREVIEW_FONT_SIZE_RANGE.step, PREVIEW_FONT_SIZE_RANGE, setPreviewFontSize)} aria-label={t('common.decrease', settings.language)}>
@@ -1101,12 +1137,12 @@
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 									</div>
-									<span class="slider-value">px · {PREVIEW_FONT_SIZE_RANGE.min}–{PREVIEW_FONT_SIZE_RANGE.max} · {t('settings.default', settings.language)} {PREVIEW_FONT_SIZE_RANGE.default}</span>
+									<span class="unit-label">px</span>
 								</div>
 							</div>
 
-							<div class="setting-item">
-								<label for="code-font">{t('settings.font', settings.language)}</label>
+							<div class="setting-item" class:modified={modified.codeFont}>
+								<label for="code-font">{t('settings.previewCodeFont', settings.language)}</label>
 								<div class="select-wrapper">
 									<select id="code-font" bind:value={settings.codeFont}>
 										{#each systemFonts as font}
@@ -1126,8 +1162,8 @@
 								</div>
 							</div>
 
-							<div class="setting-item">
-								<label for="code-font-size">{t('settings.fontSize', settings.language)}</label>
+							<div class="setting-item" class:modified={modified.codeFontSize}>
+								<label for="code-font-size">{t('settings.previewCodeFontSize', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
 										<button class="spin-btn minus" onclick={() => stepSetting(settings.codeFontSize, -CODE_FONT_SIZE_RANGE.step, CODE_FONT_SIZE_RANGE, setCodeFontSize)} aria-label={t('common.decrease', settings.language)}>
@@ -1152,7 +1188,7 @@
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
 									</div>
-									<span class="slider-value">px · {CODE_FONT_SIZE_RANGE.min}–{CODE_FONT_SIZE_RANGE.max} · {t('settings.default', settings.language)} {CODE_FONT_SIZE_RANGE.default}</span>
+									<span class="unit-label">px</span>
 								</div>
 							</div>
 						</div>
@@ -1554,7 +1590,14 @@
 		border: 1px solid var(--color-border-default);
 		border-radius: 6px;
 		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
-		width: min(560px, 90vw);
+		/*
+		 * 600px, not the 560px this shipped at: the label column plus the
+		 * widest font <select> ("Helvetica Neue (Default)", 188px) need 372px
+		 * of panel, and 560px only left 363px — the dropdown lost the end of
+		 * the font name to an ellipsis. Keep in step with the placeholder
+		 * `settingsModalFrame` starts from.
+		 */
+		width: min(600px, 90vw);
 		max-width: 90vw;
 		min-width: min(520px, 90vw);
 		height: 420px;
@@ -1814,6 +1857,28 @@
 		padding: 20px;
 		overflow-y: auto;
 		min-height: 0;
+
+		/*
+		 * The shared label column.
+		 *
+		 * Every row used to be `justify-content: space-between`, so a control's
+		 * left edge was wherever its own label happened to stop: the editor
+		 * pane's five rows started their controls at five different offsets,
+		 * and the longest label pushed its control so far left that the two
+		 * all but touched — the preview pane's width row ran out of room
+		 * entirely and wrapped onto a second line.
+		 *
+		 * 172px clears the widest label any stepper or <select> row can produce
+		 * in the 26 shipped locales — measured, not guessed: French "Colonne de
+		 * retour à la ligne" is the longest at 167px and Greek "Μέγεθος
+		 * γραμματοσειράς" second at 158px — so those controls line up in every
+		 * language rather than only in English. Longer labels do exist, but only
+		 * on toggle rows in Appearance and Files (German "Zustand beim erneuten
+		 * Öffnen wiederherstellen", 285px); `min-width` rather than a fixed
+		 * `width` lets those keep growing instead of wrapping, which is why the
+		 * column is a floor and not a track.
+		 */
+		--settings-label-column: 172px;
 	}
 
 	.settings-group h2 {
@@ -1827,6 +1892,9 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+		/* "Paramètres de l'éditeur" ran straight into "Réinitialiser les
+		   paramètres de l'éditeur" with nothing between them. */
+		gap: 12px;
 		margin-bottom: 16px;
 	}
 
@@ -1860,9 +1928,10 @@
 	.setting-item {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		column-gap: 12px;
 		padding: 10px 0;
 		border-bottom: 1px solid var(--color-border-muted);
+		position: relative;
 	}
 
 	.setting-item label:first-child {
@@ -1871,6 +1940,29 @@
 		display: flex;
 		align-items: center;
 		height: 100%;
+		/* The floor described on .settings-panel; see --settings-label-column. */
+		flex: 0 1 auto;
+		min-width: var(--settings-label-column);
+	}
+
+	/*
+	 * A row whose value is no longer the shipped default.
+	 *
+	 * This replaces the `· 12–48 · Default 16` text that used to trail every
+	 * stepper: the default is not printed any more (the pane's "Reset …
+	 * settings" button restores it), so the bar is what tells you a row has
+	 * been touched — the same signal VS Code puts in its settings gutter. It
+	 * sits in the panel's 20px padding so it cannot shift the row's contents.
+	 */
+	.setting-item.modified::before {
+		content: '';
+		position: absolute;
+		left: -10px;
+		top: 10px;
+		bottom: 10px;
+		width: 2px;
+		border-radius: 1px;
+		background: var(--color-accent-fg);
 	}
 
 	.toolbar-settings {
@@ -2057,6 +2149,13 @@
 		position: relative;
 		display: inline-flex;
 		align-items: center;
+		/*
+		 * One width for every dropdown in the modal. Left to itself a <select>
+		 * is as wide as its widest option, so "Helvetica Neue (Default)" and
+		 * "Window" produced two different boxes two rows apart.
+		 */
+		flex: 0 1 220px;
+		min-width: 0;
 	}
 
 	.select-arrow {
@@ -2073,7 +2172,8 @@
 		background-color: var(--color-canvas-default);
 		color: var(--color-fg-default);
 		font-size: 13px;
-		min-width: 160px;
+		width: 100%;
+		min-width: 140px;
 		cursor: pointer;
 		appearance: none;
 		-webkit-appearance: none;
@@ -2094,6 +2194,7 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
+		flex: 0 0 auto;
 	}
 
 	.number-input-wrapper {
@@ -2135,9 +2236,15 @@
 		height: 28px;
 	}
 
+	/*
+	 * One width for every stepper, wide enough for the four digits of
+	 * MAX_PREVIEW_MAX_WIDTH. The preview-width and wrap-column inputs used to
+	 * override this inline (62px and 50px), which gave the three steppers three
+	 * different widths and therefore three different right edges.
+	 */
 	.number-input-wrapper.horizontal .number-input {
 		text-align: center;
-		width: 36px;
+		width: 44px;
 		padding: 4px 0;
 		height: 100%;
 		border-radius: 0;
@@ -2212,6 +2319,23 @@
 	.slider-value {
 		font-size: 12px;
 		color: var(--color-fg-muted);
+	}
+
+	/*
+	 * The unit a stepper counts in, in a slot of its own.
+	 *
+	 * It used to be the first word of a sentence that ran on past the control
+	 * — `chars · 20–500 · Default 80` — and because that sentence sat in the
+	 * flow after the stepper, a five-letter unit pushed its stepper further
+	 * left than a two-letter one. Reserving the widest unit's width here means
+	 * the word can change (or be translated) without any stepper moving.
+	 */
+	.unit-label {
+		flex: 0 0 auto;
+		min-width: 36px;
+		font-size: 12px;
+		color: var(--color-fg-muted);
+		white-space: nowrap;
 	}
 
 	.toggle {
