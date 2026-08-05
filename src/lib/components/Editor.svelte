@@ -5,6 +5,7 @@
 	import { t, type LanguageCode } from '../utils/i18n.js';
 	import { managedImageFromCopy, type ManagedImage } from '../utils/managedImages.js';
 	import { MARKDOWN_LANGUAGE_ID, shouldLinkifyPastedUrl } from '../utils/pasteContext.js';
+	import { toggleLineMarker, type LineMarkerToolId } from '../utils/editorToolbar.js';
 	import {
 		getScrollSyncPositionFromPixels,
 		getScrollTopForSyncPosition,
@@ -724,43 +725,11 @@
 		]);
 	};
 
-	const toggleLinePrefix = (source: string, prefix: string, pattern: RegExp) => {
-		transformSelectedLines(source, (lines) => {
-			const contentLines = lines.filter((line) => line.trim().length > 0);
-			const shouldRemove = contentLines.length > 0 && contentLines.every((line) => pattern.test(line));
-			return lines.map((line) => {
-				if (!line.trim()) return line;
-				if (shouldRemove) return line.replace(pattern, "");
-				return `${prefix}${line}`;
-			});
-		});
-	};
-
-	const toggleHeading = (level: number) => {
-		const heading = "#".repeat(level);
-		transformSelectedLines(`fmt-heading-${level}`, (lines) => {
-			const pattern = new RegExp(`^${heading}\\s+`);
-			const contentLines = lines.filter((line) => line.trim().length > 0);
-			const shouldRemove = contentLines.length > 0 && contentLines.every((line) => pattern.test(line));
-			return lines.map((line) => {
-				if (!line.trim()) return line;
-				const withoutHeading = line.replace(/^#{1,6}\s+/, "");
-				return shouldRemove ? withoutHeading : `${heading} ${withoutHeading}`;
-			});
-		});
-	};
-
-	const toggleNumberedList = () => {
-		transformSelectedLines("fmt-numbered-list", (lines) => {
-			const contentLines = lines.filter((line) => line.trim().length > 0);
-			const shouldRemove = contentLines.length > 0 && contentLines.every((line) => /^\d+\.\s+/.test(line));
-			let itemIndex = 1;
-			return lines.map((line) => {
-				if (!line.trim()) return line;
-				if (shouldRemove) return line.replace(/^\d+\.\s+/, "");
-				return `${itemIndex++}. ${line.replace(/^(?:[-*+]|\d+\.)\s+/, "")}`;
-			});
-		});
+	// Which marker each of these tools owns, and what it replaces, lives in
+	// `utils/editorToolbar.ts` — one table, keyed by the same ids the toolbar
+	// renders, so a list toggle cannot forget to displace a competing marker.
+	const toggleLineMarkerTool = (id: LineMarkerToolId) => {
+		transformSelectedLines(id, (lines) => toggleLineMarker(id, lines));
 	};
 
 	const wrapAsCodeBlock = () => {
@@ -991,43 +960,43 @@
 			editor.addAction({
 				id: "fmt-quote",
 				label: t('menu.quote', lang),
-				run: () => toggleLinePrefix("fmt-quote", "> ", /^>\s+/),
+				run: () => toggleLineMarkerTool("fmt-quote"),
 			}),
 
 			editor.addAction({
 				id: "fmt-heading-1",
 				label: t('menu.heading1', lang),
-				run: () => toggleHeading(1),
+				run: () => toggleLineMarkerTool("fmt-heading-1"),
 			}),
 
 			editor.addAction({
 				id: "fmt-heading-2",
 				label: t('menu.heading2', lang),
-				run: () => toggleHeading(2),
+				run: () => toggleLineMarkerTool("fmt-heading-2"),
 			}),
 
 			editor.addAction({
 				id: "fmt-heading-3",
 				label: t('menu.heading3', lang),
-				run: () => toggleHeading(3),
+				run: () => toggleLineMarkerTool("fmt-heading-3"),
 			}),
 
 			editor.addAction({
 				id: "fmt-bullet-list",
 				label: t('menu.bulletList', lang),
-				run: () => toggleLinePrefix("fmt-bullet-list", "- ", /^[-*+]\s+/),
+				run: () => toggleLineMarkerTool("fmt-bullet-list"),
 			}),
 
 			editor.addAction({
 				id: "fmt-numbered-list",
 				label: t('menu.numberedList', lang),
-				run: () => toggleNumberedList(),
+				run: () => toggleLineMarkerTool("fmt-numbered-list"),
 			}),
 
 			editor.addAction({
 				id: "fmt-checklist",
 				label: t('menu.checklist', lang),
-				run: () => toggleLinePrefix("fmt-checklist", "- [ ] ", /^[-*+]\s+\[[ xX]\]\s+/),
+				run: () => toggleLineMarkerTool("fmt-checklist"),
 			}),
 
 			editor.addAction({

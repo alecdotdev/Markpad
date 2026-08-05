@@ -3,12 +3,15 @@ import { test } from 'node:test';
 
 import {
 	DEFAULT_EDITOR_TOOLBAR_ORDER,
+	LINE_MARKER_TOOL_IDS,
 	getEditorToolbarAdjacentMove,
 	getEditorToolbarReorderMove,
 	getEditorToolbarTools,
 	getVisibleEditorToolbarTools,
 	normalizeEditorToolbarHidden,
 	normalizeEditorToolbarOrder,
+	toggleLineMarker,
+	type LineMarkerToolId,
 } from '../src/lib/utils/editorToolbar.js';
 
 /**
@@ -100,4 +103,117 @@ test('toolbar reorder helpers resolve drag and keyboard moves', () => {
 	assert.deepEqual(getEditorToolbarAdjacentMove(order, 'fmt-italic', 'down'), { fromIndex: 1, toIndex: 2 });
 	assert.equal(getEditorToolbarReorderMove(order, 'fmt-bold', 'fmt-bold'), null);
 	assert.equal(getEditorToolbarAdjacentMove(order, 'fmt-bold', 'up'), null);
+});
+
+test('every tool with a line marker is a tool the toolbar renders', () => {
+	assert.deepEqual(LINE_MARKER_TOOL_IDS, [
+		'fmt-quote',
+		'fmt-bullet-list',
+		'fmt-numbered-list',
+		'fmt-checklist',
+		'fmt-heading-1',
+		'fmt-heading-2',
+		'fmt-heading-3',
+	]);
+
+	for (const id of LINE_MARKER_TOOL_IDS) {
+		assert.ok(
+			DEFAULT_EDITOR_TOOLBAR_ORDER.includes(id),
+			`${id} has a line marker but is not a toolbar tool`,
+		);
+	}
+});
+
+/**
+ * One row per (tool, starting line) pair, written as the exact text the
+ * transform has to produce. Issue #451 was a *string* — bullet on `1. foo`
+ * yielded `- 1. foo` — so nothing short of running the transform and comparing
+ * output can fail on it; an assertion about how `Editor.svelte` reads would
+ * have stayed green through the whole bug.
+ *
+ * The three list markers compete for one slot, so each of them replaces the
+ * other two (and the task box travels with the checklist marker, or the line
+ * keeps an orphan `[ ]` no tool recognises). Quote is deliberately not in that
+ * set: `> - foo` is a quoted list item, which is what a user asking for a quote
+ * around a list item wants.
+ */
+const LINE_MARKER_MATRIX: Array<[LineMarkerToolId, string, string]> = [
+	// Bullet list.
+	['fmt-bullet-list', 'foo', '- foo'],
+	['fmt-bullet-list', '- foo', 'foo'],
+	['fmt-bullet-list', '1. foo', '- foo'],
+	['fmt-bullet-list', '- [ ] foo', '- foo'],
+	['fmt-bullet-list', '- [x] foo', '- foo'],
+	['fmt-bullet-list', '> foo', '- > foo'],
+
+	// Numbered list.
+	['fmt-numbered-list', 'foo', '1. foo'],
+	['fmt-numbered-list', '- foo', '1. foo'],
+	['fmt-numbered-list', '1. foo', 'foo'],
+	['fmt-numbered-list', '- [ ] foo', '1. foo'],
+	['fmt-numbered-list', '1. [ ] foo', '1. foo'],
+	['fmt-numbered-list', '> foo', '1. > foo'],
+
+	// Checklist.
+	['fmt-checklist', 'foo', '- [ ] foo'],
+	['fmt-checklist', '- foo', '- [ ] foo'],
+	['fmt-checklist', '1. foo', '- [ ] foo'],
+	['fmt-checklist', '- [ ] foo', 'foo'],
+	['fmt-checklist', '- [x] foo', 'foo'],
+	['fmt-checklist', '> foo', '- [ ] > foo'],
+
+	// Quote wraps, it does not displace: a quoted list item is the point.
+	['fmt-quote', 'foo', '> foo'],
+	['fmt-quote', '- foo', '> - foo'],
+	['fmt-quote', '1. foo', '> 1. foo'],
+	['fmt-quote', '- [ ] foo', '> - [ ] foo'],
+	['fmt-quote', '> foo', 'foo'],
+
+	// Headings replace headings, and nothing else — `# - foo` is a heading whose
+	// text begins with a dash, and un-toggling gives the list item back.
+	['fmt-heading-2', 'foo', '## foo'],
+	['fmt-heading-2', '# foo', '## foo'],
+	['fmt-heading-2', '## foo', 'foo'],
+	['fmt-heading-1', '### foo', '# foo'],
+	['fmt-heading-1', '- foo', '# - foo'],
+];
+
+for (const [id, from, to] of LINE_MARKER_MATRIX) {
+	test(`${id} turns ${JSON.stringify(from)} into ${JSON.stringify(to)}`, () => {
+		assert.deepEqual(toggleLineMarker(id, [from]), [to]);
+	});
+}
+
+test('a selection that mixes marker types converges on the toggled one', () => {
+	assert.deepEqual(
+		toggleLineMarker('fmt-bullet-list', ['- alpha', '1. beta', '- [ ] gamma', 'delta']),
+		['- alpha', '- beta', '- gamma', '- delta'],
+	);
+
+	// Removal needs *every* content line to already carry this tool's marker, so
+	// a half-marked selection is completed rather than stripped.
+	assert.deepEqual(
+		toggleLineMarker('fmt-checklist', ['- [ ] alpha', '- beta']),
+		['- [ ] alpha', '- [ ] beta'],
+	);
+
+	assert.deepEqual(toggleLineMarker('fmt-bullet-list', ['- alpha', '- beta']), ['alpha', 'beta']);
+});
+
+test('numbering counts content lines and leaves blank lines alone', () => {
+	assert.deepEqual(
+		toggleLineMarker('fmt-numbered-list', ['- alpha', '', 'beta', '1. gamma']),
+		['1. alpha', '', '2. beta', '3. gamma'],
+	);
+
+	assert.deepEqual(toggleLineMarker('fmt-bullet-list', ['', '   ']), ['', '   ']);
+});
+
+test('quote nests around an already quoted line instead of replacing it', () => {
+	assert.deepEqual(toggleLineMarker('fmt-quote', ['> alpha', 'beta']), ['> > alpha', '> beta']);
+	assert.deepEqual(toggleLineMarker('fmt-quote', ['> alpha', '> beta']), ['alpha', 'beta']);
+});
+
+test('a bracketed link at the head of a list item is not read as a task box', () => {
+	assert.deepEqual(toggleLineMarker('fmt-numbered-list', ['- [label](url)']), ['1. [label](url)']);
 });
