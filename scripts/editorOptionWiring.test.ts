@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import {
+	EditorOptions,
+	inUntrustedWorkspace,
+	type UnicodeHighlightOptions,
+} from 'monaco-editor/esm/vs/editor/common/config/editorOptions.js';
+import {
+	UnicodeTextModelHighlighter,
+	type UnicodeHighlightResult,
+} from 'monaco-editor/esm/vs/editor/common/services/unicodeTextModelHighlighter.js';
+import ts from 'typescript';
+
 import { readSource, sliceBetween } from './sourceTree.js';
 
 // Editor.svelte translates the settings store into Monaco options and
@@ -161,4 +172,166 @@ test('Show Whitespace renders every whitespace run, not just trailing', () => {
 		2,
 		'creation and updateOptions agree on "all"',
 	);
+});
+
+// ----------------------------------------------------------------- executed
+//
+// Everything above matches Editor.svelte as text, because a keybinding and a
+// settings-driven enum cannot be exercised without a DOM. `unicodeHighlight`
+// can do better, and the weak form would be particularly bad here: asserting
+// that the string "ambiguousCharacters" occurs in the file says nothing about
+// which characters Monaco ends up outlining, which is the entire contract.
+//
+// So the option literal is lifted out of the real `monaco.editor.create` call,
+// evaluated, and pushed through the same two pieces of Monaco the running
+// editor uses — `EditorOptions.unicodeHighlight.applyUpdate` to merge it over
+// the shipped defaults, and `UnicodeTextModelHighlighter` to decide what gets a
+// box. A regression has to survive Monaco's own code to reach the assertions.
+
+/** The options object Editor.svelte hands to `monaco.editor.create`, evaluated. */
+function createdEditorOptions(): Record<string, unknown> {
+	const script = sliceBetween(editor, '<script lang="ts">', '</script>');
+	const source = ts.createSourceFile('Editor.ts', script, ts.ScriptTarget.Latest, true);
+
+	const literals: ts.Expression[] = [];
+	const visit = (node: ts.Node): void => {
+		if (ts.isCallExpression(node) && node.expression.getText(source) === 'monaco.editor.create') {
+			assert.equal(node.arguments.length, 2, 'monaco.editor.create(container, options)');
+			literals.push(node.arguments[1]);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(source);
+
+	// Also the check that this file is looking at the only editor in the app: a
+	// second `create` call would need the same option and would not be covered
+	// by anything below.
+	assert.equal(literals.length, 1, 'exactly one Monaco editor is constructed in Editor.svelte');
+
+	const js = ts.transpileModule(`(${literals[0].getText(source)})`, {
+		compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+	}).outputText;
+
+	// The literal closes over four locals. None of them can reach
+	// `unicodeHighlight`, which is a constant, so they are stubbed rather than
+	// reconstructed — the settings proxy answers undefined for every key, which
+	// is enough to let the object build.
+	return new Function('settings', 'value', 'language', 'getTheme', `return ${js};`)(
+		new Proxy({}, { get: () => undefined }),
+		'',
+		'markdown',
+		() => 'app-theme-dark',
+	) as Record<string, unknown>;
+}
+
+/**
+ * Monaco's shipped defaults with the component's option merged over them.
+ *
+ * `?? {}` models the real absence case rather than guarding: a component that
+ * passes no `unicodeHighlight` gets Monaco's defaults, which is the state this
+ * whole section exists to move away from. Without it, deleting the option from
+ * Editor.svelte fails the tests below with a TypeError raised inside Monaco
+ * instead of the assertion naming the characters that came back.
+ */
+function effectiveUnicodeHighlight(passed: unknown): UnicodeHighlightOptions {
+	const option = EditorOptions.unicodeHighlight;
+	return option.applyUpdate(option.defaultValue, passed ?? {}).newValue;
+}
+
+/**
+ * What Monaco would outline in `lines`, given an effective option set.
+ *
+ * Mirrors `resolveOptions()` in unicodeHighlighter.ts, which is not exported.
+ * `trusted` is true because that is what standalone Monaco reports —
+ * `StandaloneWorkspaceTrustManagementService.isWorkspaceTrusted()` returns true
+ * unconditionally. That is why `nonBasicASCII`, whose default is the
+ * `inUntrustedWorkspace` sentinel, is already off and needs no setting in
+ * Editor.svelte: it resolves through `!trusted`.
+ */
+function outlined(lines: string[], effective: UnicodeHighlightOptions): UnicodeHighlightResult {
+	const trusted = true;
+	const through = (value: boolean | 'inUntrustedWorkspace') =>
+		value === inUntrustedWorkspace ? !trusted : value;
+	return UnicodeTextModelHighlighter.computeUnicodeHighlights(
+		{ getLineCount: () => lines.length, getLineContent: (n: number) => lines[n - 1] },
+		{
+			nonBasicASCII: through(effective.nonBasicASCII),
+			ambiguousCharacters: effective.ambiguousCharacters,
+			invisibleCharacters: effective.invisibleCharacters,
+			includeComments: through(effective.includeComments),
+			includeStrings: through(effective.includeStrings),
+			allowedCodePoints: Object.keys(effective.allowedCharacters).map((c) => c.codePointAt(0)),
+			// The real value is derived from the OS locale and Monaco's UI
+			// language. It is pinned here because it makes no difference: the
+			// fullwidth forms are confusable in every locale Monaco ships, zh-CN
+			// and ja-JP included, which is why the reporters saw boxes on
+			// CJK systems in the first place.
+			allowedLocales: ['en'],
+		},
+	);
+}
+
+// Prose a CJK author actually types. The boxes need a basic-ASCII character in
+// the same word as the fullwidth punctuation — `shouldHighlightNonBasicASCII`
+// suppresses the highlight when the surrounding word is entirely non-ASCII —
+// so a Latin technical term or a Markdown emphasis marker is what triggers it.
+const CJK_PROSE = [
+	'使用 Monaco，然后保存。',
+	'安装依赖（npm ci），再运行测试。',
+	'这是 Markdown，不是 HTML。',
+	'打开 Settings：Editor，字体大小。',
+	'**粗体**，*斜体*，`代码`。',
+	'标题（English Title）说明',
+	'你好，世界。（测试）！？',
+];
+
+test('the editor turns off ambiguous-character highlighting and nothing else', () => {
+	// Reports #186 and #94 are both Monaco outlining fullwidth punctuation.
+	// Narrowness is the assertion: `unicodeHighlight: false` or a third
+	// sub-option would also make the boxes go away, and would take the
+	// invisible-character warning with it.
+	const options = createdEditorOptions();
+	assert.deepEqual(
+		options.unicodeHighlight,
+		{ ambiguousCharacters: false },
+		'exactly one sub-option is overridden',
+	);
+});
+
+test('no box is drawn on fullwidth CJK punctuation', () => {
+	const effective = effectiveUnicodeHighlight(createdEditorOptions().unicodeHighlight);
+	const found = outlined(CJK_PROSE, effective);
+	assert.equal(
+		found.ranges.length,
+		0,
+		`nothing outlined in CJK prose, got ${JSON.stringify(
+			found.ranges.map((r) => CJK_PROSE[r.startLineNumber - 1].slice(r.startColumn - 1, r.endColumn - 1)),
+		)}`,
+	);
+	assert.equal(found.ambiguousCharacterCount, 0);
+});
+
+test('the fixtures still reproduce the bug once the option is taken away', () => {
+	// Without this the test above could pass because Monaco stopped treating
+	// the fullwidth forms as confusable — an upgrade would quietly leave it
+	// asserting nothing. It fails loudly instead, on the fixtures rather than
+	// on the fix.
+	const withDefaults = effectiveUnicodeHighlight({ ambiguousCharacters: true });
+	const found = outlined(CJK_PROSE, withDefaults);
+	assert.ok(
+		found.ambiguousCharacterCount >= 6,
+		`Monaco's defaults still box CJK punctuation, got ${found.ambiguousCharacterCount}`,
+	);
+});
+
+test('the invisible-character warning survives the fix', () => {
+	// A stray NBSP or zero-width space is a real hazard in Markdown — an NBSP
+	// after `-` stops a list from parsing — and unlike the punctuation it is
+	// never something the author typed on purpose. Turning the whole feature
+	// off would have taken it with it.
+	const effective = effectiveUnicodeHighlight(createdEditorOptions().unicodeHighlight);
+	assert.equal(effective.invisibleCharacters, true, 'left at the Monaco default');
+
+	const found = outlined(['a b', 'x​z'], effective);
+	assert.equal(found.invisibleCharacterCount, 2, 'NBSP and zero-width space are still flagged');
 });

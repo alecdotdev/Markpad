@@ -273,6 +273,27 @@
 			fontFamily: settings.editorFont,
 			wordBasedSuggestions: "off",
 			quickSuggestions: false,
+			// Monaco's Unicode highlighter is built for source code, where a
+			// character that looks like ASCII but is not is an attack vector. In
+			// prose it fires on the punctuation CJK authors type all day: `，`
+			// `！` `？` `（` `）` `；` `：` are all confusables of an ASCII
+			// counterpart, so Monaco outlines each one (#186, #94).
+			//
+			// It only fires when the confusable shares a word with basic ASCII —
+			// shouldHighlightNonBasicASCII() suppresses the box when the
+			// surrounding word is entirely non-ASCII — which is why pure CJK
+			// looks fine and `使用 Monaco，然后保存。` or `安装依赖（npm ci）` does
+			// not. Latin technical terms inside CJK prose are the normal case,
+			// and `**粗体**，` triggers it with no Latin word at all.
+			//
+			// invisibleCharacters stays at its default: a stray zero-width space
+			// or NBSP is a real hazard in Markdown (an NBSP after `-` stops a
+			// list from parsing) and it never fires on something typed on
+			// purpose. nonBasicASCII needs no setting — it defaults to
+			// `inUntrustedWorkspace` and standalone Monaco's workspace-trust
+			// service returns true unconditionally, so it is already off; were it
+			// on, every ideograph would be boxed rather than the punctuation.
+			unicodeHighlight: { ambiguousCharacters: false },
 			renderWhitespace: settings.showWhitespace ? "all" : "none",
 			padding: { top: 20 },
 			scrollbar: {
