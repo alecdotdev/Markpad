@@ -1217,68 +1217,68 @@
 							</div>
 						</div>
 
-						<div class="setting-item" style="align-items: flex-start; padding-top: 16px;">
-							<label for="appearance-theme" style="margin-top: 6px;">{t('settings.theme', settings.language)}</label>
-								<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
-									<div class="select-wrapper">
-										<select id="appearance-theme" value={theme} onchange={(e) => onSetTheme?.(e.currentTarget.value as any)}>
-											<option value="system">{t('settings.themeFollowSystem', settings.language)}</option>
-											<option value="light">{t('settings.themeDefaultLight', settings.language)}</option>
-											<option value="dark">{t('settings.themeDefaultDark', settings.language)}</option>
-											{#if savedVscodeThemes.length > 0}
-												<optgroup label={t('settings.vsCodeThemes', settings.language)}>
-													{#each savedVscodeThemes as themeOption}
-														<option value={`vscode:${themeOption}`}>{themeOption}</option>
-													{/each}
-												</optgroup>
-											{/if}
-										</select>
-										<svg
-											class="select-arrow"
-											width="12"
-											height="12"
-											viewBox="0 0 24 24"
-											fill="none"
-											stroke="currentColor"
-											stroke-width="2"
-											stroke-linecap="round"
-											stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-									</div>
-									{#if theme.startsWith('vscode:')}
-										<button class="reset-text-btn" style="color: var(--color-danger-fg); font-size: 12px; padding: 0;" onclick={() => deleteTheme(theme.replace('vscode:', ''))}>
-										{t('settings.deleteSelectedTheme', settings.language)}
-									</button>
+						<div class="setting-item">
+							<label for="appearance-theme">{t('settings.theme', settings.language)}</label>
+							<div class="select-wrapper">
+								<select id="appearance-theme" value={theme} onchange={(e) => onSetTheme?.(e.currentTarget.value as any)}>
+									<option value="system">{t('settings.themeFollowSystem', settings.language)}</option>
+									<option value="light">{t('settings.themeDefaultLight', settings.language)}</option>
+									<option value="dark">{t('settings.themeDefaultDark', settings.language)}</option>
+									{#if savedVscodeThemes.length > 0}
+										<optgroup label={t('settings.vsCodeThemes', settings.language)}>
+											{#each savedVscodeThemes as themeOption}
+												<option value={`vscode:${themeOption}`}>{themeOption}</option>
+											{/each}
+										</optgroup>
 									{/if}
-								</div>
+								</select>
+								<svg
+									class="select-arrow"
+									width="12"
+									height="12"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
 							</div>
+						</div>
 
-							<div class="setting-item" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-								<div style="display: flex; justify-content: space-between; width: 100%;">
-									<label for="theme-import">{t('settings.importVSCodeTheme', settings.language)}</label>
-									<button
-										class="reset-text-btn"
-										onclick={() =>
-											openUrl('https://vscodethemes.com/')
-												.catch(() => window.open('https://vscodethemes.com/', '_blank'))}
-									>
-										{t('settings.browseThemes', settings.language)}
-									</button>
-								</div>
-								<div style="display: flex; gap: 8px; width: 100%;">
-									<input 
-										type="text" 
-										id="theme-import" 
-										class="text-input" 
-										style="flex: 1;" 
-										placeholder="https://vscodethemes.com/e/..." 
-										bind:value={themeImportUrl} 
-										onkeydown={e => e.key === 'Enter' && importVscodeTheme()}
-									/>
-									<button class="import-btn" onclick={importVscodeTheme} disabled={importingTheme || !themeImportUrl}>
-										{importingTheme ? t('settings.importing', settings.language) : t('settings.import', settings.language)}
-									</button>
-								</div>
+						{#if theme.startsWith('vscode:')}
+							<div class="setting-block">
+								<button class="reset-text-btn delete-theme" onclick={() => deleteTheme(theme.replace('vscode:', ''))}>
+									{t('settings.deleteSelectedTheme', settings.language)}
+								</button>
 							</div>
+						{/if}
+
+						<div class="setting-block">
+							<div class="setting-block-row">
+								<label for="theme-import">{t('settings.importVSCodeTheme', settings.language)}</label>
+								<button
+									class="reset-text-btn"
+									onclick={() =>
+										openUrl('https://vscodethemes.com/')
+											.catch(() => window.open('https://vscodethemes.com/', '_blank'))}
+								>
+									{t('settings.browseThemes', settings.language)}
+								</button>
+							</div>
+							<div class="setting-block-row">
+								<input
+									type="text"
+									id="theme-import"
+									class="text-input theme-import-url"
+									placeholder="https://vscodethemes.com/e/..."
+									bind:value={themeImportUrl}
+									onkeydown={e => e.key === 'Enter' && importVscodeTheme()}
+								/>
+								<button class="import-btn" onclick={importVscodeTheme} disabled={importingTheme || !themeImportUrl}>
+									{importingTheme ? t('settings.importing', settings.language) : t('settings.import', settings.language)}
+								</button>
+							</div>
+						</div>
 
 							<div class="setting-item">
 								<label for="appearance-tabs">{t('settings.showTabs', settings.language)}</label>
@@ -1965,6 +1965,58 @@
 		background: var(--color-accent-fg);
 	}
 
+	/*
+	 * Not every row in this modal is a label-and-control row.
+	 *
+	 * The VS Code theme block is two stacked lines (a caption with a "Browse
+	 * themes" link, then a URL field with an Import button); the delete-theme
+	 * action is a single right-aligned link. Both used to be spelled as
+	 * `.setting-item` with inline `flex-direction: column` — they wanted the
+	 * row's border and rhythm, not its columns. That worked only because
+	 * `.setting-item` was `justify-content: space-between` and sized nothing;
+	 * once it grew a label column, the inline override left the theme <select>
+	 * as the only child of an unclassed div nobody styled, and `.select-wrapper`
+	 * — sized with `flex: 0 1 220px` — read that basis down the COLUMN axis and
+	 * rendered 220px tall and 79px too narrow, with the dropdown stranded below
+	 * a 191px hole.
+	 *
+	 * So a composite block says so, and keeps only the rhythm. `.setting-item`
+	 * is now exactly one thing: a leading label plus controls that are its own
+	 * direct children. The row-structure guards at the end of
+	 * settingsPersistence.test.ts hold it to that.
+	 */
+	.setting-block {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 10px 0;
+		border-bottom: 1px solid var(--color-border-muted);
+	}
+
+	.setting-block-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.setting-block-row label {
+		font-size: 13px;
+		color: var(--color-fg-default);
+	}
+
+	.theme-import-url {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.delete-theme {
+		align-self: flex-end;
+		color: var(--color-danger-fg);
+		font-size: 12px;
+		padding: 0;
+	}
+
 	.toolbar-settings {
 		padding: 0;
 		border-bottom: 1px solid var(--color-border-muted);
@@ -2153,8 +2205,16 @@
 		 * One width for every dropdown in the modal. Left to itself a <select>
 		 * is as wide as its widest option, so "Helvetica Neue (Default)" and
 		 * "Window" produced two different boxes two rows apart.
+		 *
+		 * `width`, deliberately, not `flex: 0 1 220px`: a flex basis means the
+		 * MAIN axis, so the same declaration is a width inside a row and a
+		 * height inside a column. It was written as a basis and the theme row
+		 * — whose select then sat in a column-direction parent — came out
+		 * 220px tall. `width` plus `flex-basis: auto` says the same thing in
+		 * the row case and cannot be misread in any other.
 		 */
-		flex: 0 1 220px;
+		width: 220px;
+		flex: 0 1 auto;
 		min-width: 0;
 	}
 
