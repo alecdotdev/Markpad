@@ -161,8 +161,13 @@
 	async function applyTag() {
 		const name = tagDraftName.trim();
 		if (!name) {
-			tabManager.setWindowTag(null);
-			tagEditorOpen = false;
+			// The same exit as Remove Tag, not a second one. This branch used to
+			// call `setWindowTag(null)` on its own, which drops the tag from the
+			// window but leaves its entry in `pinned-tags.json` — so a cleared
+			// PINNED tag went on offering itself from the Home screen as a saved
+			// session under a name no window held any more. `clearTag` is the
+			// path that already unpins first.
+			clearTag();
 			tagError = '';
 			return;
 		}

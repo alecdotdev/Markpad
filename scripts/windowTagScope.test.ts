@@ -181,7 +181,7 @@ test('Pin and Remove are offered only once a tag exists', () => {
 	assert.equal(!!bar.removeRendered(), true, 'a tagged window was not offered Remove');
 });
 
-test('clearing the name and saving still removes the tag', () => {
+test('clearing the name and saving still removes the tag', async () => {
 	// The other way out, and the one a user reaches for who did not notice the
 	// Remove button. It predates this change and has to keep working.
 	const { bar } = setup();
@@ -189,10 +189,47 @@ test('clearing the name and saving still removes the tag', () => {
 	bar.openTagEditor();
 	bar.setDraft('   ', COLORS[1]);
 
-	return bar.applyTag().then(() => {
-		assert.equal(tabManager.windowTag, null, 'an emptied name left the tag in place');
-		assert.equal(bar.state().tagEditorOpen, false, 'the popover stayed open');
-	});
+	await bar.applyTag();
+
+	assert.equal(tabManager.windowTag, null, 'an emptied name left the tag in place');
+	assert.equal(bar.state().tagEditorOpen, false, 'the popover stayed open');
+});
+
+test('clearing the name of a PINNED tag drops its saved session too', async () => {
+	/*
+	 * Two ways out of a tag, and they used to disagree. `clearTag` (Remove Tag)
+	 * unpins first; `applyTag` with an emptied name called `setWindowTag(null)`
+	 * on its own, so the entry stayed in `pinned-tags.json` and the Home screen
+	 * kept offering it as a reusable session under a name no window held. The
+	 * user could still unpin it from Home, but nothing told them they had to.
+	 */
+	const { bar, invokeCalls } = setup();
+	tabManager.setWindowTag({ name: 'Docs', color: COLORS[1], pinned: true });
+	bar.openTagEditor();
+	bar.setDraft('   ', COLORS[1]);
+
+	await bar.applyTag();
+
+	assert.equal(tabManager.windowTag, null, 'an emptied name left the tag in place');
+	assert.deepEqual(
+		invokeCalls.filter((call) => call.cmd === 'remove_pinned_tag').map((call) => call.args),
+		[{ name: 'Docs' }],
+		'clearing the name orphaned the pinned session under a name no window holds',
+	);
+});
+
+test('clearing the name of an UNPINNED tag asks the backend for nothing', async () => {
+	// The fence: unpinning by name is not something to do speculatively, and a
+	// window that never pinned has nothing on disk to withdraw.
+	const { bar, invokeCalls } = setup();
+	tabManager.setWindowTag({ name: 'Docs', color: COLORS[1] });
+	bar.openTagEditor();
+	bar.setDraft('', COLORS[1]);
+
+	await bar.applyTag();
+
+	assert.equal(tabManager.windowTag, null);
+	assert.deepEqual(invokeCalls.filter((call) => call.cmd === 'remove_pinned_tag'), [], 'an unpinned tag was unpinned anyway');
 });
 
 // ----------------------------------------------------------- 4. exclusivity
