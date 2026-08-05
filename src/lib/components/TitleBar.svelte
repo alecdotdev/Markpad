@@ -323,10 +323,15 @@
 		themeMenuOpen = false;
 		kebabMenuOpen = false;
 		homeMenuOpen = false;
+		// The tag editor is dismissed here rather than committed: `applyTag` is
+		// what writes a tag, and it is reached only from Save or Enter. The
+		// draft is not preserved, because `openTagEditor` re-seeds it from the
+		// stored tag on every open.
+		tagEditorOpen = false;
 	}
 
 	$effect(() => {
-		if (themeMenuOpen || kebabMenuOpen || homeMenuOpen) {
+		if (themeMenuOpen || kebabMenuOpen || homeMenuOpen || tagEditorOpen) {
 			window.addEventListener('click', handleGlobalDismiss);
 			window.addEventListener('contextmenu', handleGlobalDismiss);
 			window.addEventListener('blur', handleGlobalDismiss);
@@ -554,12 +559,27 @@
 	</div>
 	<div class="window-tag-container">
 		{#if tabManager.windowTag}
-			<button class="window-tag-chip" style:--tag-color={tabManager.windowTag.color} onclick={openTagEditor}>
+			<button
+				class="window-tag-chip"
+				style:--tag-color={tabManager.windowTag.color}
+				onclick={(event) => {
+					event.stopPropagation();
+					if (tagEditorOpen) tagEditorOpen = false;
+					else openTagEditor();
+				}}>
 				{tabManager.windowTag.name}
 			</button>
 		{/if}
 		{#if tagEditorOpen}
-			<div class="tag-editor" role="dialog" tabindex="-1" onkeydown={(event) => event.key === 'Enter' && applyTag()}>
+			<div
+				class="tag-editor"
+				role="dialog"
+				tabindex="-1"
+				onclick={(event) => event.stopPropagation()}
+				onkeydown={(event) => {
+					if (event.key === 'Escape') tagEditorOpen = false;
+					else if (event.key === 'Enter') applyTag();
+				}}>
 				<!-- svelte-ignore a11y_autofocus -->
 				<input autofocus spellcheck="false" placeholder={t('menu.windowTagPlaceholder', currentLanguage)} bind:value={tagDraftName} />
 				<div class="tag-colors">
