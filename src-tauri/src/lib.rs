@@ -586,6 +586,11 @@ fn list_viewer_windows(state: State<'_, AppState>) -> Vec<window_runtime::Window
 }
 
 #[tauri::command]
+fn is_window_tag_taken(window: tauri::Window, state: State<'_, AppState>, name: String) -> bool {
+    window_runtime::is_window_tag_taken(window, state, name)
+}
+
+#[tauri::command]
 fn offer_tab_to_window(
     app: AppHandle,
     state: State<'_, tab_transfer::TabTransferBroker>,
@@ -2867,6 +2872,7 @@ pub fn run() {
             create_transfer_window,
             set_window_meta,
             list_viewer_windows,
+            is_window_tag_taken,
             offer_tab_to_window,
             focus_window,
             list_pinned_tags,

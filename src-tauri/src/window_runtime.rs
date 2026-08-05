@@ -265,6 +265,40 @@ pub fn set_window_meta(
     entry.tab_count = tab_count;
 }
 
+/// Whether a window other than `label` currently carries `name` as its tag.
+///
+/// A window tag names a *window*, and `save_pinned_tag_at` keys the pin file by
+/// that name alone: it finds the entry whose `name` matches and replaces its
+/// whole `files` list. Two windows holding one name therefore have one pinned
+/// document set between them, and the last one to write wins — silently, since
+/// neither window can see the other's list. #424's `pinned_tags` lock removed
+/// the *concurrent* form of that loss (two interleaved read-modify-writes); it
+/// deliberately says nothing about two serialized writes that each replace a
+/// payload the other wrote, which is the ordinary outcome of two windows
+/// sharing a name.
+///
+/// The answer comes out of `window_registry` rather than a new registry of tag
+/// names, because the registry already holds `tag_name` per window label and
+/// the frontend keeps it current through `set_window_meta`. That makes it live
+/// data with the two properties a name-holder table needs and is awkward to
+/// give one: `WindowEvent::Destroyed` removes the entry, so closing a window
+/// releases its name with no bookkeeping, and it lives in memory, so a crash
+/// leaves nothing behind to block names nobody holds any more.
+fn tag_held_by_another_window(
+    registry: &HashMap<String, WindowMeta>,
+    label: &str,
+    name: &str,
+) -> bool {
+    registry
+        .iter()
+        .any(|(other, meta)| other != label && meta.tag_name.as_deref() == Some(name))
+}
+
+pub fn is_window_tag_taken(window: tauri::Window, state: State<'_, AppState>, name: String) -> bool {
+    let registry = lock_recover(&state.window_registry);
+    tag_held_by_another_window(&registry, window.label(), &name)
+}
+
 pub fn list_viewer_windows(state: State<'_, AppState>) -> Vec<WindowListEntry> {
     let registry = lock_recover(&state.window_registry);
     let mut list: Vec<WindowListEntry> = registry
@@ -632,6 +666,98 @@ mod tests {
         assert!(read_pinned_tags_at(&path).is_empty());
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The loss that makes tag names exclusive worth enforcing.
+    ///
+    /// Two windows, one tag name, one pinned document set. Both windows pin —
+    /// serially, each holding the lock in turn, so #424's `pinned_tags` mutex
+    /// is doing its job and this is not a race. `save_pinned_tag_at` still
+    /// finds the entry BY NAME and replaces its whole `files` list, so the
+    /// second window's pin does not merge with the first's, it erases it. The
+    /// user set two windows up and gets one back.
+    ///
+    /// Asserted on the surviving file rather than on the call, because the call
+    /// succeeds in both worlds: `save_pinned_tag_at` returns `Ok(())` either
+    /// way and nothing anywhere reports the overwrite.
+    #[test]
+    fn two_windows_sharing_a_tag_name_overwrite_one_anothers_pinned_files() {
+        let dir = temp_dir("pinned-tags-shared-name");
+        let path = dir.join("pinned-tags.json");
+        let lock = Mutex::new(());
+
+        save_pinned_tag_at(
+            &lock,
+            &path,
+            "Research".to_string(),
+            "#1a73e8".to_string(),
+            vec!["/papers/a.md".to_string(), "/papers/b.md".to_string()],
+        )
+        .unwrap();
+        save_pinned_tag_at(
+            &lock,
+            &path,
+            "Research".to_string(),
+            "#d93025".to_string(),
+            vec!["/notes/c.md".to_string()],
+        )
+        .unwrap();
+
+        let tags = read_pinned_tags_at(&path);
+        assert_eq!(tags.len(), 1, "one name, one entry — the pin file is keyed by name");
+        assert_eq!(
+            tags[0].files,
+            vec!["/notes/c.md".to_string()],
+            "the second window replaced the first window's document set rather than adding to it"
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn meta_with_tag(tag: Option<&str>) -> WindowMeta {
+        WindowMeta {
+            number: 1,
+            tag_name: tag.map(str::to_string),
+            tag_color: tag.map(|_| "#1a73e8".to_string()),
+            active_tab_title: String::new(),
+            tab_count: 0,
+        }
+    }
+
+    /// A name is taken by OTHER windows only — never by the asker itself.
+    #[test]
+    fn a_window_never_blocks_its_own_tag_name() {
+        let mut registry = HashMap::new();
+        registry.insert("main".to_string(), meta_with_tag(Some("Research")));
+
+        assert!(
+            !tag_held_by_another_window(&registry, "main", "Research"),
+            "renaming the colour of a tag a window already holds must not be refused"
+        );
+        assert!(
+            tag_held_by_another_window(&registry, "window-2", "Research"),
+            "a second window taking the same name must be seen"
+        );
+    }
+
+    /// Only an exact, currently-held name is taken.
+    #[test]
+    fn only_a_live_windows_exact_tag_name_is_taken() {
+        let mut registry = HashMap::new();
+        registry.insert("main".to_string(), meta_with_tag(Some("Research")));
+        registry.insert("window-2".to_string(), meta_with_tag(None));
+
+        assert!(!tag_held_by_another_window(&registry, "window-3", "research"));
+        assert!(!tag_held_by_another_window(&registry, "window-3", "Research notes"));
+        assert!(!tag_held_by_another_window(&registry, "window-3", ""));
+
+        // The registry is the live window list, so a closed window releases its
+        // name with no bookkeeping of its own — this is what `Destroyed` does.
+        registry.remove("main");
+        assert!(
+            !tag_held_by_another_window(&registry, "window-3", "Research"),
+            "a name held by a window that has closed must be free again"
+        );
     }
 
     /// A poisoned lock must not disable pinning for the rest of the session.

@@ -125,17 +125,83 @@
 	let tagEditorOpen = $state(false);
 	let tagDraftName = $state('');
 	let tagDraftColor = $state(tagColors[1]);
+	let tagError = $state('');
 
 	function openTagEditor() {
 		tagDraftName = tabManager.windowTag?.name ?? '';
 		tagDraftColor = tabManager.windowTag?.color ?? tagColors[1];
+		tagError = '';
 		tagEditorOpen = true;
 	}
 
-	function applyTag() {
+	/**
+	 * Whether a *different* live window already carries this name.
+	 *
+	 * Asked here — at Save/Enter, the moment the user names the window — and
+	 * nowhere else. In particular not at session restore: a snapshot written by
+	 * an older build can legitimately contain two windows under one name, and
+	 * refusing it there would clear a tag the user set, silently, at a moment
+	 * they are not even looking at the popover. Leaving a restored duplicate
+	 * alone costs at most a confusing pair of chips; rejecting it costs state
+	 * the user cannot get back.
+	 *
+	 * A backend that cannot answer means the user's own save goes through. The
+	 * check exists to stop one window from quietly overwriting another's pinned
+	 * documents, and an IPC failure is not evidence that it would.
+	 */
+	async function tagNameTakenElsewhere(name: string): Promise<boolean> {
+		try {
+			return (await invoke('is_window_tag_taken', { name })) === true;
+		} catch (error) {
+			console.error('Failed to check window tag exclusivity', error);
+			return false;
+		}
+	}
+
+	async function applyTag() {
 		const name = tagDraftName.trim();
-		tabManager.setWindowTag(name ? { name, color: tagDraftColor, pinned: tabManager.windowTag?.pinned } : null);
+		if (!name) {
+			tabManager.setWindowTag(null);
+			tagEditorOpen = false;
+			tagError = '';
+			return;
+		}
+		if (await tagNameTakenElsewhere(name)) {
+			// Refused in place, with the popover still open on the name that was
+			// refused: this is a correction the user makes in the field they are
+			// already in, not news to be delivered somewhere else.
+			tagError = t('menu.windowTagTaken', currentLanguage);
+			return;
+		}
+		tabManager.setWindowTag({ name, color: tagDraftColor, pinned: tabManager.windowTag?.pinned });
 		tagEditorOpen = false;
+		tagError = '';
+	}
+
+	/**
+	 * Right-click the chip: the same popover left-click opens.
+	 *
+	 * The chip borrows Chrome's tab-group chip visually, but not the state that
+	 * makes Chrome's left/right division necessary. There, left-click collapses
+	 * and expands the group, so the commands need somewhere else to live. A
+	 * window tag has nothing to collapse — it scopes the whole window — so
+	 * left-click has no second job, and putting Pin/Remove behind a right-click
+	 * would only hide them behind a gesture with no affordance advertising it.
+	 * The one thing right-click does owe the user is not raising the platform
+	 * menu over the title bar, hence `preventDefault`.
+	 *
+	 * It opens but never closes, unlike the left-click toggle. `openTagEditor`
+	 * re-seeds the draft from the stored tag, so re-opening an open popover
+	 * would throw away a name the user is in the middle of typing; and a
+	 * gesture whose whole purpose is "show me the tag's controls" should not
+	 * sometimes hide them. `stopPropagation` for the same reason the chip's
+	 * left-click has one: `handleGlobalDismiss` is wired to window
+	 * `contextmenu`, and would otherwise dismiss the popover this just opened.
+	 */
+	function openTagEditorFromContextMenu(event: MouseEvent) {
+		event.preventDefault();
+		event.stopPropagation();
+		if (!tagEditorOpen) openTagEditor();
 	}
 
 	function clearTag() {
@@ -562,6 +628,7 @@
 			<button
 				class="window-tag-chip"
 				style:--tag-color={tabManager.windowTag.color}
+				oncontextmenu={openTagEditorFromContextMenu}
 				onclick={(event) => {
 					event.stopPropagation();
 					if (tagEditorOpen) tagEditorOpen = false;
@@ -581,7 +648,13 @@
 					else if (event.key === 'Enter') applyTag();
 				}}>
 				<!-- svelte-ignore a11y_autofocus -->
-				<input autofocus spellcheck="false" placeholder={t('menu.windowTagPlaceholder', currentLanguage)} bind:value={tagDraftName} />
+				<input
+					autofocus
+					spellcheck="false"
+					placeholder={t('menu.windowTagPlaceholder', currentLanguage)}
+					bind:value={tagDraftName}
+					oninput={() => (tagError = '')} />
+				{#if tagError}<p class="tag-error" role="alert">{tagError}</p>{/if}
 				<div class="tag-colors">
 					{#each tagColors as color}
 						<button class:selected={tagDraftColor === color} style:--tag-color={color} onclick={() => (tagDraftColor = color)} aria-label={color}></button>
@@ -595,7 +668,7 @@
 	</div>
 
 	{#if tabManager.tabs.length > 0 && settings.showTabs}
-		<div class="tab-area">
+		<div class="tab-area" class:tagged={tabManager.windowTag !== null} style:--tag-color={tabManager.windowTag?.color}>
 			<TabList onnewTab={() => tabManager.addNewTab()} {ondetach} {showHome} {ontabclick} {oncloseTab} />
 		</div>
 	{:else}
@@ -1071,6 +1144,38 @@
 		height: 100%;
 		overflow: hidden;
 		min-width: 0;
+		position: relative;
+	}
+
+	/*
+	 * What the window tag covers, drawn once for the whole strip.
+	 *
+	 * A window tag is a property of the window: `TabManager.windowTag` is one
+	 * nullable record and no tab carries membership of it. Every tab in the
+	 * window is under the tag, including the one opened a second from now.
+	 * A per-tab underline would say the opposite — that belonging is something
+	 * each tab has or lacks — and would then need a per-tab truth to read,
+	 * which does not exist and would have to be invented and kept in sync. One
+	 * line under the strip cannot disagree with the data, and a new tab lands
+	 * on it by construction rather than by remembering to mark it.
+	 *
+	 * The bottom edge is free: `.tab.active` in Tab.svelte marks the active tab
+	 * with `background-color`, so nothing else in the strip is using this
+	 * channel and the two readings do not compete.
+	 *
+	 * Above `.scroll-shadow` (20) and `.new-tab-btn` (21) in TabList, which
+	 * would otherwise cover the ends of the line.
+	 */
+	.tab-area.tagged::after {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		height: 2px;
+		background: var(--tag-color);
+		pointer-events: none;
+		z-index: 30;
 	}
 
 	.window-controls-left {
@@ -1606,6 +1711,7 @@
 	.tag-editor { position: absolute; top: 28px; left: 0; z-index: 20000; width: 180px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--color-canvas-default); border: 1px solid var(--color-border-default); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); font-family: var(--win-font); }
 	.tag-editor input { box-sizing: border-box; width: 100%; padding: 6px 8px; color: var(--color-fg-default); background: var(--color-canvas-default); border: 1px solid var(--color-border-default); border-radius: 6px; font-family: var(--win-font); font-size: 12px; outline: none; }
 	.tag-editor input:focus { border-color: var(--color-accent-fg); }
+	.tag-error { margin: 0; color: var(--color-danger-fg); font-size: 11px; line-height: 1.4; }
 	.tag-colors { display: flex; justify-content: space-between; padding: 2px 0; }
 	.tag-colors button { width: 18px; height: 18px; padding: 0; border: 2px solid transparent; border-radius: 50%; background: var(--tag-color); cursor: pointer; transition: transform 0.1s ease, border-color 0.1s ease; }
 	.tag-colors button:hover { transform: scale(1.15); }
