@@ -159,10 +159,24 @@ test('DOMPurify call sites in src are the allowlisted ones', () => {
 
 test('the diagram sanitizer stays separate from the document policy', () => {
 	// Both halves of the split are asserted so a later "let us unify these"
-	// change has to confront the reason: the diagram config must keep the tag
-	// the document config forbids.
-	assert.match(richContentSource, /ADD_TAGS: \['foreignObject'\]/);
-	assert.ok(!MARKDOWN_SANITIZE_CONFIG.FORBID_TAGS.includes('foreignObject'));
+	// change has to confront the reason: the diagram config must permit the
+	// `<style>` element the document config forbids outright.
+	//
+	// `assert.match(richContentSource, /ADD_TAGS: \['foreignObject'\]/)` stood
+	// here as the second reason. It went with the allowance itself: DOMPurify
+	// deletes the HTML inside a `foreignObject` whatever `ADD_TAGS` says, so the
+	// tag could only ever come through empty, and an empty one *hid* the SVG
+	// `<text>` fallback Mermaid pairs it with. scripts/mermaidDiagramLabels.test.ts
+	// replaces it by running the render pipeline and checking the labels end up
+	// somewhere no filter can reach.
+	// The import, not the name: the comment above `sanitizeDiagramSvg` explains
+	// the split and therefore spells `MARKDOWN_SANITIZE_CONFIG` out, so matching
+	// the identifier would fail on prose.
+	assert.doesNotMatch(
+		richContentSource,
+		/import\s*\{[^}]*\}\s*from\s*'[^']*\/sanitize\.js'/,
+		'the diagram filter must not adopt the document policy',
+	);
 	assert.ok(MARKDOWN_SANITIZE_CONFIG.FORBID_TAGS.includes('style'));
 });
 

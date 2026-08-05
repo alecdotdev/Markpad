@@ -110,20 +110,32 @@ export function loadRichContentLibraries(): Promise<RichContentLibraries> {
 }
 
 /**
- * Mermaid puts diagram text inside `foreignObject` and ships the diagram's
- * colours as a `<style>` element inside the SVG, so diagrams need a more
- * permissive filter than the document-level `MARKDOWN_SANITIZE_CONFIG` (which
- * forbids `<style>` outright). Keeping the two policies distinct — and this one
- * in one place — is what stops a document author's `<style>` from being let
- * through by the back door: this filter is only ever applied to a string
- * Mermaid produced, never to the document.
+ * Mermaid ships the diagram's colours as a `<style>` element inside the SVG, so
+ * diagrams need a different filter from the document-level
+ * `MARKDOWN_SANITIZE_CONFIG` (which forbids `<style>` outright). Keeping the two
+ * policies distinct — and this one in one place — is what stops a document
+ * author's `<style>` from being let through by the back door: this filter is
+ * only ever applied to a string Mermaid produced, never to the document.
+ *
+ * `foreignObject` used to be on this allowlist as well, on the theory that
+ * Mermaid needs it for labels. It never worked. The tag was allowed, but the
+ * label lives in the *HTML* inside it, and DOMPurify removes every HTML child of
+ * an SVG element whose tag is not an HTML integration point — `annotation-xml`
+ * is the only one on its list, so `foreignObject`'s children are deleted no
+ * matter what `ADD_TAGS` says. Allowing the tag could therefore only ever
+ * produce an empty box. Worse, Mermaid's `<switch>`-based renderers (the user
+ * journey, and anything configured with `textPlacement: 'fo'`) pair the
+ * `foreignObject` with an SVG `<text>` fallback: an empty-but-present
+ * `foreignObject` is what the browser picks, so keeping it *hid* a label that
+ * had survived intact. `renderRichContent` now asks Mermaid for SVG-native
+ * labels, and this filter no longer names the tag. See
+ * scripts/mermaidDiagramLabels.test.ts.
  *
  * On why that `<style>` is acceptable inside an exported file, see
  * `renderExportRichContent` in `export.ts`.
  */
 export function sanitizeDiagramSvg(svg: string): string {
 	return DOMPurify.sanitize(svg, {
-		ADD_TAGS: ['foreignObject'],
 		ADD_ATTR: ['dominant-baseline', 'text-anchor'],
 	});
 }
@@ -162,7 +174,15 @@ export async function renderRichContent(options: RenderRichContentOptions): Prom
 	const doc = root.ownerDocument ?? document;
 	const idFactory = options.idFactory ?? defaultIdFactory;
 
-	mermaid.initialize({ startOnLoad: false, theme: options.mermaidTheme });
+	// `htmlLabels: false` is what keeps a diagram's text in the picture. With
+	// Mermaid's default (`true`) every label is an HTML `<div>`/`<span>` inside a
+	// `<foreignObject>`, and `sanitizeDiagramSvg` — like any DOMPurify — deletes
+	// HTML children of SVG elements outright, so the diagrams arrived as empty
+	// shapes. Turning it off makes Mermaid emit SVG `<text>`, which no sanitizer
+	// objects to. Measured against mermaid 11.16.0: this one root-level key is
+	// enough for every diagram type it ships (the per-diagram `htmlLabels` keys
+	// are deprecated in 11.x and the root one takes precedence over them).
+	mermaid.initialize({ startOnLoad: false, theme: options.mermaidTheme, htmlLabels: false });
 
 	const codeBlocks = Array.from(root.querySelectorAll('pre code'));
 	let diagramIndex = 0;

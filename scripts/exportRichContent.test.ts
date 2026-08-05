@@ -243,9 +243,12 @@ test('an exported file contains drawn diagrams, not mermaid source', async () =>
 	// and would flatten every diagram, so the export must not re-run that filter
 	// over the rendered output.
 	assert.match(run.document, /<style>#mermaid-[^{]*\.node rect\{fill:#eee;\}<\/style>/);
-	// Case-insensitive: the shim lower-cases tag names on serialisation, a real
-	// browser keeps `foreignObject`. Either way the element has to survive the
-	// diagram filter, or the diagram's labels do not.
+	// The stand-in Mermaid above emits `foreignObject`; the real one no longer
+	// does, and the diagram filter no longer allows it (see
+	// scripts/mermaidDiagramLabels.test.ts). What is pinned here is unchanged by
+	// that: the export must hand the *diagram* filter's output through, not the
+	// document policy's. Case-insensitive because the shim lower-cases tag names
+	// on serialisation where a real browser keeps `foreignObject`.
 	assert.match(run.document, /<foreignobject>/i);
 
 	// The exported page carries the theme it was made in, so the diagrams are
