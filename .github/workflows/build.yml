@@ -19,7 +19,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: lts/*
 
       - name: Get Version
         id: get_version
@@ -73,7 +73,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: lts/*
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -300,6 +300,28 @@ jobs:
           WINDOWS_AARCH64=$(platform_entry "$WIN_ARM_SIG")
           LINUX_X86_64=$(platform_entry "$LINUX_SIG")
 
+          # Every key below is a plain {os}-{arch}, and that is load-bearing.
+          #
+          # tauri-plugin-updater looks up two keys in order: {os}-{arch}-{installer}
+          # first, then {os}-{arch}. The first is only tried when the binary knows
+          # its own bundle type, and ours does not on Windows or Linux --
+          # `__TAURI_BUNDLE_TYPE` is written into the binary by patching it after
+          # the build, and that patch fails on both, three times in the v2.7.0 run:
+          #   Warn Failed to add bundler type to the binary: __TAURI_BUNDLE_TYPE
+          #   variable not found in binary. ... Updater plugin may not be able to
+          #   update this package.
+          # macOS is unaffected: tauri-utils returns BundleType::App there without
+          # reading the variable.
+          #
+          # So Windows and Linux clients ask only for {os}-{arch}, which is what
+          # this file publishes, and the warning is inert for us.
+          #
+          # Adding a per-installer key -- "windows-x86_64-nsis" say -- would end
+          # that. It would be the key those clients cannot ask for, so they would
+          # keep resolving the unsuffixed one and silently ignore the new entry;
+          # remove the unsuffixed one in the same edit and they get
+          # TargetsNotFound and stop updating. If per-installer keys are ever
+          # wanted, the missing bundle type has to be fixed first.
           jq -n \
             --arg version "$VERSION" \
             --arg notes "See https://github.com/${REPO}/releases/tag/v${VERSION}" \

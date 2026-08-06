@@ -17,7 +17,7 @@ You'll be prompted for a password. **Pick a strong one and store it together wit
 - `~/.tauri/markpad-updater.key`     — **PRIVATE**. Never commit. Never share. Back up to a password manager.
 - `~/.tauri/markpad-updater.key.pub` — **PUBLIC**. Shared with developers; ends up shipped inside Markpad.
 
-### 2. Add Secrets to `alecdotdev/Markpad`
+### 2. Add Secrets to `sftwrdotdev/Markpad`
 
 In the GitHub repo settings → Secrets and variables → Actions → New repository secret:
 
@@ -42,6 +42,32 @@ If you ever lose the private key:
 - A new keypair has to be generated, embedded in a new release, and that release has to be installed manually by every user.
 - Communicate this in release notes so users aren't blindsided.
 
+### 5. CRITICAL: `alecdotdev/Markpad` must never exist again
+
+The updater endpoint in `src-tauri/tauri.conf.json` points at **`sftwrdotdev/Markpad`**. (`scripts/releaseWorkflow.test.ts` holds that name and the endpoint together — if the repository ever moves again, this line moves with it.)
+
+Markpad was transferred from `alecdotdev/Markpad` to `sftwrdotdev/Markpad`, and `alecdotdev` is still a live account — a transfer between two accounts, not a rename. Pointing the endpoint at the new location **only helps builds made from here on.** The endpoint is compiled into the binary, so every copy of Markpad up to and including v2.7.0 asks GitHub for:
+
+```
+https://github.com/alecdotdev/Markpad/releases/latest/download/latest.json
+```
+
+and reaches the current feed only because GitHub answers it with a 301 to the new location. Those installs will use that redirect for as long as they run, however many versions ship after this one.
+
+GitHub voids a transfer redirect if the old location is occupied again. From [Transferring a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/transferring-a-repository):
+
+> If you create a new repository or fork at the previous repository location, the redirects to the transferred repository will be permanently deleted.
+
+So, permanently, and regardless of what it would contain:
+
+- **Do not create a repository named `Markpad` under `alecdotdev`.**
+- **Do not fork `sftwrdotdev/Markpad` to `alecdotdev`** — the doc says a fork at the old location voids the redirect just as a new repository does.
+- **Do not transfer Markpad back to `alecdotdev`, then away again.** Each hop leaves another compiled-in endpoint depending on another redirect.
+
+The failure this prevents is quiet. `latest.json` becomes a 404, the updater reports no update available, and users on old versions simply stop being offered new ones — with no error anyone but that user can see. There is no way to fix it from this repository afterwards; the only remedy is asking every affected user to reinstall by hand.
+
+What this is *not* is a code-execution risk. The `pubkey` in `tauri.conf.json` is pinned, and `tauri-plugin-updater` verifies the minisign signature on the downloaded bundle before installing it. Whoever ends up serving that URL cannot ship a Markpad update that installs, because they cannot produce a signature for it. The exposure is broken or stalled updates, not a hijacked one.
+
 ## Per-release workflow
 
 The workflow uses `npm ci`, so its installed dependency graph is exactly the committed lockfile. Do not replace it with `npm install` in release jobs. The same applies to [`snapcraft.yaml`](snapcraft.yaml), which builds the snap outside GitHub Actions; `scripts/releaseWorkflow.test.ts` guards both.
@@ -59,7 +85,7 @@ The workflow uses `npm ci`, so its installed dependency graph is exactly the com
    - GitHub UI: Actions → "Build and Release" → Run workflow → master
    - Or CLI: `gh workflow run build.yml --ref master`
 4. **Wait** ~30 min for matrix builds to finish, plus ~2 min for `generate-update-feed`.
-5. **Open the draft release** on the [Releases page](https://github.com/alecdotdev/Markpad/releases). Verify the assets:
+5. **Open the draft release** on the [Releases page](https://github.com/sftwrdotdev/Markpad/releases). Verify the assets:
    - **macOS**: `*.dmg`, `*.app.tar.gz`, `*.app.tar.gz.sig`
    - **Windows x64**: `Markpad_<version>_x64.exe` (portable), `*_x64-setup.exe` (NSIS installer), `*_x64-setup.exe.sig`
    - **Windows ARM64**: `Markpad_<version>_arm64.exe` (portable), `*_arm64-setup.exe` (NSIS installer), `*_arm64-setup.exe.sig`
