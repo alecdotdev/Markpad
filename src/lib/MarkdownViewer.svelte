@@ -2480,9 +2480,25 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			e.preventDefault();
 			closeFile();
 		}
-		if (cmdOrCtrl && !e.shiftKey && key === 't') {
+		// New file, both keys, whether or not the editor has focus (#392).
+		//
+		// Monaco resolves its own keybindings on the editor container and calls
+		// stopPropagation() when it consumes one, so this handler only ever runs
+		// for keystrokes the editor did not claim. That is how Ctrl+T came to
+		// mean two things: inside Monaco the `file-new` action answered it and
+		// opened an Untitled buffer, outside it this branch opened a Home tab.
+		// Both of the app's own labels already promised the first one — the tab
+		// strip's + button is titled "New Tab (Ctrl+T)" and the app menu prints
+		// Ctrl/Cmd+T beside "New File" — so the branch, not the labels, was the
+		// odd one out.
+		//
+		// `file-new` binds Ctrl/Cmd+N as well, and this handler used to know
+		// about only one of the two, which left Ctrl+N doing nothing at all
+		// outside the editor. Both are listed here so the two paths cannot
+		// drift again; `formatShortcutKeymap.test.ts` holds them equal.
+		if (cmdOrCtrl && !e.shiftKey && !e.altKey && (key === 't' || key === 'n')) {
 			e.preventDefault();
-			tabManager.addHomeTab();
+			handleNewFile();
 		}
 		if (cmdOrCtrl && !e.shiftKey && !e.altKey && key === 'o') {
 			e.preventDefault();

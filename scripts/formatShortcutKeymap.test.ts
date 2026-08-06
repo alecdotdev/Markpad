@@ -11,24 +11,34 @@ import { getEditorToolbarTools } from '../src/lib/utils/editorToolbar.js';
 import { readSource, functionSource } from './sourceTree.js';
 
 /*
- * Issue #121: six formatting commands that exist in the toolbar and the command
- * palette but answer no key.
+ * Issues #121 (six formatting commands with no shortcut) and #392 (Ctrl+T means
+ * two things). Both needed the same thing first — the whole keymap — so they are
+ * held by one file.
  *
  * WHAT THIS FILE EXECUTES
  *
- * `registerLocalizedActions` is lifted out of Editor.svelte and RUN. The
- * keybinding numbers come from Monaco's real `KeyMod` and `KeyCode`, and they
- * are turned back into chords by Monaco's real `decodeKeybinding`, once per
- * operating system — `CtrlCmd` is Meta on macOS and Ctrl elsewhere, and that is
- * resolved rather than assumed. Nothing below matches the component as text, so
- * renaming a local or reordering the actions changes nothing here; changing a
- * KEY does.
+ * `registerLocalizedActions` and `handleKeyDown` are lifted out of their Svelte
+ * components and RUN. The keybinding numbers come from Monaco's real `KeyMod`
+ * and `KeyCode`, and they are turned back into chords by Monaco's real
+ * `decodeKeybinding`, once per operating system. Nothing below matches the
+ * component as text, so renaming a local, reordering the actions or rewriting
+ * the branch structure changes nothing here; changing a KEY does.
+ *
+ * The document-level layer is discovered by firing a synthetic keystroke for
+ * every chord in a bounded space and recording which app function ran. That is
+ * why "Ctrl+T does not open a Home tab" is an assertion about what the handler
+ * DOES rather than about which identifier appears next to `key === 't'`.
  *
  * WHAT IT DOES NOT ESTABLISH
  *
  * - That Monaco delivers these chords at runtime. Resolution order, the `when`
  *   clauses and the vim adapter all live in a browser. What is pinned here is
  *   the keymap the app declares.
+ * - Layout-dependent `key` values. The synthetic events carry the UNSHIFTED
+ *   character (`key: ','`, not `'<'`), because that is the only value that is
+ *   the same on every keyboard layout. Two of the app's document-level branches
+ *   compare `e.key` against punctuation and are therefore modelled, not
+ *   reproduced: `Ctrl+,` (settings) and `Ctrl+=`/`Ctrl+-` (zoom).
  * - Whether a chord is free in standalone MONACO. That needs Monaco's whole
  *   browser-side contribution graph to evaluate, which needs a DOM. The
  *   snapshot in MONACO_DEFAULTS below is the weaker form, and it is labelled as
@@ -154,6 +164,138 @@ function editorKeymap(mac: boolean, os: OperatingSystemValue): Map<string, Chord
 	return map;
 }
 
+// ----------------------------------------------- the document (window) layer
+
+/**
+ * The keys the document-level handler is fired with.
+ *
+ * `key` is the unshifted character and `code` the physical key, which is what a
+ * US layout reports and what every layout reports for letters and digits.
+ */
+const FUZZ_KEYS: Array<{ keyCode: number; key: string; code: string }> = [
+	...'abcdefghijklmnopqrstuvwxyz'.split('').map((c) => ({
+		keyCode: KeyCode.KeyA + (c.charCodeAt(0) - 97),
+		key: c,
+		code: `Key${c.toUpperCase()}`,
+	})),
+	...'0123456789'.split('').map((c) => ({
+		keyCode: KeyCode.Digit0 + (c.charCodeAt(0) - 48),
+		key: c,
+		code: `Digit${c}`,
+	})),
+	{ keyCode: KeyCode.Tab, key: 'Tab', code: 'Tab' },
+	{ keyCode: KeyCode.PageUp, key: 'PageUp', code: 'PageUp' },
+	{ keyCode: KeyCode.PageDown, key: 'PageDown', code: 'PageDown' },
+	{ keyCode: KeyCode.LeftArrow, key: 'ArrowLeft', code: 'ArrowLeft' },
+	{ keyCode: KeyCode.RightArrow, key: 'ArrowRight', code: 'ArrowRight' },
+	{ keyCode: KeyCode.F4, key: 'F4', code: 'F4' },
+	{ keyCode: KeyCode.F5, key: 'F5', code: 'F5' },
+	{ keyCode: KeyCode.Backslash, key: '\\', code: 'Backslash' },
+	{ keyCode: KeyCode.IntlBackslash, key: '\\', code: 'IntlBackslash' },
+	{ keyCode: KeyCode.BracketLeft, key: '[', code: 'BracketLeft' },
+	{ keyCode: KeyCode.BracketRight, key: ']', code: 'BracketRight' },
+	{ keyCode: KeyCode.Period, key: '.', code: 'Period' },
+	{ keyCode: KeyCode.Comma, key: ',', code: 'Comma' },
+	{ keyCode: KeyCode.Minus, key: '-', code: 'Minus' },
+	{ keyCode: KeyCode.Equal, key: '=', code: 'Equal' },
+];
+
+/**
+ * Which app functions the document-level handler runs for each chord.
+ *
+ * The handler is extracted and evaluated the same way as the editor's action
+ * list, then fired once per chord. Everything it can reach — `tabManager`,
+ * `saveContent`, `handleNewFile` — is a recording stub, so what comes back is
+ * the handler's real branch structure rather than a description of it.
+ */
+function documentKeymap(osType: string): Map<Chord, string[]> {
+	const source = functionSource(readSource('src/lib/MarkdownViewer.svelte'), 'handleKeyDown');
+	const js = ts.transpileModule(source, {
+		compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+	}).outputText;
+
+	let fired: string[] = [];
+	/**
+	 * A stub that is callable, indexable and self-similar, so
+	 * `getCurrentWindow().close()` and `tabManager.cycleTab('next')` both work
+	 * without the harness having to know they exist. Every call is recorded
+	 * under its full path, which is what the assertions read.
+	 */
+	const record = (name: string): never => {
+		const fn = (...args: unknown[]) => {
+			fired.push(args.length && typeof args[0] === 'string' ? `${name}:${args[0]}` : name);
+			return record(`${name}()`);
+		};
+		return new Proxy(fn, {
+			get: (target, key) =>
+				typeof key === 'string' && !(key in target) ? record(`${name}.${key}`) : (target as never)[key as never],
+		}) as never;
+	};
+
+	const known: Record<string, unknown> = {
+		mode: 'app',
+		settings: new Proxy({ osType }, { get: (t, k) => (k === 'osType' ? osType : record(`settings.${String(k)}`)) }),
+		showSettings: false,
+		showHome: false,
+		isEditing: false,
+		modalState: { show: false },
+		promptModal: { show: false },
+		zoomLevel: 100,
+		isFullWidth: false,
+		editorPaneEl: null,
+		document: { activeElement: null },
+		tabManager: new Proxy(
+			{ activeTab: { isSplit: false, isDirty: true, path: '/x.md' }, activeTabId: 'tab-1' },
+			{ get: (t, k) => (k in t ? (t as Record<string, unknown>)[k as string] : record(`tabManager.${String(k)}`)) },
+		),
+		canUsePreviewWidthShortcut: () => true,
+		adjustPreviewMaxWidth: () => 800,
+	};
+
+	const scope = new Proxy(known, {
+		has: () => true,
+		get: (target, property) => {
+			if (typeof property !== 'string') return undefined;
+			if (property in target) return target[property];
+			return record(property);
+		},
+		set: () => true,
+	});
+
+	const build = new Function('scope', `with (scope) { ${js}\nreturn handleKeyDown; }`) as (
+		s: unknown,
+	) => (e: unknown) => void;
+	const handler = build(scope);
+
+	const map = new Map<Chord, string[]>();
+	for (const primary of [
+		{ ctrlKey: false, metaKey: false },
+		{ ctrlKey: true, metaKey: false },
+		{ ctrlKey: false, metaKey: true },
+	]) {
+		for (const shiftKey of [false, true]) {
+			for (const altKey of [false, true]) {
+				for (const entry of FUZZ_KEYS) {
+					fired = [];
+					handler({
+						...primary,
+						shiftKey,
+						altKey,
+						key: entry.key,
+						code: entry.code,
+						target: null,
+						preventDefault: () => {},
+					});
+					if (fired.length === 0) continue;
+					map.set(label({ ...primary, shiftKey, altKey, keyCode: entry.keyCode }), [...new Set(fired)]);
+				}
+			}
+		}
+	}
+	assert.ok(map.size > 15, `the document handler answered ${map.size} chords; the harness is not running the real function`);
+	return map;
+}
+
 // ------------------------------------------------------------------ item #121
 
 /**
@@ -237,6 +379,73 @@ test('the toolbar tooltip prints the shortcut the editor actually registered', (
 	}
 });
 
+// ------------------------------------------------------------------ item #392
+
+const NEW_FILE_CHORDS = { mac: ['Meta+N', 'Meta+T'], other: ['Ctrl+N', 'Ctrl+T'] };
+
+test('Ctrl/Cmd+T means new file in the editor, on every platform', () => {
+	for (const platform of PLATFORMS) {
+		const chords = editorKeymap(platform.mac, platform.os).get('file-new');
+		assert.deepEqual(
+			chords,
+			platform.mac ? NEW_FILE_CHORDS.mac : NEW_FILE_CHORDS.other,
+			`file-new on ${platform.name}`,
+		);
+	}
+
+	// `onnew` is the prop MarkdownViewer.svelte binds to `handleNewFile`, which
+	// is the same function the document-level branch calls after this change.
+	const probe = registeredActions(false);
+	const fileNew = probe.actions.find((action) => action.id === 'file-new');
+	assert.ok(fileNew, 'file-new is registered');
+	const before = probe.calls.length;
+	fileNew.run();
+	assert.deepEqual(probe.calls.slice(before), ['onnew'], 'file-new calls the onnew prop');
+
+	assert.match(
+		readSource('src/lib/MarkdownViewer.svelte'),
+		/onnew=\{handleNewFile\}/,
+		'the editor prop is wired to handleNewFile',
+	);
+});
+
+test('Ctrl/Cmd+T means new file outside the editor too, on every platform', () => {
+	// This is #392. Before the fix the document-level handler answered the same
+	// chord with `tabManager.addHomeTab`, so the meaning of Ctrl+T depended on
+	// where the caret was — Monaco consumes the keystroke and stops it
+	// propagating only when it is the editor that has focus.
+	for (const platform of PLATFORMS) {
+		const keymap = documentKeymap(platform.osType);
+		for (const chord of platform.mac ? ['Meta+T', 'Meta+N'] : ['Ctrl+T', 'Ctrl+N']) {
+			assert.deepEqual(
+				keymap.get(chord),
+				['handleNewFile'],
+				`${chord} on ${platform.name} opens a new file and nothing else`,
+			);
+		}
+	}
+});
+
+test('no path anywhere still opens a Home tab from a keystroke', () => {
+	for (const platform of PLATFORMS) {
+		for (const [chord, fired] of documentKeymap(platform.osType)) {
+			assert.ok(
+				!fired.some((call) => call.includes('addHomeTab')),
+				`${chord} on ${platform.name} still reaches addHomeTab`,
+			);
+		}
+	}
+});
+
+test('the native macOS menu claims exactly two accelerators, and T is not one', () => {
+	// The third code path in #392. The menu was trimmed to Settings and Quit
+	// (#281); anything added back that takes Cmd+T would reintroduce a fourth
+	// meaning, above both layers above, and neither of them could see it.
+	const rust = readSource('src-tauri/src/lib.rs');
+	const accelerators = [...rust.matchAll(/\.accelerator\("([^"]+)"\)/g)].map((m) => m[1]).sort();
+	assert.deepEqual(accelerators, ['CmdOrCtrl+,', 'CmdOrCtrl+Q']);
+});
+
 // ---------------------------------------------------------- the whole keymap
 
 test('no two editor actions claim the same chord', () => {
@@ -251,6 +460,57 @@ test('no two editor actions claim the same chord', () => {
 	}
 });
 
+/**
+ * Chords the two layers answer differently, on purpose or not.
+ *
+ * A chord that both Monaco and the document handler answer must mean the same
+ * thing in both, or it means two things depending on focus — which is exactly
+ * what #392 reported. Everything left here is a divergence that predates this
+ * change; each is named so that a NEW one fails instead of joining a silent
+ * pile.
+ */
+const KNOWN_LAYER_DIVERGENCES: Record<Chord, string> = {
+	// Monaco binds real Ctrl+Tab on macOS because Cmd+Tab is the system app
+	// switcher (see editorOptionWiring.test.ts); the document handler accepts
+	// either modifier. Same action, different chord — not a meaning conflict.
+	'Ctrl+Tab': 'tab cycling: Monaco uses WinCtrl on macOS, the window handler accepts Ctrl or Cmd',
+	'Ctrl+Shift+Tab': 'tab cycling, as above',
+	'Meta+Tab': 'tab cycling, as above',
+	'Shift+Meta+Tab': 'tab cycling, as above',
+};
+
+test('a chord that both layers answer means the same thing in both', () => {
+	// The pairs the app deliberately mirrors: the editor action and the
+	// window-level branch that stands in for it when the caret is elsewhere.
+	const MIRROR: Record<string, string> = {
+		'file-new': 'handleNewFile',
+		'file-open': 'selectFile',
+		'file-save': 'saveContent',
+		'file-close': 'closeFile',
+		'view-toggle-edit': 'toggleEdit',
+		'view-toggle-split': 'toggleSplitView',
+		'tab-undo-close': 'handleUndoCloseTab',
+	};
+
+	for (const platform of PLATFORMS) {
+		const editorSide = editorKeymap(platform.mac, platform.os);
+		const documentSide = documentKeymap(platform.osType);
+
+		for (const [id, expectedCall] of Object.entries(MIRROR)) {
+			const chords = editorSide.get(id);
+			assert.ok(chords?.length, `${id} is bound in the editor on ${platform.name}`);
+			for (const chord of chords) {
+				if (chord in KNOWN_LAYER_DIVERGENCES) continue;
+				const fired = documentSide.get(chord);
+				assert.ok(fired, `${platform.name}: ${chord} runs ${id} in the editor but nothing outside it`);
+				assert.ok(
+					fired.some((call) => call.startsWith(expectedCall)),
+					`${platform.name}: ${chord} runs ${id} in the editor but ${fired.join(', ')} outside it`,
+				);
+			}
+		}
+	}
+});
 
 /**
  * Standalone Monaco's own defaults for the chords this change considered.
