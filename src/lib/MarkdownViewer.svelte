@@ -1885,6 +1885,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			// so the diagrams have to be rendered for the same appearance.
 			mermaidTheme: currentMermaidTheme(),
 			libraries: richLibraries,
+			// The same value the live preview is wearing as `--preview-max-width`,
+			// so the exported file is read at the measure it was written at
+			// instead of the 900px the exporter used to hard-code (#467).
+			contentWidth: previewContentWidth,
 		});
 		if (result?.missingImages) {
 			addToast(`Exported HTML, but ${result.missingImages} local image(s) could not be embedded.`, 'warning');

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { buildExportDocument } from '../src/lib/utils/export.js';
+import { DEFAULT_PREVIEW_MAX_WIDTH } from '../src/lib/utils/previewWidth.js';
 import { readSource } from './sourceTree.js';
 
 const styles = readSource('src/styles.css');
@@ -222,7 +223,13 @@ const screenValue = (chain: Element[], property: string) => resolve(appRules, ch
 // what says whether the recipient can read a section — and in an exported file
 // there is no toggle and no script, so anything hidden is hidden for good.
 const exportedStyles = (() => {
-	const document_ = buildExportDocument({ theme: 'light', title: 'T', styles, articleHtml: '' });
+	const document_ = buildExportDocument({
+		theme: 'light',
+		title: 'T',
+		styles,
+		articleHtml: '',
+		contentWidth: DEFAULT_PREVIEW_MAX_WIDTH,
+	});
 	const match = document_.match(/<style>([\s\S]*)<\/style>/);
 	assert.ok(match, 'the export must carry a stylesheet');
 	return parseRules(stripComments(match[1]));
