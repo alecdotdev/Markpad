@@ -997,39 +997,83 @@
 				run: () => toggleFormat("<u>|</u>", "tag"),
 			}),
 
+			// The six bindings below were chosen against the whole keymap, not
+			// against VS Code's: standalone Monaco and VS Code do not ship the
+			// same defaults, and the chords the mainstream Markdown editors use
+			// for these actions are the ones Monaco is most likely to be sitting
+			// on. `addAction` registers at weight 1000, above every Monaco
+			// default, so a clash is silent — our action simply wins and the
+			// Monaco command loses its key. The reasoning per binding is below,
+			// and `formatShortcutKeymap.test.ts` is what stops the next one from
+			// landing on an occupied chord.
+
 			editor.addAction({
 				id: "fmt-inline-code",
 				label: t('menu.inlineCode', lang),
+				// GitHub's Markdown editor binds inline code to Ctrl/Cmd+E, but
+				// plain Ctrl/Cmd+E is already `view-toggle-edit` here — which is
+				// itself the mainstream reading (Obsidian and Mark Text both use
+				// it for edit/read). So: same letter, plus Shift. Typora's
+				// Ctrl+Shift+` and Mark Text's Ctrl+` are rejected on purpose —
+				// #121 is *about* the backtick being a dead key on QWERTZ.
+				keybindings: [
+					monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyE,
+				],
 				run: () => toggleFormat("`"),
 			}),
 
 			editor.addAction({
 				id: "fmt-code-block",
 				label: t('menu.codeBlock', lang),
+				// No mainstream chord survives contact with Monaco. Typora and
+				// Mark Text both use Ctrl+Shift+K on Windows/Linux, which is
+				// `editor.action.deleteLines` on BOTH platforms, and both switch
+				// to Cmd+Option+C on macOS, which is `toggleFindCaseSensitive`.
+				// F is for the fences ("Code Fences" is Typora's own name for
+				// the command); it is free everywhere.
+				keybindings: [
+					monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
+				],
 				run: () => wrapAsCodeBlock(),
 			}),
 
 			editor.addAction({
 				id: "fmt-quote",
 				label: t('menu.quote', lang),
+				// GitHub's documented blockquote chord, and the only one that is
+				// the same on both platforms in any editor surveyed: Shift+. is
+				// `>` on a US layout, the blockquote marker itself. Typora and
+				// Mark Text use Ctrl+Shift+Q, which macOS cannot deliver —
+				// Shift+Cmd+Q is the system Log Out — which is why both of them
+				// fall back to Cmd+Option+Q there.
+				keybindings: [
+					monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Period,
+				],
 				run: () => toggleLineMarkerTool("fmt-quote"),
 			}),
 
+			// Typora binds Ctrl/Cmd+1..6 and Mark Text binds Cmd+1..6; Markpad
+			// has only three heading actions, so it binds three. 4, 5 and 6 are
+			// left unbound rather than given to something else, so completing
+			// the range later moves nothing.
 			editor.addAction({
 				id: "fmt-heading-1",
 				label: t('menu.heading1', lang),
+				keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Digit1],
 				run: () => toggleLineMarkerTool("fmt-heading-1"),
 			}),
 
 			editor.addAction({
 				id: "fmt-heading-2",
 				label: t('menu.heading2', lang),
+				keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Digit2],
 				run: () => toggleLineMarkerTool("fmt-heading-2"),
 			}),
 
 			editor.addAction({
 				id: "fmt-heading-3",
 				label: t('menu.heading3', lang),
+				keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Digit3],
 				run: () => toggleLineMarkerTool("fmt-heading-3"),
 			}),
 
