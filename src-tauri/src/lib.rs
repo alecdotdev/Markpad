@@ -543,7 +543,6 @@ fn validate_vsix_archive_limits<R: std::io::Read + std::io::Seek>(
     Ok(())
 }
 
-mod setup;
 mod tab_transfer;
 mod window_runtime;
 use window_runtime::{AppState, WatcherState};
@@ -2070,31 +2069,32 @@ fn save_theme(app: AppHandle, theme: String) -> Result<(), String> {
     atomic_write(&theme_path, theme.as_bytes()).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-async fn get_app_mode() -> String {
-    let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|arg| arg == "--uninstall") {
-        return "uninstall".to_string();
+/// Answer the uninstall entry point that pre-2.7 custom installs left behind.
+///
+/// Those installs wrote `UninstallString = "…\Markpad.exe" --uninstall`, and
+/// Add/Remove Programs still runs it on any machine whose registry entry was
+/// never rewritten. The code that used to serve it is gone, so hand the request
+/// to the NSIS uninstaller sitting beside us. When there is none to hand it to,
+/// fall through and start normally: an editor window is a poor answer, but it
+/// is a visible one, and a click that does nothing at all is worse.
+#[cfg(target_os = "windows")]
+fn forward_legacy_uninstall() {
+    if !std::env::args().any(|arg| arg == "--uninstall") {
+        return;
     }
 
-    let current_exe = std::env::current_exe().unwrap_or_default();
-    let exe_name = current_exe
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_lowercase();
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(uninstaller) = exe.parent().map(|dir| dir.join("uninstall.exe")) else {
+        return;
+    };
+    if !uninstaller.is_file() {
+        return;
+    }
 
-    let is_installer_mode =
-        args.iter().any(|arg| arg == "--install") || exe_name.contains("installer");
-
-    if setup::is_installed() {
-        "app".to_string()
-    } else {
-        if is_installer_mode {
-            "installer".to_string()
-        } else {
-            "app".to_string()
-        }
+    if std::process::Command::new(&uninstaller).spawn().is_ok() {
+        std::process::exit(0);
     }
 }
 
@@ -2633,6 +2633,8 @@ pub fn run() {
 
     #[cfg(target_os = "windows")]
     {
+        forward_legacy_uninstall();
+
         std::env::set_var(
             "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
             "--enable-features=SmoothScrolling",
@@ -2818,10 +2820,6 @@ pub fn run() {
             export_pdf_windows,
             print_pdf,
             save_file_binary,
-            get_app_mode,
-            setup::install_app,
-            setup::uninstall_app,
-            setup::check_install_status,
             is_win11,
             open_file_folder,
             rename_file,

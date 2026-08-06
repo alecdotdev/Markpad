@@ -7,8 +7,6 @@
 	import { cubicOut } from 'svelte/easing';
 	import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 	import { open, save, ask } from '@tauri-apps/plugin-dialog';
-	import Installer from './Installer.svelte';
-	import Uninstaller from './Uninstaller.svelte';
 	import Settings from './components/Settings.svelte';
 	import TitleBar from './components/TitleBar.svelte';
 	import Editor from './components/Editor.svelte';
@@ -103,7 +101,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	import 'highlight.js/styles/github-dark.css';
 	import 'katex/dist/katex.min.css';
 
-	let mode = $state<'loading' | 'app' | 'installer' | 'uninstall'>('loading');
+	let mode = $state<'loading' | 'app'>('loading');
 	let isDisposed = false;
 
 	let showSettings = $state(false);
@@ -2804,7 +2802,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 			const init = async () => {
 				const appWindow = getCurrentWindow();
-				const appMode = (await invoke('get_app_mode')) as any;
 				if (isDisposed) return;
 
 			await windowSession.restore();
@@ -3128,7 +3125,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				}
 			}
 
-			if (!isDisposed) mode = appMode;
+			if (!isDisposed) mode = 'app';
 		};
 
 		init();
@@ -3189,10 +3186,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			<circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="4"></circle>
 		</svg>
 	</div>
-{:else if mode === 'installer'}
-	<Installer />
-{:else if mode === 'uninstall'}
-	<Uninstaller />
 {:else}
 	<TitleBar
 		{isFocused}

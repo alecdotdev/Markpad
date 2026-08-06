@@ -40,7 +40,6 @@ regex = "1"
 reqwest = "0.12"
 zip = { version = "2.1", default-features = false, features = ["deflate", "time"] }
 opener = { version = "0.7", features = ["reveal"] }
-chrono = "0.4"
 font-kit = "0.14"
 base64 = "0.22"
 arboard = "3"
@@ -49,7 +48,6 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 
 
 [target.'cfg(windows)'.dependencies]
-mslnk = "0.1"
 winreg = "0.52"
 webview2-com = "0.38.2"
 windows = "0.61.3"
