@@ -1,0 +1,23 @@
+name: Question
+description: Ask how to do something in Markpad
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: Discussions are not enabled on this repository, so questions belong here as issues.
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+
+  - type: input
+    id: platform-version
+    attributes:
+      label: Platform and app version
+      placeholder: "Windows 11 · Markpad 2.7.0"
