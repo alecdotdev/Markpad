@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getMarkdownBodyWithoutFrontMatter, parseFrontMatter } from './frontMatter.js';
 import { processMarkdownHtml } from './markdown.js';
 import {
-	escapeHtmlText,
+	escapeHtml,
 	renderStaticFrontMatterPanel,
 	resolveExportImagePath,
 	rewriteMarkdownHrefForExport,
@@ -53,7 +53,7 @@ interface ExportContext {
 	libraries: RichContentLibraries | null;
 }
 
-export type ExportHtmlResult = {
+type ExportHtmlResult = {
 	path: string;
 	embeddedImages: number;
 	missingImages: number;
@@ -176,7 +176,7 @@ export function buildExportDocument(input: ExportDocumentInput): string {
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtmlText(input.title || 'Export')}</title>
+<title>${escapeHtml(input.title || 'Export')}</title>
 <style>
 ${input.styles}
 html, body {

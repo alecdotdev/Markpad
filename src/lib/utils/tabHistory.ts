@@ -1,13 +1,13 @@
-export type FileHistoryState = {
+type FileHistoryState = {
 	history: string[];
 	historyIndex: number;
 };
 
-export type FileHistoryNavigationState = FileHistoryState & {
+type FileHistoryNavigationState = FileHistoryState & {
 	currentPath: string;
 };
 
-export type FileHistoryNavigationResult = FileHistoryState & {
+type FileHistoryNavigationResult = FileHistoryState & {
 	path: string | null;
 };
 

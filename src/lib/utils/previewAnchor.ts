@@ -29,7 +29,7 @@
  */
 
 /** Inclusive source line range, as written in `data-sourcepos`. */
-export type LineRange = {
+type LineRange = {
 	startLine: number;
 	endLine: number;
 };
@@ -47,7 +47,7 @@ export type AnchorNode = {
 	readonly classList?: { contains(token: string): boolean };
 };
 
-export type AnchorMatch = LineRange & {
+type AnchorMatch = LineRange & {
 	element: AnchorNode;
 };
 
@@ -61,7 +61,7 @@ export type AnchorBox = {
 	height: number;
 };
 
-export type MeasureAnchorBox = (node: AnchorNode) => AnchorBox;
+type MeasureAnchorBox = (node: AnchorNode) => AnchorBox;
 
 const ELEMENT_NODE = 1;
 
@@ -294,7 +294,7 @@ export function findAnchorElement(root: AnchorNode, line: number): AnchorMatch |
  * back to the proportional mapping on every one of them would make the paired
  * pane jump back and forth as the reader scrolled.
  */
-export function findNearestAnchorElement(root: AnchorNode, line: number): AnchorMatch | null {
+function findNearestAnchorElement(root: AnchorNode, line: number): AnchorMatch | null {
 	if (!Number.isFinite(line) || line <= 0) return null;
 	return descend(root, null, (span) => lineDistance(span, line), false);
 }
@@ -309,7 +309,7 @@ export function findNearestAnchorElement(root: AnchorNode, line: number): Anchor
  * the render-protocol DOM shim, and that shim has no layout at all; injecting
  * one is what lets the mapping be tested over real pipeline output.
  */
-export function findAnchorElementAtOffset(
+function findAnchorElementAtOffset(
 	root: AnchorNode,
 	offset: number,
 	measure: MeasureAnchorBox,

@@ -697,119 +697,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	});
 
-	function processHighlights(root: Element) {
-		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-			acceptNode(node) {
-				let curr = node.parentElement;
-				while (curr && curr !== root) {
-					if (['CODE', 'PRE', 'SCRIPT', 'STYLE'].includes(curr.tagName)) return NodeFilter.FILTER_REJECT;
-					curr = curr.parentElement;
-				}
-				return NodeFilter.FILTER_ACCEPT;
-			},
-		});
-
-		const toReplace: { node: Text; replaced: string }[] = [];
-		let node: Node | null;
-		while ((node = walker.nextNode())) {
-			const text = (node as Text).nodeValue || '';
-			if (text.includes('==')) {
-				const replaced = text.replace(/==([^=\n]+)==/g, '<mark>$1</mark>');
-				if (replaced !== text) toReplace.push({ node: node as Text, replaced });
-			}
-		}
-		for (const { node, replaced } of toReplace) {
-			const span = root.ownerDocument!.createElement('span');
-			span.innerHTML = replaced;
-			node.parentNode?.replaceChild(span, node);
-		}
-	}
-
-	function processBlockIds(root: Element, doc: Document) {
-		// handle pre-emitted block-id spans from rust parser
-		for (const el of Array.from(root.querySelectorAll('.block-id, [data-block-id]'))) {
-			const rawId = el.getAttribute('data-block-id') || (el as HTMLElement).textContent?.replace(/^\^/, '').trim() || '';
-			if (!rawId) continue;
-			const anchor = doc.createElement('a');
-			anchor.id = rawId;
-			anchor.className = 'block-id-anchor';
-			anchor.setAttribute('data-label', rawId);
-			anchor.setAttribute('aria-hidden', 'true');
-			el.replaceWith(anchor);
-		}
-
-		// scan text nodes for trailing ^id pattern (text ^blockid at end of block)
-		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-			acceptNode(node) {
-				const parent = node.parentElement;
-				if (!parent) return NodeFilter.FILTER_REJECT;
-				if (['CODE', 'PRE', 'SCRIPT', 'STYLE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(parent.tagName)) return NodeFilter.FILTER_REJECT;
-				return NodeFilter.FILTER_ACCEPT;
-			},
-		});
-
-		const blockIdPattern = / \^([a-zA-Z0-9_-]+)\s*$/;
-		const nodes: { node: Text; id: string }[] = [];
-		let textNode: Node | null;
-		while ((textNode = walker.nextNode())) {
-			const text = (textNode as Text).nodeValue || '';
-			const match = text.match(blockIdPattern);
-			if (match) nodes.push({ node: textNode as Text, id: match[1] });
-		}
-
-		for (const { node, id } of nodes) {
-			const text = node.nodeValue || '';
-			const cleanText = text.replace(blockIdPattern, '');
-			const anchor = doc.createElement('a');
-			anchor.id = id;
-			anchor.className = 'block-id-anchor';
-			anchor.setAttribute('data-label', id);
-			anchor.setAttribute('aria-hidden', 'true');
-			const parent = node.parentNode;
-			if (parent) {
-				const textBefore = doc.createTextNode(cleanText);
-				parent.replaceChild(anchor, node);
-				parent.insertBefore(textBefore, anchor);
-			}
-		}
-	}
-
-	function processTaskItems(root: Element) {
-		for (const input of Array.from(root.querySelectorAll('li input[type="checkbox"]'))) {
-			input.setAttribute('data-task-checkbox', '');
-			input.removeAttribute('disabled');
-			(input as HTMLInputElement).style.cursor = 'pointer';
-
-			const li = input.closest('li');
-			if (!li) continue;
-
-			// wrap bare text/inline nodes after checkbox in a span for CSS targeting
-			const nodes = Array.from(li.childNodes);
-			const inputIdx = nodes.indexOf(input);
-			const afterInput = nodes.slice(inputIdx + 1);
-
-			// we loop until we hit a block child (like a nested UL)
-			const inlineNodes = [];
-			for (const n of afterInput) {
-				if (n.nodeType === 1 && ['P', 'DIV', 'UL', 'OL'].includes((n as Element).tagName)) break;
-				inlineNodes.push(n);
-			}
-
-			if (inlineNodes.length > 0) {
-				const wrapper = root.ownerDocument!.createElement('span');
-				wrapper.className = 'task-text';
-				for (const n of inlineNodes) wrapper.appendChild(n);
-				
-				// insert the newly wrapped span after the checkbox
-				li.insertBefore(wrapper, afterInput[inlineNodes.length] || null);
-			}
-
-			if ((input as HTMLInputElement).checked) {
-				li.classList.add('task-done');
-			}
-		}
-	}
-
 	// The preview and the export run the same filter in opposite orders, on
 	// purpose. The export sanitizes the renderer output first and processes
 	// afterwards, because the bytes it writes are read by another program and
@@ -2790,28 +2677,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		window.addEventListener('pointercancel', onUp);
 	}
 
-	function getSplitTransition(node: Element, { isEditing, side }: { isEditing: boolean; side: 'left' | 'right' }) {
-		let shouldAnimate = false;
-		let x = 0;
-
-		if (side === 'left') {
-			if (!isEditing) {
-				shouldAnimate = true;
-				x = -50;
-			}
-		} else {
-			if (isEditing) {
-				shouldAnimate = true;
-				x = 50;
-			}
-		}
-
-		if (shouldAnimate) {
-			return fly(node, { x, duration: 250 });
-		}
-		return { duration: 0 };
-	}
-
 	onMount(() => {
 		loadRecentFiles();
 		isDisposed = false;
@@ -3452,7 +3317,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 																	<input
 																		id={frontMatterFieldId(field.key)}
 																		type={field.kind === 'number' ? 'number' : 'text'}
-																		value={field.editableValue}
+																		value={field.displayValue}
 																		onchange={(e) => handleFrontMatterEdit(field, (e.currentTarget as HTMLInputElement).value)} />
 																{/if}
 															{:else}

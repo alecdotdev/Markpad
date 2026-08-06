@@ -10,7 +10,7 @@ export type EditorToolbarTool = {
 	group: EditorToolbarGroup;
 };
 
-export type EditorToolbarMove = {
+type EditorToolbarMove = {
 	fromIndex: number;
 	toIndex: number;
 };

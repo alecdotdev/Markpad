@@ -1,12 +1,12 @@
-export type ExportedFileFormat = 'HTML' | 'PDF';
-export type OpenExportedFileResult = 'opened' | 'declined' | 'failed';
+type ExportedFileFormat = 'HTML' | 'PDF';
+type OpenExportedFileResult = 'opened' | 'declined' | 'failed';
 
 type OpenExportedFileLabels = {
 	title?: string;
 	message?: string;
 };
 
-export type OpenExportedFileDeps = {
+type OpenExportedFileDeps = {
 	ask: (message: string, options?: { title: string; kind: 'info' }) => Promise<boolean>;
 	openPath: (path: string) => Promise<void>;
 	labels?: OpenExportedFileLabels;

@@ -28,7 +28,7 @@
  * Which menu the command would live under. The four labels are the existing
  * menu-bar categories, so grouping the panel costs no new translations.
  */
-export type ShortcutGroup = 'file' | 'edit' | 'view' | 'window';
+type ShortcutGroup = 'file' | 'edit' | 'view' | 'window';
 
 /** Display order of the groups, and the i18n key that titles each one. */
 export const SHORTCUT_GROUPS: ReadonlyArray<{ group: ShortcutGroup; labelKey: string }> = [
@@ -39,7 +39,7 @@ export const SHORTCUT_GROUPS: ReadonlyArray<{ group: ShortcutGroup; labelKey: st
 ];
 
 /** The platforms the app distinguishes, spelled the way `settings.osType` does. */
-export type ShortcutPlatform = 'macos' | 'windows' | 'linux';
+type ShortcutPlatform = 'macos' | 'windows' | 'linux';
 
 export type ShortcutEntry = {
 	/**
@@ -311,7 +311,7 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
 ];
 
 /** The modifier word each platform spells `Mod` with. */
-export function modifierFor(platform: ShortcutPlatform): 'Cmd' | 'Ctrl' {
+function modifierFor(platform: ShortcutPlatform): 'Cmd' | 'Ctrl' {
 	return platform === 'macos' ? 'Cmd' : 'Ctrl';
 }
 
@@ -327,10 +327,6 @@ export function formatChord(chord: string, modifier: 'Cmd' | 'Ctrl'): string {
 
 const byId = new Map(SHORTCUTS.map((entry) => [entry.id, entry]));
 
-export function getShortcut(id: string): ShortcutEntry | undefined {
-	return byId.get(id);
-}
-
 /**
  * The single chord a one-line consumer shows for `id`, or `undefined` when the
  * command has no shortcut. This is what the app menu and the toolbar tooltip
@@ -341,7 +337,7 @@ export function shortcutLabel(id: string, modifier: 'Cmd' | 'Ctrl'): string | un
 	return entry ? formatChord(entry.chords[0], modifier) : undefined;
 }
 
-export type ShortcutSection = {
+type ShortcutSection = {
 	group: ShortcutGroup;
 	labelKey: string;
 	entries: ReadonlyArray<{ id: string; labelKey: string; chords: string[] }>;

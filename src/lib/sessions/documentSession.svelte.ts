@@ -32,7 +32,7 @@ export type LoadMarkdownOptions = {
  * `conflict` means the owning tab has unsaved edits, so the choice belongs
  * to the user rather than to a background reload.
  */
-export type ExternalChangeOutcome =
+type ExternalChangeOutcome =
 	| { action: 'ignore' }
 	| { action: 'reload'; tabId: string; path: string }
 	| { action: 'conflict'; tabId: string; path: string };

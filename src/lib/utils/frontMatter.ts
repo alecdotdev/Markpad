@@ -7,7 +7,6 @@ export type FrontMatterField = {
 	value: unknown;
 	kind: FrontMatterValueKind;
 	displayValue: string;
-	editableValue: string;
 	editable: boolean;
 };
 
@@ -25,7 +24,6 @@ export type FrontMatterParseResult = {
 type FrontMatterRange = {
 	raw: string;
 	body: string;
-	lineEnding: '\n' | '\r\n';
 };
 
 function detectLineEnding(content: string): '\n' | '\r\n' {
@@ -33,7 +31,6 @@ function detectLineEnding(content: string): '\n' | '\r\n' {
 }
 
 function findFrontMatterRange(content: string): FrontMatterRange | null {
-	const lineEnding = detectLineEnding(content);
 	const firstLineMatch = content.match(/^(?:\uFEFF)?---[ \t]*(?:\r?\n|$)/);
 	if (!firstLineMatch) return null;
 
@@ -54,7 +51,6 @@ function findFrontMatterRange(content: string): FrontMatterRange | null {
 			return {
 				raw,
 				body: content.slice(bodyStart),
-				lineEnding,
 			};
 		}
 
@@ -84,11 +80,6 @@ function stringifyDisplayValue(value: unknown): string {
 	return String(value);
 }
 
-function toPlainRecord(value: unknown): Record<string, unknown> {
-	if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-	return value as Record<string, unknown>;
-}
-
 // Front matter is metadata, so the block has to parse as a YAML mapping. Jekyll
 // rejects anything else outright (`validate_data!` raises unless the parsed
 // value `is_a?(Hash)`) and Hugo fails to unmarshal it into its map type; when a
@@ -107,14 +98,13 @@ function toField([key, value]: [string, unknown]): FrontMatterField {
 		value,
 		kind,
 		displayValue: stringifyDisplayValue(value),
-		editableValue: Array.isArray(value) ? value.map((item) => stringifyDisplayValue(item)).join(', ') : stringifyDisplayValue(value),
 		editable: kind !== 'object',
 	};
 }
 
 export function parseFrontMatter(content: string): FrontMatterParseResult {
+	const lineEnding = detectLineEnding(content);
 	const range = findFrontMatterRange(content);
-	const lineEnding = range?.lineEnding ?? detectLineEnding(content);
 	const notFrontMatter: FrontMatterParseResult = {
 		exists: false,
 		valid: true,
@@ -148,7 +138,7 @@ export function parseFrontMatter(content: string): FrontMatterParseResult {
 	const parsed = doc.toJSON();
 	if (!isFrontMatterMapping(parsed)) return notFrontMatter;
 
-	const data = toPlainRecord(parsed);
+	const data = (parsed ?? {}) as Record<string, unknown>;
 	return {
 		exists: true,
 		valid: true,
@@ -213,15 +203,7 @@ export function getFrontMatterListItems(field: FrontMatterField): string[] {
 }
 
 export function addFrontMatterListItems(items: string[], values: string[]): string[] {
-	const next = [...items];
-	for (const value of values.flatMap(parseFrontMatterTagInput)) {
-		if (!next.includes(value)) next.push(value);
-	}
-	return next;
-}
-
-export function addFrontMatterListItem(items: string[], value: string): string[] {
-	return addFrontMatterListItems(items, [value]);
+	return [...new Set([...items, ...values.flatMap(parseFrontMatterTagInput)])];
 }
 
 export function removeFrontMatterListItem(items: string[], index: number): string[] {

@@ -126,7 +126,7 @@ export function buildPasteProbe(
 	return { text: lines.join('\n'), lineIndex, offset };
 }
 
-export type PasteCaretContext = {
+type PasteCaretContext = {
 	/** Language id of the model the caret is in. */
 	languageId: string;
 	/** Full document text, needed to locate front matter. */

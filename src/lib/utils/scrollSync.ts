@@ -103,7 +103,7 @@ export function getScrollTopForSyncPosition(position: ScrollSyncPosition, scroll
  * end of the document — the part #205 is about — the one place the round trip
  * did not close.
  */
-export type LineTopLookup = (line: number) => number;
+type LineTopLookup = (line: number) => number;
 
 /** Fractional line number rendered at `offset`. Inverse of the function below. */
 export function getLineAtVerticalOffset(offset: number, lineCount: number, topForLine: LineTopLookup): number {
