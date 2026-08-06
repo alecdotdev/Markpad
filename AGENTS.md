@@ -143,9 +143,9 @@ src-tauri/
 - Export singleton instances (e.g., `export const tabManager = new TabManager()`)
 
 ### Tauri Invoke
-Use `invoke()` from `@tauri-apps/api` for Rust commands:
+Use `invoke()` from `@tauri-apps/api/core` for Rust commands:
 ```typescript
-import { invoke } from '@tauri-apps/api';
+import { invoke } from '@tauri-apps/api/core';
 const result = await invoke<string>('command_name', { arg: value });
 ```
 
@@ -155,8 +155,8 @@ All file operations go through Rust commands - never use Node.js fs APIs.
 ## Testing
 
 - **Rust**: `cargo test` in `src-tauri/` directory
-- **Frontend**: No test framework currently configured
-- **CI**: Runs `npm run check` and `cargo test` on PRs
+- **Frontend**: `npm test` runs the behavior tests in `scripts/*.test.ts` (`node --test --import tsx`)
+- **CI**: Runs `npm audit`, `npm run check`, `npm test` and `cargo test` on PRs
 
 ## Notes
 
