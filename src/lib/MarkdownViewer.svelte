@@ -639,9 +639,20 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		await windowSession.persistState();
 	}
 
+	// Exit discards the snapshot on purpose — it is how "quit" differs from
+	// closing the window — but only once startup is over. Until `init` sets
+	// `mode` to 'app', the file on disk is still the only complete record of
+	// the session: `restore()` has rebuilt the tab list but is partway through
+	// reading those files back. That window is short unless a restored path is
+	// unreachable, and then it is the share timeout, once per tab, serially —
+	// which is exactly when the user starts looking for a way out. The loading
+	// screen renders the ☰ menu while every keyboard shortcut is inert
+	// (`handleKeyDown` returns on `mode !== 'app'`), so Exit is the control
+	// they reach. Discarding there costs them the session they were waiting
+	// for; falling through to a plain close writes it back instead.
 	async function appExit() {
 		await savePinnedTagIfNeeded();
-		if (settings.restoreStateOnReopen) {
+		if (settings.restoreStateOnReopen && mode === 'app') {
 			const hasUnsaved = tabManager.tabs.some((t) => t.isDirty || (t.path === '' && t.rawContent.trim() !== ''));
 			if (hasUnsaved) {
 				const response = await askCustom(t('modal.areYouSureYouWantToExit', settings.language), {

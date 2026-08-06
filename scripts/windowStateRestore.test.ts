@@ -107,6 +107,20 @@ test('v2 snapshots are invisible to legacy builds (Rust file, localStorage keys 
 	assert.match(exitScope, /await discardPersistedWindowState\(\)/);
 });
 
+test('exit discards the snapshot only once startup has finished', () => {
+	const exitScope = sliceBetween(viewer, 'async function appExit', '\n\t}');
+	// Until `init` flips `mode` to 'app', the file on disk is the only complete
+	// record of the session: restore has rebuilt the tab list but is still
+	// reading those files back. An unreachable restored path stretches that
+	// window to one share timeout per tab, and the loading screen renders the
+	// ☰ menu while every keyboard shortcut is inert — so Exit is the control
+	// the user reaches for, and discarding there costs them the session.
+	assert.match(exitScope, /restoreStateOnReopen && mode === 'app'/);
+	const gate = offsetOf(exitScope, "mode === 'app'");
+	const discard = offsetOf(exitScope, 'discardPersistedWindowState()');
+	assert.ok(gate < discard, 'the discard must sit behind the startup gate');
+});
+
 test('with restore enabled resolved titled tabs stay open for the snapshot', () => {
 	const handler = closeHandler();
 	// tabs are closed one-by-one only when restore is off (or untitled)
