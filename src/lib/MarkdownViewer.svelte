@@ -2520,7 +2520,18 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			// alone, identically for the hotkey and the toolbar button.
 			if (!isSplit) toggleEdit();
 		}
-		if (cmdOrCtrl && key === 's') {
+		if (cmdOrCtrl && e.shiftKey && !e.altKey && key === 's') {
+			// Save As. The app menu advertised this chord for as long as the menu has
+			// existed, but nothing ever bound it: the branch below matched on
+			// `cmdOrCtrl && key === 's'` with no Shift guard, so the advertised
+			// keystroke fell through to a plain Save and silently overwrote the file
+			// the user was asking to write somewhere else. `saveContentAs` had no
+			// keyboard path at all — its only caller was the menu button.
+			e.preventDefault();
+			saveContentAs();
+			return;
+		}
+		if (cmdOrCtrl && !e.shiftKey && key === 's') {
 			// Reading mode used to swallow the shortcut entirely. An untitled
 			// buffer reaches it with content still unsaved — `toggleEdit`
 			// only runs its save flow for tabs that already have a path — so

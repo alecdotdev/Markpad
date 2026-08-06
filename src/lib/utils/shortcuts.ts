@@ -118,10 +118,16 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
 		editorAction: true,
 		documentCall: 'saveContent',
 	},
-	// NOTE: Save As is deliberately absent. The app menu used to print
-	// `Mod+Shift+S` beside it; nothing anywhere binds that chord, and because the
-	// save branch does not exclude Shift, pressing it ran a plain Save instead.
-	// See the PR that introduced this file.
+	{
+		id: 'file-save-as',
+		labelKey: 'menu.saveAs',
+		// The chord the app menu has always printed. It is bound for the first
+		// time here: until now the save branch matched `cmdOrCtrl && key === 's'`
+		// with no Shift guard, so the advertised keystroke ran a plain Save.
+		chords: ['Mod+Shift+S'],
+		group: 'file',
+		documentCall: 'saveContentAs',
+	},
 	{
 		id: 'file-reload',
 		labelKey: 'menu.reloadFromDisk',
@@ -231,6 +237,17 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
 		// The branch opens Settings by assigning, not by calling; the harness
 		// records the write.
 		documentCall: 'showSettings=true',
+		nativeMenuAccelerator: 'CmdOrCtrl+,',
+	},
+	{
+		id: 'view-preview-width',
+		labelKey: 'settings.previewMaxWidth',
+		// One row, two chords: `[` narrows and `]` widens, the same pair the
+		// settings stepper offers. Both run the same branch, which turns full-width
+		// off before it adjusts — that write is what the harness records.
+		chords: ['Mod+Alt+[', 'Mod+Alt+]'],
+		group: 'view',
+		documentCall: 'isFullWidth=',
 	},
 	{ id: 'view-zoom-in', labelKey: 'menu.zoomIn', chords: ['Mod+='], group: 'view', documentCall: 'zoomLevel=' },
 	{ id: 'view-zoom-out', labelKey: 'menu.zoomOut', chords: ['Mod+-'], group: 'view', documentCall: 'zoomLevel=' },

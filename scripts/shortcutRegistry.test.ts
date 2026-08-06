@@ -215,7 +215,7 @@ test('the native accelerator the registry defers to is the one the Rust menu cla
 		);
 		checked++;
 	}
-	assert.equal(checked, 1, 'exactly one entry defers to the native menu');
+	assert.equal(checked, 2, 'Quit and Settings are the two entries the native menu also claims');
 });
 
 test('zoom in raises the level, zoom out lowers it, and reset returns to the default', () => {
@@ -288,22 +288,26 @@ test('the app menu prints no shortcut literal of its own', () => {
 	assert.deepEqual(offRegistry, [], 'every menu chord comes from shortcutLabel()');
 });
 
-test('the app menu shows the chord for a command the registry can still not verify', () => {
-	// Save As. The menu used to print `Mod+Shift+S` beside it; nothing binds that
-	// chord. Because the save branch does not exclude Shift, the advertised
-	// keystroke ran a plain Save — silently writing the current file instead of
-	// asking where to put it. The registry has no Save As row, so the menu now
-	// prints no chord there, and this pins the reason.
+test('Save As runs Save As, and not a plain Save', () => {
+	// The chord the app menu printed for years while nothing bound it. The save
+	// branch matched `cmdOrCtrl && key === 's'` with no Shift guard, so the
+	// advertised keystroke reached plain Save and silently overwrote the file the
+	// user was asking to write elsewhere. This is the assertion that the label is
+	// now true rather than merely present.
 	for (const platform of PLATFORMS) {
 		const keymap = documentKeymap(platform.osType);
 		const shiftS = platform.mac ? 'Shift+Meta+S' : 'Ctrl+Shift+S';
-		const fired = keymap.get(shiftS) ?? [];
+		const fired = keymap.get(shiftS);
+		assert.ok(fired, `${shiftS} does nothing on ${platform.name}`);
 		assert.ok(
-			!fired.some((call) => call.startsWith('saveContentAs')),
-			`${shiftS} now reaches saveContentAs on ${platform.name} — give Save As a registry row`,
+			fired.some((call) => call.startsWith('saveContentAs')),
+			`${platform.name}: ${shiftS} runs ${fired.join(', ')} instead of saveContentAs`,
+		);
+		assert.ok(
+			!fired.some((call) => call === 'saveContent'),
+			`${platform.name}: ${shiftS} still falls through to a plain Save`,
 		);
 	}
-	assert.equal(SHORTCUTS.find((entry) => entry.labelKey === 'menu.saveAs'), undefined);
 });
 
 // -------------------------------------------------- editor bindings vs panel
@@ -387,6 +391,8 @@ const PARTIALLY_TRANSLATED: Record<string, number> = {
 	'menu.back': 21,
 	'menu.forward': 21,
 	'menu.window': 23,
+	// Already rendered by the preview settings pane; the panel inherits its gap.
+	'settings.previewMaxWidth': 23,
 };
 
 test('every panel label is translated everywhere, or is a named pre-existing gap', () => {
@@ -442,4 +448,83 @@ test('the panel renders the platform modifier the user is on', () => {
 
 	assert.equal(shortcutLabel('fmt-quote', 'Cmd'), 'Cmd+Shift+.');
 	assert.equal(shortcutLabel('no-such-command', 'Cmd'), undefined);
+});
+
+// ------------------------------------------- reality -> registry (completeness)
+//
+// Every assertion above runs registry -> reality: it takes a row and checks the
+// app really answers that chord. Nothing ran the other way, so a chord the app
+// binds that never made it into the table was invisible to the whole file —
+// `no registry entry is unverifiable` cannot see it, because there is no entry
+// to check. This section is the missing direction, and it found two live gaps
+// the first pass shipped: the preview-width chords, and the native Settings
+// accelerator.
+//
+// The editor layer's half of this is `every keybinding the editor registers is
+// either advertised or consciously not`, above.
+
+/** A recorded call, reduced to the command it names: drop the argument and the assigned value. */
+function commandOf(call: string): string {
+	return call.split(':')[0].replace(/=.*$/, '=');
+}
+
+/**
+ * Commands the document handler can reach that are deliberately not advertised.
+ *
+ * Empty today, and that is the point: everything the keyboard can reach is in
+ * the panel. A new branch has to be listed here with a reason, or shown.
+ */
+const DOCUMENT_NOT_ADVERTISED: Record<string, string> = {};
+
+/** Native menu accelerators deliberately not advertised. Also empty today. */
+const NATIVE_NOT_ADVERTISED: Record<string, string> = {};
+
+test('every command the document handler can reach is advertised, or consciously not', () => {
+	const advertised = SHORTCUTS.map((entry) => entry.documentCall).filter(Boolean) as string[];
+	assert.ok(advertised.length > 10, `${advertised.length} rows name a document command`);
+
+	const reachable = new Set<string>();
+	for (const platform of PLATFORMS) {
+		for (const calls of documentKeymap(platform.osType).values()) for (const call of calls) reachable.add(commandOf(call));
+	}
+	// Without this the whole test passes vacuously if the harness stops running.
+	assert.ok(reachable.size > 10, `the document handler reached ${reachable.size} commands`);
+
+	// Prefix either way: a row may name `getCurrentWindow` for a chord recorded as
+	// `getCurrentWindow().close`, or `showSettings=true` for one recorded as
+	// `showSettings=`. This direction is a coverage question — is the command
+	// mentioned at all — and the exact chord-by-chord contract is asserted above.
+	const unexplained = [...reachable].filter(
+		(command) =>
+			!advertised.some((call) => command.startsWith(call) || call.startsWith(command)) &&
+			!(command in DOCUMENT_NOT_ADVERTISED),
+	);
+	assert.deepEqual(
+		unexplained.sort(),
+		[],
+		'these commands are reachable from the keyboard but the shortcuts panel never mentions them; ' +
+			'add a row to SHORTCUTS or a reason to DOCUMENT_NOT_ADVERTISED',
+	);
+
+	for (const command of Object.keys(DOCUMENT_NOT_ADVERTISED)) {
+		assert.ok(reachable.has(command), `${command} is no longer reachable — drop it from DOCUMENT_NOT_ADVERTISED`);
+	}
+});
+
+test('every native menu accelerator is advertised, or consciously not', () => {
+	// The macOS menu is a third layer above the other two, and #392 was in part a
+	// chord it owned that nothing else knew about.
+	const rust = readSource('src-tauri/src/lib.rs');
+	const accelerators = [...rust.matchAll(/\.accelerator\("([^"]+)"\)/g)].map((m) => m[1]);
+	assert.ok(accelerators.length > 0, 'the native menu accelerators were found');
+
+	const advertised = new Set(SHORTCUTS.map((entry) => entry.nativeMenuAccelerator).filter(Boolean));
+	const unexplained = accelerators.filter(
+		(accelerator) => !advertised.has(accelerator) && !(accelerator in NATIVE_NOT_ADVERTISED),
+	);
+	assert.deepEqual(
+		unexplained.sort(),
+		[],
+		'the native menu claims these accelerators and the shortcuts panel never mentions them',
+	);
 });

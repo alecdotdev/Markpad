@@ -541,6 +541,7 @@
 								points="7 3 7 8 15 8"></polyline
 							></svg>
 						{t('menu.saveAs', currentLanguage)}
+						<span class="menu-shortcut">{shortcutLabel('file-save-as', modifier)}</span>
 					</button>
 					{#if currentFile !== ''}
 						<button
