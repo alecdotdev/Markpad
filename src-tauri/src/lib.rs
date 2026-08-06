@@ -2031,24 +2031,48 @@ async fn save_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
     .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Async because `reveal` blocks its caller until the file manager answers:
+/// on Windows it spawns a COM worker for `SHOpenFolderAndSelectItems` and
+/// joins it, on macOS it waits for `open -R`. Selecting a file on a network
+/// volume makes that wait the share's, and on the main thread it would stall
+/// every window until it returns.
 #[tauri::command]
-fn open_file_folder(path: String) -> Result<(), String> {
-    opener::reveal(path).map_err(|e| e.to_string())
+async fn open_file_folder(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || opener::reveal(path).map_err(|e| e.to_string()))
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Async because a rename is a round trip to whatever holds the path — on a
+/// network or removable volume, seconds of blocking I/O for a metadata
+/// operation that looks instant on a local disk.
 #[tauri::command]
-fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
-    fs::rename(old_path, new_path).map_err(|e| e.to_string())
+async fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::rename(old_path, new_path).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Async because arming a watcher opens the watched path, and an unreachable
+/// one costs the full share timeout before it fails — `\\wsl$\…` with the
+/// distro stopped is the case that prompted this. Inserting the new watcher
+/// also drops the window's previous one, and that drop joins its thread.
+///
+/// `State` is resolved inside the closure rather than taken as a parameter:
+/// `State<'_, _>` borrows from the app and cannot cross into a `'static`
+/// blocking task. It is injected by Tauri either way, so the command's
+/// frontend-facing arguments are unchanged.
 #[tauri::command]
-fn watch_file(
-    window: tauri::Window,
-    handle: AppHandle,
-    state: State<'_, WatcherState>,
-    path: String,
-) -> Result<(), String> {
-    window_runtime::watch_file(window, handle, state, path)
+async fn watch_file(window: tauri::Window, handle: AppHandle, path: String) -> Result<(), String> {
+    let state_handle = handle.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = state_handle.state::<WatcherState>();
+        window_runtime::watch_file(window, handle, state, path)
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -2593,9 +2617,17 @@ fn copy_file_to_img_blocking(
     Ok(rel_path)
 }
 
+/// Async because `fs::copy` streams the whole file. On a network or removable
+/// volume that is seconds of blocking I/O, and on the main thread it would
+/// stall every window until the copy completes — the same reason its sibling
+/// `copy_file_to_img` already runs on the blocking pool.
 #[tauri::command]
-fn copy_file(src: String, dest: String) -> Result<(), String> {
-    fs::copy(src, dest).map(|_| ()).map_err(|e| e.to_string())
+async fn copy_file(src: String, dest: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::copy(src, dest).map(|_| ()).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
