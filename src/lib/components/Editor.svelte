@@ -331,6 +331,16 @@
 			occurrencesHighlight: settings.occurrencesHighlight
 				? "singleFile"
 				: "off",
+			// The other half of "Highlight Occurrences". Monaco splits the
+			// feature across two options, and `SelectionHighlighter` gates
+			// itself on `selectionHighlight` — it reads `occurrencesHighlight`
+			// only to choose which decoration style to draw with. Left unset,
+			// `selectionHighlight` defaults to true, so with the setting off —
+			// which is its default — selecting a word still highlighted every
+			// other copy of it, from a switch the app never exposed. Same shape
+			// as the defects #369 fixed: a setting that does not control the
+			// thing its label names.
+			selectionHighlight: settings.occurrencesHighlight,
 			fontSize: settings.editorFontSize,
 			fontFamily: settings.editorFont,
 			wordBasedSuggestions: "off",
@@ -356,6 +366,24 @@
 			// service returns true unconditionally, so it is already off; were it
 			// on, every ideograph would be boxed rather than the punctuation.
 			unicodeHighlight: { ambiguousCharacters: false },
+			// The same argument one option over. U+2028 (LINE SEPARATOR) and
+			// U+2029 (PARAGRAPH SEPARATOR) break a JavaScript string literal,
+			// which is what Monaco's guard is for; in Markdown they are just
+			// characters, and they arrive by ordinary means — several word
+			// processors and PDF text extractors emit U+2028 for a soft line
+			// break, so pasting one in is normal here.
+			//
+			// The default is 'prompt', and in standalone Monaco that prompt is
+			// `StandaloneDialogService.doConfirm`, i.e. a bare
+			// `mainWindow.confirm()`: an unstyled browser dialog inside a Tauri
+			// window, carrying Monaco's English string in an app translated
+			// into 26 locales, offering to rewrite the user's bytes. 'auto'
+			// would rewrite them without asking, which is worse.
+			//
+			// 'off' loses no visibility: the line renderer substitutes U+FFFD
+			// for LINE_SEPARATOR and PARAGRAPH_SEPARATOR unconditionally, so
+			// they stay as visible as they ever were. Only the dialog goes.
+			unusualLineTerminators: "off",
 			renderWhitespace: settings.showWhitespace ? "all" : "none",
 			padding: { top: 20 },
 			scrollbar: {
@@ -1451,6 +1479,7 @@
 				occurrencesHighlight: settings.occurrencesHighlight
 					? "singleFile"
 					: "off",
+				selectionHighlight: settings.occurrencesHighlight,
 				fontSize: settings.editorFontSize * (zoomLevel / 100),
 				fontFamily: settings.editorFont,
 				renderWhitespace: settings.showWhitespace ? "all" : "none",

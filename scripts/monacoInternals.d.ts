@@ -30,7 +30,26 @@ declare module 'monaco-editor/esm/vs/editor/common/config/editorOptions.js' {
 		allowedLocales: Record<string, boolean>;
 	}
 
+	/**
+	 * One entry of the option registry.
+	 *
+	 * `validate` is the function `monaco.editor.create` runs over the value it
+	 * was handed: it returns `defaultValue` for `undefined`, and for anything
+	 * outside the option's accepted set. Driving an assertion through it rather
+	 * than comparing the literal is what makes `"Off"` or a renamed enum member
+	 * fail in the test instead of silently reverting at runtime.
+	 */
+	export interface SimpleEditorOption<T> {
+		readonly id: number;
+		readonly name: string;
+		readonly defaultValue: T;
+		validate(input: unknown): T;
+	}
+
 	export const EditorOptions: {
+		occurrencesHighlight: SimpleEditorOption<'off' | 'singleFile' | 'multiFile'>;
+		selectionHighlight: SimpleEditorOption<boolean>;
+		unusualLineTerminators: SimpleEditorOption<'auto' | 'off' | 'prompt'>;
 		unicodeHighlight: {
 			readonly defaultValue: UnicodeHighlightOptions;
 			/** Merges a partial option object over `value`, as `editor.create` does. */
@@ -40,6 +59,15 @@ declare module 'monaco-editor/esm/vs/editor/common/config/editorOptions.js' {
 			): { newValue: UnicodeHighlightOptions };
 		};
 	};
+}
+
+declare module 'monaco-editor/esm/vs/base/common/strings.js' {
+	/**
+	 * Monaco's own predicate for U+2028 / U+2029 — the one whose result the
+	 * piece-tree buffer stores as `mightContainUnusualLineTerminators`, which is
+	 * the gate `UnusualLineTerminatorsDetector` checks before it opens a dialog.
+	 */
+	export function containsUnusualLineTerminators(str: string): boolean;
 }
 
 declare module 'monaco-editor/esm/vs/editor/common/services/unicodeTextModelHighlighter.js' {

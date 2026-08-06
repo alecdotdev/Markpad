@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { containsUnusualLineTerminators } from 'monaco-editor/esm/vs/base/common/strings.js';
 import {
 	EditorOptions,
 	inUntrustedWorkspace,
@@ -188,44 +189,65 @@ test('Show Whitespace renders every whitespace run, not just trailing', () => {
 // the shipped defaults, and `UnicodeTextModelHighlighter` to decide what gets a
 // box. A regression has to survive Monaco's own code to reach the assertions.
 
-/** The options object Editor.svelte hands to `monaco.editor.create`, evaluated. */
-function createdEditorOptions(): Record<string, unknown> {
+/**
+ * The one option literal Editor.svelte passes to `callee`, evaluated against a
+ * given settings store.
+ *
+ * `settings` is a plain object rather than a fixture of the real store: an
+ * absent key reads as `undefined`, which is what a falsy setting does to every
+ * ternary in these literals anyway, so naming only the keys a test cares about
+ * keeps that test readable. It is a parameter at all because a settings-driven
+ * option cannot be judged from one evaluation — wiring that is right for one
+ * value of a setting and wrong for the other is the defect shape this whole
+ * file exists for.
+ */
+function optionsPassedTo(callee: string, settings: Record<string, unknown> = {}): Record<string, unknown> {
 	const script = sliceBetween(editor, '<script lang="ts">', '</script>');
 	const source = ts.createSourceFile('Editor.ts', script, ts.ScriptTarget.Latest, true);
 
 	const literals: ts.Expression[] = [];
 	const visit = (node: ts.Node): void => {
-		if (ts.isCallExpression(node) && node.expression.getText(source) === 'monaco.editor.create') {
-			assert.equal(node.arguments.length, 2, 'monaco.editor.create(container, options)');
-			literals.push(node.arguments[1]);
+		if (ts.isCallExpression(node) && node.expression.getText(source) === callee) {
+			assert.equal(
+				node.arguments.length,
+				callee === 'monaco.editor.create' ? 2 : 1,
+				`${callee} takes the options object last`,
+			);
+			literals.push(node.arguments[node.arguments.length - 1]);
 		}
 		ts.forEachChild(node, visit);
 	};
 	visit(source);
 
 	// Also the check that this file is looking at the only editor in the app: a
-	// second `create` call would need the same option and would not be covered
-	// by anything below.
-	assert.equal(literals.length, 1, 'exactly one Monaco editor is constructed in Editor.svelte');
+	// second `create` call would need the same options and would not be covered
+	// by anything below. The same holds for a second `updateOptions`, which is
+	// the effect race #369 removed.
+	assert.equal(literals.length, 1, `exactly one ${callee} call site in Editor.svelte`);
 
 	const js = ts.transpileModule(`(${literals[0].getText(source)})`, {
 		compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
 	}).outputText;
 
-	// The literal closes over five locals. None of them can reach
-	// `unicodeHighlight`, which is a constant, so they are stubbed rather than
-	// reconstructed — the settings proxy answers undefined for every key, which
-	// is enough to let the object build. `documentOptions` is the spread that
-	// hands the editor the active tab's model (or `value`/`language` when there
-	// is no tab); an empty object is the right stub because nothing it can
-	// contain is an option this file asserts on.
-	return new Function('settings', 'value', 'language', 'getTheme', 'documentOptions', `return ${js};`)(
-		new Proxy({}, { get: () => undefined }),
-		'',
-		'markdown',
-		() => 'app-theme-dark',
-		{},
-	) as Record<string, unknown>;
+	// The literals close over six locals, stubbed rather than reconstructed.
+	// `documentOptions` is the spread that hands the editor the active tab's
+	// model (or `value`/`language` when there is no tab); an empty object is the
+	// right stub because nothing it can contain is an option this file asserts
+	// on. `zoomLevel` is 100, the neutral factor, for the same reason.
+	return new Function(
+		'settings',
+		'value',
+		'language',
+		'getTheme',
+		'documentOptions',
+		'zoomLevel',
+		`return ${js};`,
+	)(settings, '', 'markdown', () => 'app-theme-dark', {}, 100) as Record<string, unknown>;
+}
+
+/** The options object Editor.svelte hands to `monaco.editor.create`, evaluated. */
+function createdEditorOptions(): Record<string, unknown> {
+	return optionsPassedTo('monaco.editor.create');
 }
 
 /**
@@ -338,4 +360,123 @@ test('the invisible-character warning survives the fix', () => {
 
 	const found = outlined(['a b', 'x​z'], effective);
 	assert.equal(found.invisibleCharacterCount, 2, 'NBSP and zero-width space are still flagged');
+});
+
+// ------------------------------------------------- the defaults left in force
+//
+// Everything above is an option Editor.svelte was passing wrongly. The two
+// below are options it was not passing at all, so `monaco.editor.create`'s
+// default was deciding — and deciding against something the app states
+// elsewhere.
+//
+// Both are read through the option's own `validate`, the function the real
+// `create` runs over what it is handed. That is not ceremony: `validate`
+// silently returns the option's *default* for anything outside its accepted
+// set, so `"Off"`, `0`, or an enum member renamed in a Monaco upgrade would
+// leave the editor exactly as it is today while an `assert.equal` on the
+// literal stayed green.
+
+/**
+ * What both occurrence-highlighting options resolve to, for one value of the
+ * one setting that is supposed to drive them.
+ */
+function occurrenceHighlighting(
+	callee: string,
+	occurrencesHighlight: boolean,
+): { occurrencesHighlight: string; selectionHighlight: boolean } {
+	const options = optionsPassedTo(callee, { occurrencesHighlight });
+	return {
+		occurrencesHighlight: EditorOptions.occurrencesHighlight.validate(options.occurrencesHighlight),
+		selectionHighlight: EditorOptions.selectionHighlight.validate(options.selectionHighlight),
+	};
+}
+
+test('"Highlight Occurrences" off leaves nothing highlighting occurrences', () => {
+	// The setting (`settings.occurrencesHighlight`, default false, labelled
+	// "Highlight Occurrences" / 高亮匹配项 / 一致箇所の強調) drove Monaco's
+	// `occurrencesHighlight` alone. Monaco splits the feature in two:
+	// `SelectionHighlighter` gates itself on `selectionHighlight` and consults
+	// `occurrencesHighlight` only to choose which decoration style to draw with.
+	// So at the setting's own default, selecting a word still highlighted every
+	// other copy of it — the promise the label makes was kept by half the
+	// editor.
+	//
+	// Both call sites, because they can disagree: two effects writing one option
+	// with different values is what #369 found in `fontSize`, and an option set
+	// only at construction stops tracking the setting the moment a user toggles
+	// it.
+	for (const callee of ['monaco.editor.create', 'editor.updateOptions']) {
+		assert.deepEqual(
+			occurrenceHighlighting(callee, false),
+			{ occurrencesHighlight: 'off', selectionHighlight: false },
+			`${callee}: with the setting off both occurrence highlighters must be off — ` +
+				'selectionHighlight is the one SelectionHighlighter actually gates on',
+		);
+		assert.deepEqual(
+			occurrenceHighlighting(callee, true),
+			{ occurrencesHighlight: 'singleFile', selectionHighlight: true },
+			`${callee}: with the setting on the same one switch must turn both on`,
+		);
+	}
+});
+
+test('an unset selectionHighlight still means "highlight the selection"', () => {
+	// The other half of the test above, for the same reason the CJK fixtures are
+	// re-checked against Monaco's defaults: without this, dropping
+	// `selectionHighlight` from Editor.svelte would pass if Monaco ever flipped
+	// that default, and the test would be asserting nothing. It fails on Monaco
+	// instead, rather than on the fix.
+	assert.equal(
+		EditorOptions.selectionHighlight.validate(undefined),
+		true,
+		"Monaco still highlights the selection's occurrences when the option is not passed",
+	);
+	assert.notEqual(
+		EditorOptions.occurrencesHighlight.validate(undefined),
+		'off',
+		'…and still runs the other highlighter, so neither is covered by leaving it out',
+	);
+});
+
+test('the editor does not offer to rewrite a document containing U+2028', () => {
+	// `unusualLineTerminators` defaults to 'prompt'. On 'prompt',
+	// UnusualLineTerminatorsDetector calls IDialogService.confirm, which in a
+	// standalone build is StandaloneDialogService — `mainWindow.confirm(...)`,
+	// an unstyled browser dialog carrying Monaco's English string, inside an app
+	// whose own UI ships 26 locales, offering to delete characters out of the
+	// user's file. The guard exists to protect JavaScript string literals, which
+	// U+2028 and U+2029 terminate; Markdown has no such hazard.
+	//
+	// 'auto' is not the alternative: it makes the same edit with no dialog.
+	assert.equal(
+		EditorOptions.unusualLineTerminators.validate(createdEditorOptions().unusualLineTerminators),
+		'off',
+		'the detector must return early instead of reaching the dialog',
+	);
+
+	// The default this moves away from, and the reason the assertion above is
+	// not spelled against the literal: anything Monaco does not recognise
+	// resolves straight back to the dialog.
+	assert.equal(EditorOptions.unusualLineTerminators.validate(undefined), 'prompt');
+	assert.equal(EditorOptions.unusualLineTerminators.validate('never'), 'prompt');
+	assert.equal(EditorOptions.unusualLineTerminators.validate('Off'), 'prompt');
+});
+
+test('the character that opens that dialog is one prose really carries', () => {
+	// Not hypothetical: U+2028 is what several word processors and PDF text
+	// extractors emit for a soft line break, so it arrives by pasting. This is
+	// Monaco's own predicate — its result is what the piece-tree buffer stores
+	// as `mightContainUnusualLineTerminators`, the flag the detector reads
+	// before it prompts.
+	//
+	// Spelled as escapes rather than as the characters themselves: the value
+	// Monaco sees is identical, and a reviewer can tell which character each
+	// fixture is about instead of staring at an invisible one.
+	assert.equal(containsUnusualLineTerminators('A pasted paragraph with a soft\u2028break.'), true);
+	assert.equal(containsUnusualLineTerminators('Two paragraphs,\u2029joined.'), true);
+	assert.equal(
+		containsUnusualLineTerminators('# Heading\n\nOrdinary markdown\r\nwith both line endings.\n'),
+		false,
+		'ordinary line endings are not what this is about',
+	);
 });
