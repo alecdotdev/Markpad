@@ -6,8 +6,10 @@
 	import { MARKDOWN_LANGUAGE_ID, shouldLinkifyPastedUrl } from '../utils/pasteContext.js';
 	import { toggleLineMarker, type LineMarkerToolId } from '../utils/editorToolbar.js';
 	import {
+		getLineAtVerticalOffset,
 		getScrollSyncPositionFromPixels,
 		getScrollTopForSyncPosition,
+		getVerticalOffsetForLine,
 		type ScrollSyncPosition,
 	} from '../utils/scrollSync.js';
 
@@ -1185,26 +1187,58 @@
 		return Math.max(0, Math.min(getEditorContentScrollMax(), editor.getTopForLineNumber(safeBodyStartLine)));
 	}
 
+	// Monaco's own line -> pixel measurement, which already accounts for folded
+	// regions, wrapped lines and view zones. `getLineAtVerticalOffset` inverts it
+	// by binary search, so this is called ~log2(lineCount) times per sync.
+	function getEditorLineTop(line: number) {
+		return editor ? editor.getTopForLineNumber(line) : 0;
+	}
+
 	function getEditorScrollSyncPosition() {
 		if (!editor) {
 			return { section: 'body', ratio: 0 } satisfies ScrollSyncPosition;
 		}
 
-		return getScrollSyncPositionFromPixels(
+		const position = getScrollSyncPositionFromPixels(
 			editor.getScrollTop(),
 			getEditorContentScrollMax(),
 			getEditorFrontMatterScrollEnd(),
 		);
+
+		// Front matter renders as a panel in the preview with no source range, so
+		// there is nothing for a line to resolve against there; the section ratio
+		// carries it, exactly as before.
+		const model = position.section === 'body' ? editor.getModel() : null;
+		if (!model) return position;
+
+		const line = getLineAtVerticalOffset(editor.getScrollTop(), model.getLineCount(), getEditorLineTop);
+
+		return Number.isFinite(line) ? { ...position, line } : position;
 	}
 
 	export function syncScrollToPosition(position: ScrollSyncPosition) {
 		if (!editor) return;
 
-		const targetScroll = getScrollTopForSyncPosition(
-			position,
-			getEditorContentScrollMax(),
-			getEditorFrontMatterScrollEnd(),
-		);
+		const scrollMax = getEditorContentScrollMax();
+		let targetScroll: number | null = null;
+
+		if (position.section === 'body' && position.line !== undefined) {
+			const model = editor.getModel();
+			if (model) {
+				const offset = getVerticalOffsetForLine(position.line, model.getLineCount(), getEditorLineTop);
+				if (Number.isFinite(offset)) targetScroll = offset;
+			}
+		}
+
+		if (targetScroll === null) {
+			targetScroll = getScrollTopForSyncPosition(position, scrollMax, getEditorFrontMatterScrollEnd());
+		}
+
+		// Clamp before the threshold: a line near the end of the document resolves
+		// to an offset the editor cannot reach, and an unreachable target produces
+		// no scroll event — which would leave `isApplyingExternalScroll` to be
+		// spent on the reader's next real scroll instead of on this one.
+		targetScroll = Math.max(0, Math.min(scrollMax, targetScroll));
 
 		if (Math.abs(editor.getScrollTop() - targetScroll) <= 5) return;
 
