@@ -41,8 +41,11 @@ import { observeFoldLayout } from './utils/foldLayout.js';
 import {
 	findAnchorElement,
 	getAnchorScrollTop,
-	parseSourceposLineRange,
+	getPreviewOffsetForSourceLine,
+	getSourceLineAtPreviewOffset,
 	PREVIEW_ANCHOR_OFFSET,
+	type AnchorBox,
+	type AnchorNode,
 } from './utils/previewAnchor.js';
 import {
 	addFrontMatterListItems,
@@ -1194,22 +1197,57 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		return Math.max(0, Math.min(getPreviewScrollMax(target), panel.offsetTop + panel.offsetHeight));
 	}
 
-	function getPreviewScrollSyncPosition(target: HTMLElement) {
-		return getScrollSyncPositionFromPixels(
+	// `offsetTop` is relative to the offset parent rather than to the scroll
+	// container, but every measurement in the sync path reads the same property
+	// on elements sharing one offset parent, so the difference is a constant that
+	// cancels — the same reasoning `getAnchorScrollTop` documents for the restore.
+	function measurePreviewBox(node: AnchorNode): AnchorBox {
+		const element = node as HTMLElement;
+		return { top: element.offsetTop, height: element.offsetHeight };
+	}
+
+	function getPreviewScrollSyncPosition(target: HTMLElement): ScrollSyncPosition {
+		const position = getScrollSyncPositionFromPixels(
 			target.scrollTop,
 			getPreviewScrollMax(target),
 			getPreviewFrontMatterScrollEnd(target),
 		);
+
+		// Front matter is a rendered panel with no source range, so there is no
+		// line to send and the section ratio is the only thing that can carry it.
+		// This is the carve-out `scrollSync.ts` exists for, unchanged.
+		if (position.section !== 'body') return position;
+
+		const line = getSourceLineAtPreviewOffset(target, target.scrollTop, measurePreviewBox);
+
+		return line === null ? position : { ...position, line };
 	}
 
 	function scrollPreviewToSyncPosition(position: ScrollSyncPosition) {
 		if (!markdownBody) return;
 
-		const targetScroll = getScrollTopForSyncPosition(
-			position,
-			getPreviewScrollMax(markdownBody),
-			getPreviewFrontMatterScrollEnd(markdownBody),
-		);
+		const scrollMax = getPreviewScrollMax(markdownBody);
+		let targetScroll: number | null = null;
+
+		if (position.section === 'body' && position.line !== undefined) {
+			const offset = getPreviewOffsetForSourceLine(markdownBody, position.line, measurePreviewBox);
+			if (offset !== null) targetScroll = offset;
+		}
+
+		if (targetScroll === null) {
+			targetScroll = getScrollTopForSyncPosition(
+				position,
+				scrollMax,
+				getPreviewFrontMatterScrollEnd(markdownBody),
+			);
+		}
+
+		// The line mapping can point past either end — the last block interpolates
+		// beyond the bottom of a preview that has no room left to scroll. Clamping
+		// before the threshold check is what keeps `isProgrammaticScroll` honest:
+		// an unreachable target fires no scroll event, and the flag would then be
+		// spent swallowing the reader's next real scroll instead.
+		targetScroll = Math.max(0, Math.min(scrollMax, targetScroll));
 
 		if (Math.abs(markdownBody.scrollTop - targetScroll) <= 5) return;
 
@@ -1223,41 +1261,29 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	}
 
-	type PreviewScrollAnchor = {
-		line: number;
-		ratio: number;
-	};
+	/**
+	 * The source line to save as this tab's reading position: the one rendered
+	 * `PREVIEW_ANCHOR_OFFSET` below the top of the viewport, which is where the
+	 * restore puts it back.
+	 *
+	 * This used to be its own scan — `querySelectorAll('[data-sourcepos]')` over
+	 * the whole preview, then `offsetTop` and `offsetHeight` on every element it
+	 * returned, on every scroll event. Two things were wrong with that beyond the
+	 * cost (8.3ms per event on a 13,000-line document, measured in Chrome). It
+	 * took the FIRST element covering the offset in document order, which is the
+	 * outermost, while the restore's `findAnchorElement` takes the narrowest — so
+	 * capture and restore disagreed about which block a position belonged to. And
+	 * it had no opinion about `<br>`, which carries a source range and no box, so
+	 * an anchor at the top of the document could resolve to one (#464).
+	 */
+	function getPreviewScrollAnchor(target: HTMLElement): number | null {
+		const line = getSourceLineAtPreviewOffset(
+			target,
+			target.scrollTop + PREVIEW_ANCHOR_OFFSET,
+			measurePreviewBox,
+		);
 
-	function getPreviewScrollAnchor(target: HTMLElement): PreviewScrollAnchor | null {
-		const anchorOffset = target.scrollTop + PREVIEW_ANCHOR_OFFSET;
-		const viewportRatio =
-			target.clientHeight > 0 ? Math.min(1, PREVIEW_ANCHOR_OFFSET / target.clientHeight) : 0;
-		const candidates = Array.from(target.querySelectorAll<HTMLElement>('[data-sourcepos]'));
-
-		let best: { el: HTMLElement; startLine: number; endLine: number; distance: number } | null = null;
-		for (const el of candidates) {
-			const range = parseSourceposLineRange(el.dataset.sourcepos);
-			if (!range) continue;
-
-			const top = el.offsetTop;
-			const bottom = top + el.offsetHeight;
-			const distance = anchorOffset < top ? top - anchorOffset : anchorOffset > bottom ? anchorOffset - bottom : 0;
-
-			if (!best || distance < best.distance) {
-				best = { el, startLine: range.startLine, endLine: range.endLine, distance };
-				if (distance === 0) break;
-			}
-		}
-
-		if (!best) return null;
-
-		const elementHeight = best.el.offsetHeight;
-		const relativeOffset = Math.max(0, Math.min(elementHeight, anchorOffset - best.el.offsetTop));
-		const elementRatio = elementHeight > 0 ? relativeOffset / elementHeight : 0;
-		const totalLines = best.endLine - best.startLine;
-		const line = best.startLine + Math.round(Math.max(0, totalLines) * elementRatio);
-
-		return { line, ratio: viewportRatio };
+		return line === null ? null : Math.round(line);
 	}
 
 	function syncEditorToPreviewScroll(target: HTMLElement) {
@@ -1299,9 +1325,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				tabManager.updateTabScrollPercentage(tabManager.activeTabId, percentage);
 			}
 
-			const anchor = getPreviewScrollAnchor(target);
-			if (anchor) {
-				tabManager.updateTabAnchorLine(tabManager.activeTabId, anchor.line);
+			const anchorLine = getPreviewScrollAnchor(target);
+			if (anchorLine !== null) {
+				tabManager.updateTabAnchorLine(tabManager.activeTabId, anchorLine);
 			}
 		}
 

@@ -141,6 +141,7 @@ function createDocument(initial: string) {
 			getValue: () => buffer,
 			getValueInRange: (range: FakeRange) => buffer.slice(range.startColumn - 1, range.endColumn - 1),
 			getLineContent: () => buffer,
+			getLanguageId: () => 'markdown',
 		}),
 		getPosition: () => ({ lineNumber: 1, column: buffer.length + 1 }),
 		getSelection: () => null,
@@ -230,6 +231,13 @@ const factorySource = ts.transpileModule(
 	`const __component = (invoke, settings, tabManager, monaco, editor) => {
 		let value = '';
 		let wordCount = 0;
+		let currentLanguage = 'markdown';
+
+		// The status-bar refresh the content-change listener calls. Lifted from
+		// the component rather than stubbed, so the listener under test runs
+		// exactly the statements it runs in the app; nothing here asserts on
+		// what it writes.
+		${functionSource(source, 'syncStatusFromModel')}
 
 		// Reached only by the text-paste path, which no test here exercises.
 		const insertTextAtCursor = () => { throw new Error('text paste path not modelled'); };

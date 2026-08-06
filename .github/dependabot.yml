@@ -1,0 +1,64 @@
+# Dependabot version updates.
+#
+# Deliberately quiet. Three ecosystems on a weekly cadence would put roughly a
+# dozen pull requests a month in front of one maintainer, which is how a
+# dependency bot stops being read. Each ecosystem instead gets one grouped pull
+# request a month.
+#
+# Security updates are not configured here -- they are a repository setting
+# (Settings -> Advanced Security -> Dependabot security updates) and they open
+# their own pull requests as advisories land, independent of the schedule below.
+# `applies-to: version-updates` on each group is what keeps them out of the
+# monthly batch, so a security fix still arrives on its own and immediately.
+
+version: 2
+
+updates:
+  # package.json / package-lock.json at the repository root.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    # One group covers everything, so in practice this is 1. The headroom is
+    # for the case where a grouped pull request is open and stale.
+    open-pull-requests-limit: 2
+    groups:
+      npm:
+        applies-to: version-updates
+        patterns:
+          - '*'
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+      include: scope
+
+  # src-tauri/Cargo.toml -- the only Rust manifest in the tree.
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      cargo:
+        applies-to: version-updates
+        patterns:
+          - '*'
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # .github/workflows/*.yml. Four of the five actions in use are tracked by
+  # major tag, so this moves once or twice a year.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns:
+          - '*'
+    commit-message:
+      prefix: ci
+      include: scope

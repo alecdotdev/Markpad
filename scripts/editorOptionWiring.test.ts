@@ -212,15 +212,19 @@ function createdEditorOptions(): Record<string, unknown> {
 		compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
 	}).outputText;
 
-	// The literal closes over four locals. None of them can reach
+	// The literal closes over five locals. None of them can reach
 	// `unicodeHighlight`, which is a constant, so they are stubbed rather than
 	// reconstructed — the settings proxy answers undefined for every key, which
-	// is enough to let the object build.
-	return new Function('settings', 'value', 'language', 'getTheme', `return ${js};`)(
+	// is enough to let the object build. `documentOptions` is the spread that
+	// hands the editor the active tab's model (or `value`/`language` when there
+	// is no tab); an empty object is the right stub because nothing it can
+	// contain is an option this file asserts on.
+	return new Function('settings', 'value', 'language', 'getTheme', 'documentOptions', `return ${js};`)(
 		new Proxy({}, { get: () => undefined }),
 		'',
 		'markdown',
 		() => 'app-theme-dark',
+		{},
 	) as Record<string, unknown>;
 }
 

@@ -5,6 +5,7 @@ import { hasRealFilePath } from '../utils/tabFileActions.js';
 import { HOME_TAB_PATH, isHomePath } from '../utils/homeTab.js';
 import { buildTransferredTab, type TransferableTab } from '../utils/tabTransfer.js';
 import { canonicalizePath, isSameFilePath } from '../utils/pathIdentity.js';
+import { retainTabModels } from '../utils/tabModels.js';
 import {
 	canGoBackInHistory,
 	canGoForwardInHistory,
@@ -314,6 +315,9 @@ class TabManager {
 			this.activeTabId = restored.some((t) => t.id === data.activeTabId)
 				? data.activeTabId
 				: restored[0]?.id ?? null;
+			// Every tab that was open is gone, replaced wholesale — the one tab
+			// removal in this file that never calls `closeTab`.
+			this.releaseModelsOfRemovedTabs();
 			// Snapshots store paths as they were typed, and the restore reads
 			// each file directly rather than through `loadMarkdown`, so nothing
 			// else would ever resolve these. Without this a restored window sits
@@ -541,6 +545,32 @@ class TabManager {
 		return tab.id;
 	}
 
+	/**
+	 * Release the Monaco models of tabs that no longer exist.
+	 *
+	 * Called after every removal rather than paired with each one, because the
+	 * question it asks — "which models have no tab?" — is answered from the tab
+	 * list, so a route that removes a tab in some way not listed below is still
+	 * covered. A model that is dropped without `dispose()` is not collected:
+	 * Monaco registers it with the model service, and its buffer, tokenization
+	 * state and worker-side copy stay alive for the life of the window. See
+	 * `utils/tabModels.ts`.
+	 *
+	 * The three call sites are the three places a tab stops existing: `closeTab`
+	 * (the close button, ⌘W, close-others/close-to-the-right, a clean tab losing
+	 * its path in `claimPath`, a tab moved to another window, a rolled-back
+	 * transfer), `closeAll`, and `restoreState`, which replaces the whole array.
+	 *
+	 * Whether the model being disposed is the one on screen does not matter
+	 * here: Monaco's editor detaches itself from a model that is disposed
+	 * (`_attachModel` registers `model.onWillDispose(() => this.setModel(null))`),
+	 * and `Editor.svelte` attaches the newly active tab's model in the same
+	 * flush.
+	 */
+	private releaseModelsOfRemovedTabs() {
+		retainTabModels(this.tabs.map((tab) => tab.id));
+	}
+
 	closeTab(id: string) {
 		const index = this.tabs.findIndex((t) => t.id === id);
 		if (index === -1) return;
@@ -555,11 +585,13 @@ class TabManager {
 			this.recentlyClosed.push(tab.path);
 		}
 		this.tabs.splice(index, 1);
+		this.releaseModelsOfRemovedTabs();
 	}
 
 	closeAll() {
 		this.tabs = [];
 		this.activeTabId = null;
+		this.releaseModelsOfRemovedTabs();
 	}
 
 	setActive(id: string) {

@@ -5,10 +5,13 @@
 	import { t, type LanguageCode } from '../utils/i18n.js';
 	import { MARKDOWN_LANGUAGE_ID, shouldLinkifyPastedUrl } from '../utils/pasteContext.js';
 	import { toggleLineMarker, type LineMarkerToolId } from '../utils/editorToolbar.js';
+	import { getTabModel, tabModelUri } from '../utils/tabModels.js';
 	import { installVimScrollCommands } from '../utils/vimScrollCommands.js';
 	import {
+		getLineAtVerticalOffset,
 		getScrollSyncPositionFromPixels,
 		getScrollTopForSyncPosition,
+		getVerticalOffsetForLine,
 		type ScrollSyncPosition,
 	} from '../utils/scrollSync.js';
 
@@ -135,6 +138,48 @@
 		return /^(Mac|iPhone|iPad|iPod)/i.test(navigator.platform || '');
 	}
 
+	/**
+	 * The `ITextModel` belonging to a tab — Monaco's document object, and the
+	 * thing that owns the undo stack.
+	 *
+	 * One per tab, created here because this component holds the dynamically
+	 * imported Monaco namespace, and reaped by `TabManager` because that is
+	 * what knows a tab is gone; see `utils/tabModels.ts` for both halves.
+	 *
+	 * The language is re-applied on every call rather than only at creation.
+	 * `language` is derived from the ACTIVE TAB'S PATH, and a tab can be
+	 * repointed at a file of another type without being recreated — following a
+	 * link, back/forward, Save As. The model outlives all of those, so a
+	 * language fixed at creation would be the extension of whatever file the tab
+	 * held the first time it was edited. `setModelLanguage` is a no-op when the
+	 * id already matches.
+	 */
+	function acquireTabModel(tabId: string, seed: string, languageId: string) {
+		const model = getTabModel(tabId, () =>
+			monaco.editor.createModel(seed, languageId, monaco.Uri.parse(tabModelUri(tabId))),
+		);
+		if (model.getLanguageId() !== languageId) monaco.editor.setModelLanguage(model, languageId);
+		return model;
+	}
+
+	/**
+	 * The status-bar readings that are properties of the DOCUMENT rather than of
+	 * an edit: the language and the word count.
+	 *
+	 * They used to be refreshed only by `onDidChangeModelContent`, which was
+	 * enough while a tab switch went through `setValue` — that fires a content
+	 * change (a flush) as a side effect. `setModel` does not, because no content
+	 * changed: a different document arrived. So switching tabs has to ask for
+	 * these explicitly, or the status bar keeps the previous document's numbers.
+	 */
+	function syncStatusFromModel() {
+		const model = editor.getModel();
+		if (!model) return;
+		currentLanguage = model.getLanguageId();
+		const text = model.getValue();
+		wordCount = (text.match(/\S+/g) || []).filter((w) => /\w/.test(w)).length;
+	}
+
 	self.MonacoEnvironment = {
 		getWorker: function (_moduleId: any, label: string) {
 			if (label === "json") {
@@ -247,9 +292,25 @@
 			return theme === "dark" ? "app-theme-dark" : "app-theme-light";
 		};
 
+		// The editor is a VIEW; the document it shows is the active tab's model.
+		// Passing `model` rather than `value`/`language` also settles ownership:
+		// `StandaloneEditor` only sets `_ownsModel` when it had to build the
+		// model itself, and `_postDetachModelCleanup` disposes the model on
+		// `editor.dispose()` only when it owns it. So a model handed in here
+		// SURVIVES the editor — which is the point, because this component is
+		// unmounted every time the user switches a tab to reading mode.
+		//
+		// With no active tab there is nothing to key a model by, so the editor
+		// builds and owns a throwaway one, exactly as it did before. That state
+		// is not reachable from the markup (the pane renders under
+		// `tabManager.activeTab`); it is the honest fallback for the window
+		// between the Monaco chunk resolving and this function running.
+		const documentOptions = currentTabId
+			? { model: acquireTabModel(currentTabId, value, language) }
+			: { value, language };
+
 		editor = monaco.editor.create(container, {
-			value: value,
-			language: language,
+			...documentOptions,
 			theme: getTheme(),
 			dragAndDrop: true,
 			automaticLayout: true,
@@ -350,13 +411,7 @@
 				}
 			}
 
-			const model = editor.getModel();
-			if (model) {
-				const text = model.getValue();
-				wordCount = (text.match(/\S+/g) || []).filter((w) =>
-					/\w/.test(w),
-				).length;
-			}
+			syncStatusFromModel();
 		});
 
 		editor.onDidChangeCursorPosition((e) => {
@@ -380,11 +435,7 @@
 			}
 		});
 
-		if (editor.getModel()) {
-			currentLanguage = editor.getModel()?.getLanguageId() || "markdown";
-			const text = editor.getModel()?.getValue() || "";
-			wordCount = (text.match(/\S+/g) || []).filter((w) => /\w/.test(w)).length;
-		}
+		syncStatusFromModel();
 
 		const wheelListener = (e: WheelEvent) => {
 			if (e.ctrlKey || e.metaKey) {
@@ -1186,26 +1237,58 @@
 		return Math.max(0, Math.min(getEditorContentScrollMax(), editor.getTopForLineNumber(safeBodyStartLine)));
 	}
 
+	// Monaco's own line -> pixel measurement, which already accounts for folded
+	// regions, wrapped lines and view zones. `getLineAtVerticalOffset` inverts it
+	// by binary search, so this is called ~log2(lineCount) times per sync.
+	function getEditorLineTop(line: number) {
+		return editor ? editor.getTopForLineNumber(line) : 0;
+	}
+
 	function getEditorScrollSyncPosition() {
 		if (!editor) {
 			return { section: 'body', ratio: 0 } satisfies ScrollSyncPosition;
 		}
 
-		return getScrollSyncPositionFromPixels(
+		const position = getScrollSyncPositionFromPixels(
 			editor.getScrollTop(),
 			getEditorContentScrollMax(),
 			getEditorFrontMatterScrollEnd(),
 		);
+
+		// Front matter renders as a panel in the preview with no source range, so
+		// there is nothing for a line to resolve against there; the section ratio
+		// carries it, exactly as before.
+		const model = position.section === 'body' ? editor.getModel() : null;
+		if (!model) return position;
+
+		const line = getLineAtVerticalOffset(editor.getScrollTop(), model.getLineCount(), getEditorLineTop);
+
+		return Number.isFinite(line) ? { ...position, line } : position;
 	}
 
 	export function syncScrollToPosition(position: ScrollSyncPosition) {
 		if (!editor) return;
 
-		const targetScroll = getScrollTopForSyncPosition(
-			position,
-			getEditorContentScrollMax(),
-			getEditorFrontMatterScrollEnd(),
-		);
+		const scrollMax = getEditorContentScrollMax();
+		let targetScroll: number | null = null;
+
+		if (position.section === 'body' && position.line !== undefined) {
+			const model = editor.getModel();
+			if (model) {
+				const offset = getVerticalOffsetForLine(position.line, model.getLineCount(), getEditorLineTop);
+				if (Number.isFinite(offset)) targetScroll = offset;
+			}
+		}
+
+		if (targetScroll === null) {
+			targetScroll = getScrollTopForSyncPosition(position, scrollMax, getEditorFrontMatterScrollEnd());
+		}
+
+		// Clamp before the threshold: a line near the end of the document resolves
+		// to an offset the editor cannot reach, and an unreachable target produces
+		// no scroll event — which would leave `isApplyingExternalScroll` to be
+		// spent on the reader's next real scroll instead of on this one.
+		targetScroll = Math.max(0, Math.min(scrollMax, targetScroll));
 
 		if (Math.abs(editor.getScrollTop() - targetScroll) <= 5) return;
 
@@ -1241,35 +1324,68 @@
 		}
 	});
 
+	// Tab activation. A switch swaps the editor's MODEL; it does not overwrite
+	// one shared buffer any more, which is the whole of #391: `setValue` is
+	// defined to clear the undo stack (`TextModel._setValueFromTextBuffer` →
+	// `_commandManager.clear()`), so every switch away and back used to cost the
+	// user their undo history. Undo now lives on the document, which is Monaco's
+	// intended usage and how VS Code works.
+	//
+	// `setValue` is still here, and still clears undo, for the case it is
+	// actually right for: the tab's buffer was REPLACED behind the editor's back
+	// — a reload from disk, an external change the user accepted, a truncated
+	// buffer completed, a link followed inside this tab, a task checkbox toggled
+	// from the preview. Those hand the model a different document, and an undo
+	// stack from the old one would splice two texts together. The `getValue()`
+	// comparison is what tells the two apart: an ordinary tab switch finds the
+	// model already holding its own text and touches nothing.
+	//
+	// Making external writes undoable instead (`pushEditOperation`) is a real
+	// option and #391 suggests it, but it is a second behaviour change — it
+	// would let Ctrl+Z resurrect a buffer that the truncation and lossy-decode
+	// guards (#374, #379) exist to keep away from the file — so it is
+	// deliberately not part of this one.
 	$effect(() => {
 		const activeTabId = tabManager.activeTabId;
 		const content = value;
+		const languageId = language;
 
 		if (!editorReady || !editor) return;
 
-		if (activeTabId !== currentTabId) {
-			if (currentTabId) {
-				const state = editor.saveViewState();
-				tabManager.updateTabEditorState(currentTabId, state);
-			}
+		const switched = activeTabId !== currentTabId;
 
-			currentTabId = activeTabId;
-			
-			if (editor.getValue() !== content) {
-				editor.setValue(content);
-			}
+		if (switched && currentTabId) {
+			const state = editor.saveViewState();
+			tabManager.updateTabEditorState(currentTabId, state);
+		}
 
+		currentTabId = activeTabId;
+
+		if (activeTabId) {
+			const model = acquireTabModel(activeTabId, content, languageId);
+			if (editor.getModel() !== model) editor.setModel(model);
+		}
+
+		if (editor.getValue() !== content) {
+			editor.setValue(content);
+		}
+
+		if (switched) {
+			// The view state is the editor's, not the model's — cursor, scroll,
+			// selections and the folding contribution — so it still has to be
+			// restored by hand, and only after the model it describes is
+			// attached.
 			if (tabManager.activeTab?.editorViewState) {
 				editor.restoreViewState(tabManager.activeTab.editorViewState);
 			} else {
 				editor.setScrollTop(0);
 				editor.setPosition({ lineNumber: 1, column: 1 });
 			}
-		} else {
-			if (editor.getValue() !== content) {
-				editor.setValue(content);
-			}
 		}
+
+		// Cheap on the hot path: this effect re-runs on every keystroke (it
+		// reads `value`), and on a keystroke neither test holds.
+		if (switched || currentLanguage !== languageId) syncStatusFromModel();
 	});
 
 	$effect(() => {
