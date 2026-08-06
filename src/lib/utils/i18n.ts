@@ -70,6 +70,7 @@ export const translations: Record<LanguageCode, Translation> = {
             appearance: 'Appearance',
             toolbars: 'Toolbars',
             files: 'Files',
+            shortcuts: 'Shortcuts',
             editorSettings: 'Editor Settings',
             previewSettings: 'Preview Settings',
             appearanceSettings: 'Appearance Settings',

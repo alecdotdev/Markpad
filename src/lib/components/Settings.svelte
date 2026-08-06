@@ -19,6 +19,7 @@
 	import { updateStore } from '../stores/update.svelte.js';
 	import { fade, scale, fly } from 'svelte/transition';
 	import { t, getSupportedLanguages } from '../utils/i18n.js';
+	import { shortcutSections } from '../utils/shortcuts.js';
 	import type { LanguageCode } from '../utils/i18n.js';
 	import { getEditorToolbarTools } from '../utils/editorToolbar.js';
 	import { getTitlebarToolbarActions, type TitlebarToolbarPlacement } from '../utils/titlebarToolbar.js';
@@ -36,7 +37,7 @@
 		onclose,
 	} = $props<{ show?: boolean; theme?: string; onSetTheme?: (t: string) => void; onclose: () => void }>();
 
-	let activeCategory = $state<'editor' | 'preview' | 'appearance' | 'toolbars' | 'files'>('editor');
+	let activeCategory = $state<'editor' | 'preview' | 'appearance' | 'toolbars' | 'files' | 'shortcuts'>('editor');
 	let highlightMenuOpen = $state(false);
 
 	function updatePreviewMaxWidth(value: unknown) {
@@ -815,6 +816,26 @@
 							</svg>
 							{t('settings.files', settings.language)}
 					</button>
+					<button class="nav-item" class:active={activeCategory === 'shortcuts'} onclick={() => (activeCategory = 'shortcuts')}>
+						<svg
+								xmlns="http://www.w3.org/2000/svg"
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round">
+								<rect x="2" y="6" width="20" height="12" rx="2" ry="2"></rect>
+								<line x1="6" y1="10" x2="6" y2="10"></line>
+								<line x1="10" y1="10" x2="10" y2="10"></line>
+								<line x1="14" y1="10" x2="14" y2="10"></line>
+								<line x1="18" y1="10" x2="18" y2="10"></line>
+								<line x1="8" y1="14" x2="16" y2="14"></line>
+							</svg>
+							{t('settings.shortcuts', settings.language)}
+					</button>
 
 					<div class="nav-footer">
 						<button
@@ -1555,6 +1576,35 @@
 							</label>
 						</div>
 					</div>
+					{:else if activeCategory === 'shortcuts'}
+					<!--
+						Read-only, on purpose. Remapping needs conflict detection,
+						persistence, reset-to-default and chord capture inside a webview, and
+						it is a product-direction call; this pane is the part of the value
+						that needs none of them.
+
+						Every chord below comes from `shortcuts.ts`, and
+						`scripts/shortcutRegistry.test.ts` fires each one at the real
+						handlers — so this list cannot drift away from what the keys do.
+					-->
+					{#each shortcutSections(settings.osType === 'macos' ? 'macos' : 'windows') as section (section.group)}
+						<div class="settings-group">
+							<div class="settings-group-header">
+								<h2>{t(section.labelKey, settings.language)}</h2>
+							</div>
+
+							{#each section.entries as entry (entry.id)}
+								<div class="shortcut-row">
+									<span class="shortcut-name">{t(entry.labelKey, settings.language)}</span>
+									<span class="shortcut-keys">
+										{#each entry.chords as chord (chord)}
+											<kbd>{chord}</kbd>
+										{/each}
+									</span>
+								</div>
+							{/each}
+						</div>
+					{/each}
 					{/if}
 				</div>
 			</div>
@@ -1886,6 +1936,39 @@
 		font-weight: 600;
 		margin: 0 0 16px 0;
 		color: var(--color-fg-default);
+	}
+
+	/* Read-only shortcut rows: a command on the left, its chord(s) on the right. */
+	.shortcut-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 6px 0;
+	}
+
+	.shortcut-name {
+		color: var(--color-fg-default);
+		font-size: 13px;
+	}
+
+	.shortcut-keys {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 6px;
+	}
+
+	.shortcut-keys kbd {
+		font-family: var(--code-font, monospace);
+		font-size: 11px;
+		line-height: 1.4;
+		white-space: nowrap;
+		color: var(--color-fg-muted);
+		background: var(--color-canvas-subtle);
+		border: 1px solid var(--color-border-default);
+		border-radius: 4px;
+		padding: 2px 6px;
 	}
 
 	.settings-group-header {

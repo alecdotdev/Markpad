@@ -223,8 +223,17 @@ const KNOWN_ORPHANS = new Set(['editor.status.lines', 'tooltip.zoomIn', 'tooltip
 
 // `t(action.labelKey, …)`: resolved by the `labelKey:` harvest above. Any new
 // unexplained indirection has to be added here consciously.
+//
+// The two shortcut-panel entries are the same shape: the panel renders
+// `t(section.labelKey)` and `t(entry.labelKey)` over `src/lib/utils/shortcuts.ts`,
+// whose rows spell their key as `labelKey: '…'` — so the harvest above already
+// collects every one of them and checks it exists in English like any other key.
+// `scripts/shortcutRegistry.test.ts` additionally measures their per-locale
+// coverage, which this file only reports.
 const KNOWN_INDIRECT_CALLS = new Set([
 	'src/lib/components/Settings.svelte: t(action.labelKey)',
+	'src/lib/components/Settings.svelte: t(entry.labelKey)',
+	'src/lib/components/Settings.svelte: t(section.labelKey)',
 	'src/lib/components/Tab.svelte: t(action.labelKey)',
 ]);
 
