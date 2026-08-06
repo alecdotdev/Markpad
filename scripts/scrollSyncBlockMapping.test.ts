@@ -253,7 +253,7 @@ function isAnnotated(element: ShimElement): boolean {
 	return elementChildren(element).some(isAnnotated);
 }
 
-export type Box = { top: number; height: number };
+type Box = { top: number; height: number };
 
 /**
  * Assign every annotated block a top and a height, laying children out in

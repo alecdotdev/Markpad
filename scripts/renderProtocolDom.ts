@@ -61,7 +61,7 @@ function escapeAttribute(value: string): string {
 
 export const NODE_ELEMENT = 1;
 export const NODE_TEXT = 3;
-export const NODE_COMMENT = 8;
+const NODE_COMMENT = 8;
 
 export class ShimNode {
 	nodeType: number;
@@ -213,7 +213,7 @@ export class ShimText extends ShimNode {
 	}
 }
 
-export class ShimComment extends ShimNode {
+class ShimComment extends ShimNode {
 	nodeValue: string;
 
 	constructor(value: string) {
@@ -411,7 +411,7 @@ export class ShimElement extends ShimNode {
 	}
 }
 
-export class ShimDocument extends ShimNode {
+class ShimDocument extends ShimNode {
 	documentElement: ShimElement;
 	body: ShimElement;
 
@@ -537,7 +537,7 @@ function parseFragment(html: string, doc: ShimDocument | null): ShimNode[] {
 	});
 }
 
-export class ShimDOMParser {
+class ShimDOMParser {
 	parseFromString(html: string, _type: string): ShimDocument {
 		const doc = new ShimDocument();
 		parseInto(html, doc.body, doc);

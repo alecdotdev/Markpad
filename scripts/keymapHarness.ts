@@ -45,7 +45,7 @@ export type Chord = string;
  */
 export const OperatingSystem = { Windows: 1, Macintosh: 2, Linux: 3 } as const;
 
-export type OperatingSystemValue = (typeof OperatingSystem)[keyof typeof OperatingSystem];
+type OperatingSystemValue = (typeof OperatingSystem)[keyof typeof OperatingSystem];
 
 const MODIFIER_ORDER = ['Ctrl', 'Shift', 'Alt', 'Meta'] as const;
 
@@ -66,7 +66,7 @@ export function label(parts: {
 }
 
 /** A Monaco keybinding number, as the chord (or chord sequence) Monaco resolves it to. */
-export function chordOf(binding: number, os: OperatingSystemValue): Chord {
+function chordOf(binding: number, os: OperatingSystemValue): Chord {
 	const decoded = decodeKeybinding(binding, os);
 	assert.ok(decoded, `Monaco could not decode keybinding ${binding}`);
 	return decoded.chords.map((chord) => label(chord as KeyCodeChord)).join(' ');
@@ -80,7 +80,7 @@ export const PLATFORMS = [
 
 // ------------------------------------------------- the editor (Monaco) layer
 
-export type ActionDescriptor = {
+type ActionDescriptor = {
 	id: string;
 	label: string;
 	keybindings?: number[];
@@ -180,7 +180,7 @@ export function editorKeymap(mac: boolean, os: OperatingSystemValue): Map<string
  * `key` is the unshifted character and `code` the physical key, which is what a
  * US layout reports and what every layout reports for letters and digits.
  */
-export const FUZZ_KEYS: Array<{ keyCode: number; key: string; code: string }> = [
+const FUZZ_KEYS: Array<{ keyCode: number; key: string; code: string }> = [
 	...'abcdefghijklmnopqrstuvwxyz'.split('').map((c) => ({
 		keyCode: KeyCode.KeyA + (c.charCodeAt(0) - 97),
 		key: c,

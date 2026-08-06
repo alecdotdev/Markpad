@@ -185,7 +185,7 @@ function handlerSourceIn(text: string, node: Node, name: string): string {
 	return soleExpression(text, attribute?.value) ?? '(() => {})';
 }
 
-export function handlerSource(node: Node, name: string): string {
+function handlerSource(node: Node, name: string): string {
 	return handlerSourceIn(source, node, name);
 }
 
@@ -198,7 +198,7 @@ export function handlerSource(node: Node, name: string): string {
  * on its own claim ("the strip carried no scope line while a tag was set")
  * rather than on a missing attribute name.
  */
-export function directiveSource(node: Node, type: 'ClassDirective' | 'StyleDirective', name: string): string {
+function directiveSource(node: Node, type: 'ClassDirective' | 'StyleDirective', name: string): string {
 	const directive = node.attributes?.find((a: Node) => a.type === type && a.name === name);
 	if (!directive) return type === 'ClassDirective' ? 'false' : 'undefined';
 	if (type === 'ClassDirective') return stripTypes(source.slice(directive.expression.start, directive.expression.end));
@@ -210,7 +210,7 @@ export function directiveSource(node: Node, type: 'ClassDirective' | 'StyleDirec
 }
 
 /** The one `<name>` element under `root`. */
-export function elementByTag(root: Node, name: string): Node {
+function elementByTag(root: Node, name: string): Node {
 	const found: Node[] = [];
 	collect(root, (node) => {
 		if (node.type === 'RegularElement' && node.name === name) found.push(node);
@@ -225,7 +225,7 @@ export function elementByTag(root: Node, name: string): Node {
  * nothing when it is clicked and renders under no condition, which is what the
  * stand-in models. Same reasoning as `handlerSourceIn`.
  */
-export function elementByHandler(root: Node, marker: string): Node {
+function elementByHandler(root: Node, marker: string): Node {
 	const found: Node[] = [];
 	collect(root, (node) => {
 		if (node.type !== 'RegularElement' || node === root) return;
@@ -240,7 +240,7 @@ export function elementByHandler(root: Node, marker: string): Node {
  * element to be on screen at all — or `false` for an element that is not in the
  * markup.
  */
-export function enclosingIfTest(node: Node): string {
+function enclosingIfTest(node: Node): string {
 	if (typeof node.start !== 'number') return 'false';
 	let innermost: Node | null = null;
 	collect(fragment, (candidate) => {
@@ -253,14 +253,14 @@ export function enclosingIfTest(node: Node): string {
 }
 
 /** The one `{…}` an element renders as its whole content, if that is all it has. */
-export function textExpression(node: Node): string {
+function textExpression(node: Node): string {
 	const tags = (node.fragment?.nodes ?? []).filter((child: Node) => child.type === 'ExpressionTag');
 	if (tags.length !== 1) return "''";
 	return stripTypes(source.slice(tags[0].expression.start, tags[0].expression.end));
 }
 
 /** The initialiser of a top-level `const`, evaluated. */
-export function constantValue(name: string): unknown {
+function constantValue(name: string): unknown {
 	const found: Node[] = [];
 	collect(parse(source, { modern: true, filename: TITLE_BAR }).instance, (node) => {
 		if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier' && node.id.name === name && node.init) {
@@ -295,20 +295,20 @@ const dismissEffectBody = (() => {
 
 // ------------------------------------------------------------------- harness
 
-export type WindowStub = {
+type WindowStub = {
 	listeners: Map<string, () => void>;
 	addEventListener: (type: string, fn: () => void) => void;
 	removeEventListener: (type: string, fn: () => void) => void;
 };
 
-export type ClickHandler = (event: { stopPropagation: () => void }) => void;
+type ClickHandler = (event: { stopPropagation: () => void }) => void;
 
-export type MouseEventStub = {
+type MouseEventStub = {
 	preventDefault: () => void;
 	stopPropagation: () => void;
 };
 
-export type InvokeCall = { cmd: string; args: any };
+type InvokeCall = { cmd: string; args: any };
 
 export type TitleBar = {
 	state: () => {
@@ -402,7 +402,7 @@ function createTitleBar(windowStub: WindowStub, invoke: (cmd: string, args: any)
 
 export const COLORS = constantValue('tagColors') as string[];
 
-export type SetupOptions = {
+type SetupOptions = {
 	/** Answers `is_window_tag_taken`; every other command resolves to null. */
 	tagTakenElsewhere?: boolean | (() => boolean | Promise<boolean>);
 	/** Fails every `invoke`, to drive the "backend cannot answer" path. */

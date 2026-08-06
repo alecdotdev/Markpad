@@ -21,7 +21,7 @@
  * here a lie.
  */
 
-export type RenderFixture = {
+type RenderFixture = {
 	/** Markdown handed to `convert_markdown`. */
 	markdown: string;
 	/** Exactly what `convert_markdown` returned. */
@@ -150,5 +150,3 @@ export const renderFixtures = {
 		html: "<p data-sourcepos=\"1:1-1:50\">A paragraph with <input type=\"checkbox\" /> inline.</p>\n",
 	},
 } as const satisfies Record<string, RenderFixture>;
-
-export type RenderFixtureName = keyof typeof renderFixtures;
