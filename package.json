@@ -19,16 +19,16 @@
 	"license": "BSD-3-Clause",
 	"dependencies": {
 		"@tauri-apps/api": "^2",
-		"@tauri-apps/plugin-dialog": "^2.5.0",
+		"@tauri-apps/plugin-dialog": "^2.7.2",
 		"@tauri-apps/plugin-opener": "^2",
 		"@tauri-apps/plugin-process": "^2.3.1",
 		"@tauri-apps/plugin-updater": "^2.10.1",
 		"dompurify": "3.4.12",
 		"highlight.js": "^11.11.1",
 		"highlightjs-svelte": "^1.0.6",
-		"katex": "^0.16.27",
+		"katex": "^0.18.1",
 		"mermaid": "^11.16.0",
-		"monaco-editor": "^0.55.1",
+		"monaco-editor": "^0.56.0",
 		"monaco-vim": "^0.4.4",
 		"yaml": "^2.9.0"
 	},
@@ -40,7 +40,7 @@
 		"@types/node": "^24.13.3",
 		"svelte": "^5.56.8",
 		"svelte-check": "^4.7.4",
-		"tsx": "^4.22.4",
+		"tsx": "^4.23.5",
 		"typescript": "~5.6.2",
 		"vite": "^6.4.3"
 	},
