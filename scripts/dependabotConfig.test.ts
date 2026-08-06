@@ -25,19 +25,35 @@ import { readSource } from './sourceTree.js';
 
 const config = readSource('.github/dependabot.yml');
 
+/** The prose above `version: 2` — the argument that justifies the settings below it. */
+const headerLines = config.slice(0, config.indexOf('version: 2')).split('\n');
+
+const manifest = JSON.parse(readSource('package.json')) as {
+	dependencies: Record<string, string>;
+	devDependencies: Record<string, string>;
+};
+
 /**
- * The prose above `version: 2` — the argument that justifies the settings below
- * it — as one line, with the `#` markers and the wrapping removed.
+ * The cadence the header comment promises for each ecosystem, read out of the
+ * table it opens with:
  *
- * Unwrapped because a sentence in a YAML comment is broken across lines at
- * whatever column it reaches, so `/one grouped pull request a month/` against
- * the raw text is a claim about where the author happened to press enter. It
- * did not match: the phrase is split after "pull".
+ *   github-actions  monthly    -- someone else's deadline
+ *   npm             quarterly  -- our own deadline
+ *
+ * Per ecosystem rather than one global cadence. The previous version of this
+ * file read a single promised cadence and applied it to every block, which was
+ * only right because every block agreed; with two cadences that shape passes as
+ * long as *some* ecosystem matches, which is a test going green for the wrong
+ * reason.
  */
-const header = config
-	.slice(0, config.indexOf('version: 2'))
-	.replace(/^#[ \t]?/gm, '')
-	.replace(/\s+/g, ' ');
+const promisedCadence = new Map(
+	headerLines
+		.map((line) =>
+			/^#\s{2,}([a-z-]+)\s{2,}(daily|weekly|monthly|quarterly|semiannually|yearly)\b/.exec(line),
+		)
+		.filter((m): m is RegExpExecArray => m !== null)
+		.map((m) => [m[1], m[2]]),
+);
 
 type EcosystemBlock = { ecosystem: string; text: string };
 
@@ -86,7 +102,7 @@ test('no group may batch a major version', () => {
 	}
 });
 
-test('a security fix never waits for the monthly batch', () => {
+test('a security fix never waits for the grouped batch', () => {
 	for (const { ecosystem, text } of ecosystemBlocks()) {
 		// Without this, Dependabot folds security updates into the grouped pull
 		// request, and an advisory published on the 2nd waits until the 1st.
@@ -98,25 +114,112 @@ test('a security fix never waits for the monthly batch', () => {
 	}
 });
 
-test('the schedule is the cadence the header comment promises', () => {
-	// Two copies of one fact: the prose that argues for a quiet bot, and the
-	// `interval:` that implements it. Asserting `interval: monthly` on its own
-	// would be a constant checking itself — the header could be edited to
-	// promise a weekly bot and nothing would notice. So the expected value is
-	// read out of the promise.
-	const promised = /one grouped pull request a (day|week|month)\b/.exec(header);
-	assert.ok(
-		promised,
-		'the header comment must still state the cadence it is asking a maintainer to accept',
+test('each ecosystem runs on the cadence the header comment promises for it', () => {
+	// Two copies of one fact: the table that argues for each cadence, and the
+	// `interval:` that implements it. Checked per ecosystem, so that changing one
+	// block's interval fails and names that block, rather than passing because
+	// its two siblings still agree with the comment.
+	const blocks = ecosystemBlocks();
+	assert.deepEqual(
+		[...promisedCadence.keys()].sort(),
+		blocks.map((b) => b.ecosystem).sort(),
+		'the header comment must state a cadence for every ecosystem and no others',
 	);
-	const interval = { day: 'daily', week: 'weekly', month: 'monthly' }[promised[1]];
-	for (const { ecosystem, text } of ecosystemBlocks()) {
-		assert.match(
-			text,
-			new RegExp(`interval: ${interval}\\b`),
-			`the header comment promises one grouped pull request a ${promised[1]}, so ${ecosystem} ` +
-				`must be on \`interval: ${interval}\``,
+	for (const { ecosystem, text } of blocks) {
+		const promised = promisedCadence.get(ecosystem);
+		const actual = /interval:\s*(\S+)/.exec(text)?.[1];
+		assert.equal(
+			actual,
+			promised,
+			`the header comment promises ${ecosystem} runs ${promised}, but its block says ${actual}`,
 		);
+	}
+});
+
+test('every pre-1.0 npm dependency is kept out of the grouped batch', () => {
+	// Dependabot types an npm update by the literal position of the number, so
+	// katex 0.16.47 -> 0.18.1 is a `minor` and lands in the batch — while npm's
+	// own caret rule stops `^0.16.47` before 0.17, because below 1.0 a minor
+	// bump is the breaking one. KaTeX 0.18.0 renamed every internal CSS class;
+	// it arrived inside the batch that is supposed to be safe to skim (#487).
+	//
+	// Cargo gets this right on its own (`Cargo::Version` implements the pre-1.0
+	// rule), so this is an npm-only exclusion, and `patterns` cannot express it
+	// — they match names, not versions. So it is a hand-written list, and this
+	// is what keeps the list honest: the expectation is derived from
+	// package.json, so adding a 0.x dependency, or an existing one reaching 1.0,
+	// fails here rather than silently changing what the batch contains.
+	const ranges = { ...manifest.dependencies, ...manifest.devDependencies };
+	const preRelease = Object.entries(ranges)
+		.filter(([, range]) => /^[\^~]?0\./.test(range))
+		.map(([name]) => name)
+		.sort();
+	assert.ok(
+		preRelease.length > 0,
+		'expected package.json to declare at least one pre-1.0 dependency; if that is no longer ' +
+			'true this test and the exclude-patterns it guards should both go',
+	);
+
+	const npm = ecosystemBlocks().find((b) => b.ecosystem === 'npm');
+	assert.ok(npm, 'the npm ecosystem block must exist');
+	const excluded = /exclude-patterns:\n((?:\s+- '[^']+'\n)+)/.exec(npm.text);
+	assert.ok(
+		excluded,
+		`the npm group must exclude its pre-1.0 dependencies (${preRelease.join(', ')}); without ` +
+			'that they ride along in the grouped pull request as ordinary minor bumps',
+	);
+	const listed = [...excluded[1].matchAll(/- '([^']+)'/g)].map((m) => m[1]).sort();
+	assert.deepEqual(
+		listed,
+		preRelease,
+		'the npm group\'s exclude-patterns must name exactly the pre-1.0 dependencies in package.json',
+	);
+});
+
+test('every ignored range names a version series, so the entry lapses', () => {
+	// An `ignore` is the one thing in this file that also filters *security*
+	// updates, and the one thing with no expiry. A bare `dependency-name`, or a
+	// semver level, silences a dependency until somebody deletes the line —
+	// and nothing will ever prompt them to.
+	//
+	// A bounded series does prompt them: `windows` is held at `0.62.*` because
+	// tauri requires `^0.61`, and the day `windows` 0.63 ships, Dependabot
+	// proposes it and the question gets asked again.
+	//
+	// This does not assert *which* dependencies are ignored — that is a decision
+	// the file may change. It asserts that whatever is ignored is ignored in a
+	// way that ends.
+	for (const { ecosystem, text } of ecosystemBlocks()) {
+		// Two steps, not one: "does this block ignore anything" is asked
+		// separately from "can this test read what it ignores", so a spelling the
+		// parser below does not understand fails here instead of skipping the
+		// block and reporting success.
+		if (!/^ {4}ignore:$/m.test(text)) continue;
+		const ignores = /^ {4}ignore:\n((?: {6}[-\s].*\n)+)/m.exec(text);
+		assert.ok(
+			ignores,
+			`${ecosystem} has an \`ignore:\` key this test cannot parse, so it cannot vouch for it`,
+		);
+		const entries = [
+			...ignores[1].matchAll(/- dependency-name:\s*(\S+)\n\s+versions:\s*\[([^\]]*)\]/g),
+		];
+		const names = [...ignores[1].matchAll(/- dependency-name:/g)];
+		assert.equal(
+			entries.length,
+			names.length,
+			`every ignore entry under ${ecosystem} must carry a \`versions:\` list; an entry without ` +
+				'one silences the dependency permanently, including its security updates',
+		);
+		for (const [, name, versions] of entries) {
+			for (const range of versions.split(',')) {
+				assert.match(
+					range.trim(),
+					/^'\d+\.\d+\.\*'$/,
+					`ignoring ${name} at ${range.trim()} does not name a bounded version series, so ` +
+						'nothing will ever reopen the question',
+				);
+			}
+		}
 	}
 });
 
