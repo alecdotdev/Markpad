@@ -24,8 +24,6 @@
  * so listing Copy without Paste would be the more confusing half-answer.
  */
 
-import type { LanguageCode } from './i18n.js';
-
 /**
  * Which menu the command would live under. The four labels are the existing
  * menu-bar categories, so grouping the panel costs no new translations.
@@ -345,6 +343,3 @@ export function shortcutSections(platform: ShortcutPlatform): ShortcutSection[] 
 		})),
 	}));
 }
-
-/** Kept so callers that already have a `LanguageCode` do not have to import it twice. */
-export type { LanguageCode };
