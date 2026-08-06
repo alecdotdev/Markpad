@@ -60,7 +60,10 @@ test('the tab carries the fidelity of its buffer', () => {
 	assert.match(tabs, /hasReplacementChars: boolean;/);
 	assert.doesNotMatch(tabs, /hasReplacementChars\?: boolean;/);
 	assert.match(tabs, /setTabDecodedLossy\(id: string, lossy: boolean\)/);
-	assert.equal(tabs.match(/hasReplacementChars: false/g)?.length, 4);
+	// One per Tab construction site in this store: restoreState, addTab,
+	// addNewTab. It was four until addHomeTab lost its last caller and was
+	// removed (#480). A new site that forgets the field moves this number.
+	assert.equal(tabs.match(/hasReplacementChars: false/g)?.length, 3);
 });
 
 test('every load decides the flag instead of leaving it stale', () => {

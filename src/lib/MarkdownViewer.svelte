@@ -3321,7 +3321,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 								ontoggleEdit={() => toggleEdit()}
 								ontoggleLive={toggleLiveMode}
 								ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
-								onhome={() => (showHome = true)}
 								onnextTab={() => tabManager.cycleTab('next')}
 								onprevTab={() => tabManager.cycleTab('prev')}
 								onundoClose={handleUndoCloseTab}

@@ -183,11 +183,33 @@ function reset() {
 	localStore.clear();
 }
 
+/**
+ * A tab bearing the home sentinel.
+ *
+ * `TabManager.addHomeTab` used to build one and these tests used to call it.
+ * That method lost its last caller when Ctrl+T settled on "new file" (#480)
+ * and was removed with it, so the state is assembled here instead.
+ *
+ * The gate still has to recognise the sentinel, which is why these tests did
+ * not go with the constructor: a session snapshot written before #401 can
+ * still hand a `HOME` path to a running window, and what keeps such a tab out
+ * is precisely the recognition this file evaluates.
+ *
+ * Setting `path` is the whole of it — `isHomePath` is a predicate over `path`
+ * and nothing else, which is the property the title test below pins. Building
+ * the state this way states that outright rather than inheriting a title from
+ * a constructor the gate is required to ignore.
+ */
+function openHomeTab() {
+	tabManager.addNewTab();
+	tabManager.activeTab!.path = HOME_TAB_PATH;
+}
+
 // --------------------------------------------------------------- the regression
 
 test('the home tab renders the home screen, not an empty document', () => {
 	reset();
-	tabManager.addHomeTab();
+	openHomeTab();
 
 	assert.equal(tabManager.activeTab?.path, HOME_TAB_PATH, 'precondition: the home tab is active');
 	assert.equal(
@@ -199,11 +221,12 @@ test('the home tab renders the home screen, not an empty document', () => {
 });
 
 test('a home tab opened next to files still renders the home screen', () => {
-	// Ctrl+T from a window that already has documents open — the reported path.
+	// Ctrl+T from a window that already had documents open — the path #392 was
+	// reported from, and the one a pre-#401 snapshot reproduces on startup.
 	reset();
 	tabManager.addTab('/notes/a.md');
 	tabManager.addTab('/notes/b.md');
-	tabManager.addHomeTab();
+	openHomeTab();
 
 	assert.equal(showsDocumentContainer(), false, `blank home tab alongside open files. Gate: ${gateSource}`);
 });
@@ -214,7 +237,7 @@ test('the home screen is reached by tab kind, never by the tab title', () => {
 	// `Recents` used to be enough to hide the editor. Nothing about which
 	// branch runs may depend on it.
 	reset();
-	tabManager.addHomeTab();
+	openHomeTab();
 	const home = tabManager.activeTab!;
 
 	for (const { code } of getSupportedLanguages()) {
@@ -273,7 +296,7 @@ test('the Home toolbar button still overlays the home screen on any tab', () => 
 	tabManager.addNewTab();
 	assert.equal(showsDocumentContainer(true), false, 'an untitled tab with showHome set');
 
-	tabManager.addHomeTab();
+	openHomeTab();
 	assert.equal(showsDocumentContainer(true), false, 'the home tab with showHome set');
 });
 
@@ -281,7 +304,7 @@ test('switching from the home tab back to a file returns to the document', () =>
 	reset();
 	tabManager.addTab('/notes/a.md');
 	const file = tabManager.activeTab!.id;
-	tabManager.addHomeTab();
+	openHomeTab();
 	assert.equal(showsDocumentContainer(), false);
 
 	tabManager.setActive(file);

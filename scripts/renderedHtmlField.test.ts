@@ -433,7 +433,6 @@ test('every Tab construction site starts the rendered-HTML field empty', () => {
 	tabManager.restoreState(JSON.stringify({ tabs: [{ path: '/notes/b.md', title: 'b.md' }] }));
 	tabManager.addTab('/notes/a.md', '# a\n');
 	tabManager.addNewTab();
-	tabManager.addHomeTab();
 	tabManager.insertTransferredTab({
 		path: '/notes/c.md',
 		title: 'c.md',
@@ -452,7 +451,7 @@ test('every Tab construction site starts the rendered-HTML field empty', () => {
 		hasReplacementChars: false,
 	});
 
-	assert.equal(tabManager.tabs.length, 5, 'precondition: every construction site produced a tab');
+	assert.equal(tabManager.tabs.length, 4, 'precondition: every construction site produced a tab');
 	for (const tab of tabManager.tabs) {
 		assert.equal(tab.content, '', `${tab.path || tab.title} was constructed with a non-empty content field`);
 	}

@@ -190,13 +190,14 @@ test('untitled tabs are not files and do not collide', () => {
 	assert.equal(tabsFor('').length, 3);
 });
 
-test('the home tab is a singleton on its own terms, not through the path rule', () => {
-	reset();
-	tabManager.addHomeTab();
-	const home = tabManager.activeTabId;
-	tabManager.addTab('/notes/a.md');
-	tabManager.addHomeTab();
-
-	assert.equal(tabsFor('HOME').length, 1);
-	assert.equal(tabManager.activeTabId, home);
-});
+// There used to be a test here that the home tab was a singleton on its own
+// terms rather than through the path rule: `addHomeTab` re-activated the
+// existing home tab instead of building a second one, and it had to, because
+// `claimPath` returns early for anything that is not a real file path and so
+// would never have de-duplicated two of them.
+//
+// `addHomeTab` was the only way to make a home tab and it is gone (#480), which
+// takes the singleton rule with it — there is no longer a second call to make.
+// The half that outlives it, that the sentinel is not a file path and is not
+// subject to the claim rule, is `hasRealFilePath`'s job and is covered where
+// that predicate is: homeSentinelSnapshot.test.ts and homeTabRender.test.ts.

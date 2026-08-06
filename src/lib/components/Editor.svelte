@@ -47,7 +47,6 @@
 		ontoggleEdit,
 		ontoggleLive,
 		ontoggleSplit,
-		onhome,
 		onnextTab,
 		onprevTab,
 		onundoClose,
@@ -65,7 +64,6 @@
 		ontoggleEdit?: () => void;
 		ontoggleLive?: () => void;
 		ontoggleSplit?: () => void;
-		onhome?: () => void;
 		onnextTab?: () => void;
 		onprevTab?: () => void;
 		onundoClose?: () => void;

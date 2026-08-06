@@ -2,7 +2,6 @@ import { t } from '../utils/i18n.js';
 import { nextUntitledTitle } from '../utils/untitledTitle.js';
 import { settings } from './settings.svelte.js';
 import { hasRealFilePath } from '../utils/tabFileActions.js';
-import { HOME_TAB_PATH, isHomePath } from '../utils/homeTab.js';
 import { buildTransferredTab, type TransferableTab } from '../utils/tabTransfer.js';
 import { canonicalizePath, isSameFilePath } from '../utils/pathIdentity.js';
 import { retainTabModels } from '../utils/tabModels.js';
@@ -214,9 +213,9 @@ class TabManager {
 	 * Untitled tabs have no disk backing and are resolved at close, so they
 	 * are not persisted.
 	 *
-	 * The filter is `hasRealFilePath`, not `path !== ''`: the home screen sits
-	 * in a tab whose path is `HOME_TAB_PATH`, which passes the non-empty test
-	 * and used to be written into the snapshot. Restoring it then asked the
+	 * The filter is `hasRealFilePath`, not `path !== ''`: the home screen used
+	 * to sit in a tab whose path is `HOME_TAB_PATH`, which passes the non-empty
+	 * test and so was written into the snapshot. Restoring it then asked the
 	 * backend to read a file under that name, and the failure left a
 	 * permanently unreadable phantom tab — or, when the home tab was the only
 	 * one, a window that came back empty.
@@ -394,10 +393,10 @@ class TabManager {
 	 * `''` for a tab whose file is read afterwards, which is what both callers
 	 * in the app do. It is NOT the rendered `content`: that starts empty here
 	 * as it does at every other construction site (`addNewTab`, `restoreState`,
-	 * `addHomeTab`, `buildTransferredTab`), and the first preview render fills
-	 * it. Seeding it from this argument put Markdown in the field that is
-	 * injected via `{@html}` — sanitized at the sink, so it showed as escaped
-	 * source rather than being a hole, but it is not what that field means.
+	 * `buildTransferredTab`), and the first preview render fills it. Seeding it
+	 * from this argument put Markdown in the field that is injected via
+	 * `{@html}` — sanitized at the sink, so it showed as escaped source rather
+	 * than being a hole, but it is not what that field means.
 	 */
 	addTab(path: string, rawContent: string = '', pathKey?: string) {
 		// Opening a file that is already open activates that tab instead of
@@ -467,40 +466,6 @@ class TabManager {
 			isDirty: false,
 			isEditing: settings.newFileDefaultMode,
 			history: [content],
-			historyIndex: 0,
-			editorViewState: null,
-			scrollPercentage: 0,
-			anchorLine: 0,
-			isSplit: false,
-			splitRatio: 0.5,
-			isScrollSynced: false,
-			collapsedHeaders: new Set<string>(),
-			isTruncated: false,
-			hasReplacementChars: false
-		});
-
-		this.activeTabId = id;
-	}
-
-	addHomeTab() {
-		const homeTab = this.tabs.find(t => isHomePath(t.path));
-		if (homeTab) {
-			this.activeTabId = homeTab.id;
-			return;
-		}
-
-		const id = crypto.randomUUID();
-		this.tabs.push({
-			id,
-			path: HOME_TAB_PATH,
-			title: t('tabs.home', settings.language),
-			content: '',
-			rawContent: '',
-			originalContent: '',
-			scrollTop: 0,
-			isDirty: false,
-			isEditing: false,
-			history: [],
 			historyIndex: 0,
 			editorViewState: null,
 			scrollPercentage: 0,

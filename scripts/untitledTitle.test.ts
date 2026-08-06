@@ -40,7 +40,9 @@ test('works with localized bases', () => {
 test('new tabs are created with numbered untitled titles', () => {
 	const tabs = readSource('src/lib/stores/tabs.svelte.ts');
 	assert.match(tabs, /nextUntitledTitle\(/);
-	// both creation paths go through the helper
-	const addNewTab = sliceBetween(tabs, 'addNewTab()', 'addHomeTab()');
+	// both creation paths go through the helper. The slice ends at the next
+	// method after `addNewTab`, which used to be `addHomeTab` until that one
+	// lost its last caller and was removed (#480).
+	const addNewTab = sliceBetween(tabs, 'addNewTab()', 'insertTransferredTab(');
 	assert.match(addNewTab, /nextUntitledTitle\(/);
 });

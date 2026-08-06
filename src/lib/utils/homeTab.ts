@@ -14,6 +14,20 @@
  * A tab kind is not really a path, and nothing stops a document from being
  * opened at a relative path spelled exactly `HOME`. Neither is fixed here, but
  * both are now a single edit rather than a search-and-replace.
+ *
+ * Nothing in the app constructs such a tab any more. `TabManager.addHomeTab`
+ * was the only constructor, its only caller was the Ctrl+T branch in
+ * MarkdownViewer.svelte, and that branch now opens a new file instead (#480) —
+ * so the method went with it.
+ *
+ * The sentinel and its reader stay, because a tab carrying it can still arrive
+ * from outside this build. Snapshots written before #401 have `HOME` in them
+ * and are sitting on users' disks; what turns those away is `hasRealFilePath`
+ * in tabFileActions.ts, and that predicate is spelled in terms of `isHomePath`.
+ * The recognition IS the rejection — drop it and the sentinel is readmitted as
+ * a phantom tab pointing at a file that can never be read (#401). The gate in
+ * MarkdownViewer.svelte and the tab-strip guards keep reading it for the same
+ * reason: they are what a stray home tab would run into (#429).
  */
 export const HOME_TAB_PATH = 'HOME';
 

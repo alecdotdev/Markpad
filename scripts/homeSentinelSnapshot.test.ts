@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-// The home screen sits in a tab, and that tab's path is the sentinel string
-// `'HOME'` rather than a file. `serializeState` filtered on `path !== ''`, so
-// the sentinel was written into the session snapshot; `restoreState` accepted
-// any non-empty string, so it came back; and startup then asked the backend to
-// read a file called `HOME`. The failure left a phantom tab that can never be
-// read, and a window whose only tab was the home screen came back empty.
+// The home screen used to sit in a tab, and that tab's path was the sentinel
+// string `'HOME'` rather than a file. `serializeState` filtered on
+// `path !== ''`, so the sentinel was written into the session snapshot;
+// `restoreState` accepted any non-empty string, so it came back; and startup
+// then asked the backend to read a file called `HOME`. The failure left a
+// phantom tab that can never be read, and a window whose only tab was the home
+// screen came back empty.
 //
 // `hasRealFilePath` in utils/tabFileActions.ts is the project's existing answer
 // to "is this path a file" — every other caller already used it.
@@ -41,16 +42,33 @@ g.window.__TAURI_INTERNALS__ = {
 };
 
 const { tabManager } = await import('../src/lib/stores/tabs.svelte.js');
+const { HOME_TAB_PATH } = await import('../src/lib/utils/homeTab.js');
 
 function reset() {
 	tabManager.closeAll();
 	localStore.clear();
 }
 
+/**
+ * A tab bearing the home sentinel.
+ *
+ * `TabManager.addHomeTab` used to build one; it lost its last caller when
+ * Ctrl+T settled on "new file" (#480) and was removed with it. The write-side
+ * rule it exercised here outlives it, because the two sides are one filter:
+ * `serializeState` and `restoreState` both reject on `hasRealFilePath`, and the
+ * read side still meets `HOME` in snapshots this app wrote before the fix.
+ * Pinning the write side is what keeps a future writer from putting the
+ * sentinel back into the file the read side is busy defending against.
+ */
+function openHomeTab() {
+	tabManager.addNewTab();
+	tabManager.activeTab!.path = HOME_TAB_PATH;
+}
+
 test('a session snapshot never carries the home tab', () => {
 	reset();
 	tabManager.addTab('/notes/a.md');
-	tabManager.addHomeTab();
+	openHomeTab();
 
 	const snapshot = JSON.parse(tabManager.serializeState());
 
@@ -62,7 +80,7 @@ test('a session snapshot never carries the home tab', () => {
 
 test('a window showing only the home tab writes an empty snapshot, not a HOME one', () => {
 	reset();
-	tabManager.addHomeTab();
+	openHomeTab();
 
 	assert.deepEqual(JSON.parse(tabManager.serializeState()).tabs, []);
 });
