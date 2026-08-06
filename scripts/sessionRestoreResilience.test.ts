@@ -447,17 +447,30 @@ test('a document that kills the launch reading it is read by exactly one more la
 	const poison = ({ cmd, args }: { cmd: string; args: any }) =>
 		cmd === 'read_file_content_checked' && args.path === '/poison.md';
 
+	// A stopping bound, not an expected count: the design promises two, and a
+	// broken mechanism never recovers at all, so anything comfortably above two
+	// does the job. Read the failure message, not this number.
+	const GIVE_UP_AFTER = 5;
 	const outcomes: string[] = [];
-	for (let attempt = 0; attempt < 6; attempt++) {
+	for (let attempt = 0; attempt < GIVE_UP_AFTER; attempt++) {
 		outcomes.push(await launch(poison));
 		if (outcomes[outcomes.length - 1] === 'restored') break;
 	}
+	const recovered = outcomes[outcomes.length - 1] === 'restored';
 
 	assert.deepEqual(
 		outcomes,
 		['died', 'restored'],
-		`recovery took ${outcomes.length} launches; /poison.md was read ${readsOfPath('/poison.md')} times, ` +
-			'so the launch that died on it left nothing the next one could find',
+		// Says what happened rather than how long the loop ran. `outcomes.length`
+		// is this test's own bound when nothing recovers, and a message that
+		// reports it as a launch count reads as a result — which is how a reader
+		// ends up believing the suite reproduced a number from a bug report.
+		recovered
+			? `recovery took ${outcomes.length} launches, not the two the design promises; ` +
+				`/poison.md was read ${readsOfPath('/poison.md')} times`
+			: `never recovered: ${outcomes.length} launches all died and the loop gave up, ` +
+				`with /poison.md read ${readsOfPath('/poison.md')} times — ` +
+				'the launch that died on it left nothing the next one could find',
 	);
 	assert.equal(readsOfPath('/poison.md'), 1, 'the document that killed a launch is not read again');
 	assert.deepEqual(
