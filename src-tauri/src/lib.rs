@@ -543,6 +543,7 @@ fn validate_vsix_archive_limits<R: std::io::Read + std::io::Seek>(
     Ok(())
 }
 
+mod asset_protocol;
 mod tab_transfer;
 mod window_runtime;
 use window_runtime::{AppState, WatcherState};
@@ -2645,6 +2646,18 @@ pub fn run() {
         .manage(AppState::new())
         .manage(WatcherState::new())
         .manage(tab_transfer::TabTransferBroker::new())
+        // Replaces Tauri's own `asset:` handler, which reads the file on the
+        // thread the webview calls it on — see `asset_protocol` for why that
+        // freezes every window on an unreachable path. Registering the scheme
+        // here is what suppresses the built-in one.
+        .register_asynchronous_uri_scheme_protocol("asset", |ctx, request, responder| {
+            let scope = ctx.app_handle().asset_protocol_scope();
+            tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(asset_protocol::respond(&request, &|path| {
+                    scope.is_allowed(path)
+                }));
+            });
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
