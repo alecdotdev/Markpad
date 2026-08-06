@@ -5,6 +5,44 @@
 # dependency bot stops being read. Each ecosystem instead gets one grouped pull
 # request a month.
 #
+# That grouping is only safe for updates that promise to be compatible, so each
+# group is limited to `minor` and `patch`. Majors fall outside every group and
+# arrive as one pull request per dependency, each carrying its own changelog --
+# this is the documented shape, "Example: Individual pull requests for major
+# updates and grouped for minor/patch updates" in GitHub's guide to optimizing
+# pull request creation. Note that it is `update-types` alone that does this:
+# suppressing majors outright takes an additional `ignore` condition on
+# `version-update:semver-major`, which is deliberately not written here.
+#
+# The first run without that limit produced an eleven-package npm batch that
+# crossed TypeScript 5 -> 7 and Vite 6 -> 8 (#477), and a seventeen-crate cargo
+# batch that crossed tauri-plugin-prevent-default 2 -> 5 (#478) -- toolchain
+# migrations under a `chore(deps)` title, which is not a thing anyone can review
+# as a batch.
+#
+# One caveat, because it is invisible from the config: on a run where a grouped
+# pull request is already open, Dependabot marks every dependency matching the
+# group's `patterns` as handled before it looks at `update-types`, so that run
+# opens no individual major pull requests at all. They appear on the first run
+# after the grouped pull request is merged or closed. Majors are deferred by an
+# unreviewed batch, not dropped by it -- but they are deferred.
+#
+# One thing no `update-types` setting can fix, because it is not about semver:
+# the Tauri plugins ship as coupled pairs, one crate and one npm package, and
+# `tauri build` refuses to run when the two halves disagree --
+#
+#   Found version mismatched Tauri packages. Make sure the NPM package and Rust
+#   crate versions are on the same major/minor releases:
+#   tauri-plugin-dialog (v2.7.2) : @tauri-apps/plugin-dialog (v2.6.0)
+#
+# npm and cargo are separate ecosystems to Dependabot, so the two halves land in
+# two different pull requests that cannot see each other, and neither is green
+# on its own. The guard compares major *and minor*, so grouping by minor and
+# patch does not avoid it. When a Tauri plugin appears in both the npm and the
+# cargo pull request, the two have to be merged as a pair -- merge one, then
+# rebase and merge the other, and treat the red build on the first as expected
+# rather than as a reason to close it.
+#
 # Security updates are not configured here -- they are a repository setting
 # (Settings -> Advanced Security -> Dependabot security updates) and they open
 # their own pull requests as advisories land, independent of the schedule below.
@@ -19,14 +57,20 @@ updates:
     directory: /
     schedule:
       interval: monthly
-    # One group covers everything, so in practice this is 1. The headroom is
-    # for the case where a grouped pull request is open and stale.
-    open-pull-requests-limit: 2
+    # One slot for the grouped minor/patch pull request, three for the majors
+    # that now open individually alongside it. At the old limit of 2 a single
+    # major filled the file and the rest were invisible. Anything past the limit
+    # waits for a later run rather than being skipped, so this is how many stay
+    # visible at once, not a cap on how many are pending.
+    open-pull-requests-limit: 4
     groups:
       npm:
         applies-to: version-updates
         patterns:
           - '*'
+        update-types:
+          - minor
+          - patch
     commit-message:
       prefix: chore
       prefix-development: chore
@@ -37,28 +81,37 @@ updates:
     directory: /src-tauri
     schedule:
       interval: monthly
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 4
     groups:
       cargo:
         applies-to: version-updates
         patterns:
           - '*'
+        update-types:
+          - minor
+          - patch
     commit-message:
       prefix: chore
       include: scope
 
   # .github/workflows/*.yml. Four of the five actions in use are tracked by
-  # major tag, so this moves once or twice a year.
+  # major tag (`@v7`, `@v3`; the fifth is `dtolnay/rust-toolchain@stable`, which
+  # carries no version for Dependabot to compare), so a bump here is usually the
+  # tag moving to a new major -- exactly the case the group excludes. In
+  # practice this ecosystem will open single pull requests rather than a batch.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 4
     groups:
       github-actions:
         applies-to: version-updates
         patterns:
           - '*'
+        update-types:
+          - minor
+          - patch
     commit-message:
       prefix: ci
       include: scope
