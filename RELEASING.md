@@ -42,31 +42,21 @@ If you ever lose the private key:
 - A new keypair has to be generated, embedded in a new release, and that release has to be installed manually by every user.
 - Communicate this in release notes so users aren't blindsided.
 
-### 5. CRITICAL: `alecdotdev/Markpad` must never exist again
+### 5. `alecdotdev/Markpad` is load-bearing
 
 The updater endpoint in `src-tauri/tauri.conf.json` points at **`sftwrdotdev/Markpad`**. (`scripts/releaseWorkflow.test.ts` holds that name and the endpoint together — if the repository ever moves again, this line moves with it.)
 
-Markpad was transferred from `alecdotdev/Markpad` to `sftwrdotdev/Markpad`, and `alecdotdev` is still a live account — a transfer between two accounts, not a rename. Pointing the endpoint at the new location **only helps builds made from here on.** The endpoint is compiled into the binary, so every copy of Markpad up to and including v2.7.0 asks GitHub for:
+That only helps builds made from here on. The endpoint is compiled into the binary, so every copy up to and including v2.7.0 asks GitHub for `https://github.com/alecdotdev/Markpad/releases/latest/download/latest.json` and reaches the current feed only because GitHub answers with a 301. Those installs use that redirect for as long as they run.
 
-```
-https://github.com/alecdotdev/Markpad/releases/latest/download/latest.json
-```
-
-and reaches the current feed only because GitHub answers it with a 301 to the new location. Those installs will use that redirect for as long as they run, however many versions ship after this one.
-
-GitHub voids a transfer redirect if the old location is occupied again. From [Transferring a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/transferring-a-repository):
+GitHub voids a transfer redirect if the old location is occupied. From [Transferring a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/transferring-a-repository):
 
 > If you create a new repository or fork at the previous repository location, the redirects to the transferred repository will be permanently deleted.
 
-So, permanently, and regardless of what it would contain:
+So: **do not create a repository named `Markpad` under `alecdotdev`, do not fork this repository to `alecdotdev`, and do not transfer Markpad back and away again.** A fork is the easy mistake — it copies the code and not the releases, so that URL 404s the moment one exists.
 
-- **Do not create a repository named `Markpad` under `alecdotdev`.**
-- **Do not fork `sftwrdotdev/Markpad` to `alecdotdev`** — the doc says a fork at the old location voids the redirect just as a new repository does.
-- **Do not transfer Markpad back to `alecdotdev`, then away again.** Each hop leaves another compiled-in endpoint depending on another redirect.
+The failure is quiet and unfixable from here: `latest.json` 404s, the updater reports no update available, and users on old versions simply stop being offered new ones. It is not a code-execution risk — the pinned `pubkey` means whoever serves that URL cannot produce a signature that installs.
 
-The failure this prevents is quiet. `latest.json` becomes a 404, the updater reports no update available, and users on old versions simply stop being offered new ones — with no error anyone but that user can see. There is no way to fix it from this repository afterwards; the only remedy is asking every affected user to reinstall by hand.
-
-What this is *not* is a code-execution risk. The `pubkey` in `tauri.conf.json` is pinned, and `tauri-plugin-updater` verifies the minisign signature on the downloaded bundle before installing it. Whoever ends up serving that URL cannot ship a Markpad update that installs, because they cannot produce a signature for it. The exposure is broken or stalled updates, not a hijacked one.
+**`build.yml` checks this before creating a release.** It fetches that URL and asserts the feed's download URLs still name this repository, so it tests what actually matters rather than whether a repository exists at the old location — occupying it while serving a correct feed would pass, correctly. A network failure warns instead of blocking.
 
 ## Per-release workflow
 
