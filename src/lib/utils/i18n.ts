@@ -272,7 +272,9 @@ export const translations: Record<LanguageCode, Translation> = {
             savedNewerEdits: 'Saved — staying in edit mode because you have newer edits',
             openExportedFileFailed: 'Could not open exported file',
             partialDocument: 'Cannot edit yet — this file is not fully loaded',
-            lossySaveBlocked: 'Not saved: this file is not UTF-8, so parts of it became "�" when it was opened. Saving would destroy the original — use "Save As" to write a copy'
+            lossySaveBlocked: 'Not saved: this file is not UTF-8, so parts of it became "�" when it was opened. Saving would destroy the original — use "Save As" to write a copy',
+            restoreInterrupted: 'Markpad did not finish restoring your session last time',
+            restoreInterruptedDeferred: 'Markpad did not finish opening {path} last time, so it was skipped. Open it yourself to try again'
         },
         externalChange: {
             message: 'This file changed on disk while you had unsaved changes.',

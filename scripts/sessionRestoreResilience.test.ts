@@ -14,9 +14,10 @@ import test from 'node:test';
 //
 // These tests drive the real window session and the real TabManager against a
 // stubbed Tauri bridge and a stubbed localStorage, so they lock the behaviour
-// rather than the wording. What they cannot cover is the renderer actually
-// dying mid-restore; an interrupted launch is simulated by leaving behind
-// exactly the breadcrumb such a launch leaves.
+// rather than the wording. The tests in the first half simulate an interrupted
+// launch by leaving behind exactly the breadcrumb such a launch leaves; the
+// `launch()` harness at the bottom goes further and models the kill itself,
+// including what a kill takes with it.
 
 const g = globalThis as any;
 const runeEffect = (fn: () => void) => {
@@ -46,6 +47,8 @@ const RESTORE_IN_PROGRESS_KEY = 'markpad-window-restore-in-progress';
 let invokeCalls: Array<{ cmd: string; args: any }> = [];
 /** The window-state file the Rust side holds. */
 let storedSnapshot: string | null = null;
+/** The breadcrumb file the Rust side holds, beside the snapshot. */
+let storedProgress: string | null = null;
 /** Files the backend can read; anything else fails the way a real read does. */
 let disk = new Map<string, string>();
 /** Paths whose read should fail even though the file "exists". */
@@ -53,10 +56,24 @@ let unreadable = new Set<string>();
 /** Called just before each read, to observe the breadcrumb mid-restore. */
 let onRead: (path: string) => void = () => {};
 
+/**
+ * When this says yes, the process is gone: the call never answers and nothing
+ * after it runs. See `launch()` for what that models and what it costs.
+ */
+let killsTheLaunch: (call: { cmd: string; args: any }) => boolean = () => false;
+let died = false;
+
 g.window.__TAURI_INTERNALS__ = {
 	metadata: { currentWindow: { label: 'main' }, currentWebview: { windowLabel: 'main', label: 'main' } },
 	invoke: (cmd: string, args: any) => {
 		invokeCalls.push({ cmd, args });
+		if (!died && killsTheLaunch({ cmd, args })) {
+			died = true;
+			// A process that has been killed does not return an error — it does
+			// not return. A rejection here would be caught and handled, which is
+			// the one thing a real kill never lets the code do.
+			return new Promise(() => {});
+		}
 		switch (cmd) {
 			case 'get_os_type':
 				return Promise.resolve('macos');
@@ -67,6 +84,14 @@ g.window.__TAURI_INTERNALS__ = {
 				return Promise.resolve(null);
 			case 'clear_window_state':
 				storedSnapshot = null;
+				return Promise.resolve(null);
+			case 'load_restore_progress':
+				return Promise.resolve(storedProgress);
+			case 'save_restore_progress':
+				storedProgress = args.json;
+				return Promise.resolve(null);
+			case 'clear_restore_progress':
+				storedProgress = null;
 				return Promise.resolve(null);
 			case 'read_file_content_checked': {
 				onRead(args.path);
@@ -86,6 +111,8 @@ const { createWindowSession } = await import('../src/lib/sessions/windowSession.
 
 const warnings: string[] = [];
 const errors: string[] = [];
+/** What the session asked the UI to tell the user, before any wording. */
+const notices: Array<{ deferredPath: string | null }> = [];
 
 function makeSession() {
 	return createWindowSession({
@@ -112,6 +139,7 @@ function makeSession() {
 		acceptTransferredTab: async () => true,
 		onError: (message) => errors.push(message),
 		onWarning: (message) => warnings.push(message),
+		onInterrupted: (interruption) => notices.push(interruption),
 	});
 }
 
@@ -130,15 +158,24 @@ function reset(paths: string[], contents: Record<string, string> = {}) {
 	invokeCalls = [];
 	warnings.length = 0;
 	errors.length = 0;
+	notices.length = 0;
 	unreadable = new Set();
 	onRead = () => {};
+	killsTheLaunch = () => false;
+	died = false;
 	disk = new Map(paths.map((path) => [path, contents[path] ?? `# ${path}`]));
 	storedSnapshot = snapshotOf(paths);
+	storedProgress = null;
 }
 
+/**
+ * The breadcrumb as the next launch would find it. It is read from the Rust
+ * side because that is where it lives now: the tests below seed the
+ * localStorage key instead where they mean "a breadcrumb an older build left",
+ * and the session honours that as a migration.
+ */
 function breadcrumb(): any {
-	const raw = localStore.get(RESTORE_IN_PROGRESS_KEY);
-	return raw === undefined ? null : JSON.parse(raw);
+	return storedProgress === null ? null : JSON.parse(storedProgress);
 }
 
 function persistedPaths(): string[] {
@@ -340,6 +377,163 @@ test('a snapshot of nothing but HOME does not cost the window its session', asyn
 		invokeCalls.some((call) => call.cmd === 'read_file_content_checked'),
 		false,
 	);
+});
+
+// --- a launch killed at any point costs at most one repeat ---
+//
+// The tests above all begin from a breadcrumb that a dead launch is ASSUMED to
+// have left. That assumption is the thing #201 disproves: the breadcrumb lived
+// in localStorage, `setItem` is an async message to the WebKit storage process,
+// and the kill this record exists to survive is exactly the event that loses
+// messages in flight. A test that seeds the breadcrumb by hand cannot see that
+// — it will pass whatever store the record is kept in, which is why the
+// mechanism could be complete, tested, and still leave the reporter relaunching
+// into the same hang.
+//
+// So these run the kill instead of assuming its result. `launch()` models three
+// things about a killed process, and the second is the one that bites:
+//
+//   1. the call it died in never answers, and nothing after it runs;
+//   2. whatever the launch had put in localStorage is gone with it;
+//   3. whatever reached the backend is still there when the next one starts.
+//
+// (2) is the pessimistic reading — a real kill sometimes loses the write and
+// sometimes does not — and it is the right one for a resilience contract: the
+// guarantee worth having is the one that holds when the flush does not happen.
+// It is also what the repository already concluded about this exact store, in
+// the comment above `persistWindowState`.
+
+/** Lets every already-queued microtask run, then returns. */
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * One launch of Markpad against the world the previous launches left behind.
+ *
+ * Returns 'died' if `dies` fired, 'restored' if the pass ran to completion.
+ * A killed launch never resolves — that is what being killed means — so this
+ * cannot simply await `restore()`.
+ */
+async function launch(dies: (call: { cmd: string; args: any }) => boolean = () => false) {
+	// A new process: no tabs on screen, and nothing left of the store the last
+	// kill took down with it.
+	tabManager.closeAll();
+	localStore.clear();
+	died = false;
+	killsTheLaunch = dies;
+
+	let settled = false;
+	void makeSession()
+		.restore()
+		.then(
+			() => (settled = true),
+			() => (settled = true),
+		);
+	for (let turn = 0; turn < 200 && !settled && !died; turn++) await flush();
+	killsTheLaunch = () => false;
+
+	// Without this the harness could report 'restored' for a launch that merely
+	// ran out of turns, and every assertion below would be measuring the loop
+	// bound instead of the mechanism.
+	assert.ok(settled || died, 'the simulated launch neither finished nor died');
+	return died ? 'died' : 'restored';
+}
+
+const readsOfPath = (path: string) => readsOf().filter((read) => read === path).length;
+
+test('a document that kills the launch reading it is read by exactly one more launch', async () => {
+	reset(['/a.md', '/poison.md', '/c.md']);
+	// The #201 shape: one document takes the process down, every time, before
+	// the window is usable. The user's only move is to launch it again.
+	const poison = ({ cmd, args }: { cmd: string; args: any }) =>
+		cmd === 'read_file_content_checked' && args.path === '/poison.md';
+
+	const outcomes: string[] = [];
+	for (let attempt = 0; attempt < 6; attempt++) {
+		outcomes.push(await launch(poison));
+		if (outcomes[outcomes.length - 1] === 'restored') break;
+	}
+
+	assert.deepEqual(
+		outcomes,
+		['died', 'restored'],
+		`recovery took ${outcomes.length} launches; /poison.md was read ${readsOfPath('/poison.md')} times, ` +
+			'so the launch that died on it left nothing the next one could find',
+	);
+	assert.equal(readsOfPath('/poison.md'), 1, 'the document that killed a launch is not read again');
+	assert.deepEqual(
+		tabManager.tabs.map((tab) => tab.path),
+		['/a.md', '/poison.md', '/c.md'],
+		'and the session comes back whole, minus the content of the one suspect',
+	);
+	assert.deepEqual(readsOf().slice(-2), ['/a.md', '/c.md'], 'the other documents are read normally');
+});
+
+test('launches killed before the snapshot arrives still count, so startup can give up by itself', async () => {
+	reset(['/a.md', '/b.md', '/c.md']);
+	// Nothing here blames a document — the process is gone before the snapshot
+	// that names one has even been loaded. A launch that leaves no trace of
+	// itself cannot advance the give-up counter, and startup that cannot give
+	// up walks into the same wall for as long as the user keeps launching it.
+	const duringTheLoad = ({ cmd }: { cmd: string }) => cmd === 'load_window_state';
+
+	for (let attempt = 0; attempt < 3; attempt++) {
+		assert.equal(await launch(duringTheLoad), 'died', `launch ${attempt + 1} was supposed to die`);
+	}
+	invokeCalls = [];
+	assert.equal(await launch(), 'restored');
+
+	assert.deepEqual(
+		readsOf(),
+		[],
+		'after three launches died before they could name a suspect, startup stops opening documents at all',
+	);
+	assert.deepEqual(
+		tabManager.tabs.map((tab) => tab.path),
+		['/a.md', '/b.md', '/c.md'],
+		'and still hands back every tab',
+	);
+	assert.deepEqual(persistedPaths(), ['/a.md', '/b.md', '/c.md']);
+});
+
+test('claiming the launch early does not strand a window that had nothing to restore', async () => {
+	// Claiming before the snapshot is loaded means a launch with no snapshot at
+	// all leaves a breadcrumb describing nothing. If that phantom stuck, three
+	// ordinary launches of an empty window would be enough to make the fourth
+	// refuse to open documents.
+	reset([]);
+	storedSnapshot = null;
+	assert.equal(await launch(), 'restored');
+	assert.equal(breadcrumb(), null, 'a launch with nothing to restore leaves no claim behind');
+
+	assert.equal(await launch(({ cmd }) => cmd === 'load_window_state'), 'died');
+	assert.notEqual(breadcrumb(), null, 'the launch that died during the load is on the record');
+	assert.equal(await launch(), 'restored');
+	assert.equal(breadcrumb(), null, 'and the record retires itself once there is nothing to describe');
+
+	// The phantom cost nothing: a later launch reads every document.
+	disk = new Map([['/a.md', '# a'], ['/b.md', '# b']]);
+	storedSnapshot = snapshotOf(['/a.md', '/b.md']);
+	invokeCalls = [];
+	assert.equal(await launch(), 'restored');
+	assert.deepEqual(readsOf(), ['/a.md', '/b.md']);
+});
+
+test('the launch that follows an interruption tells the user which document it skipped', async () => {
+	reset(['/a.md', '/poison.md']);
+	await launch(({ cmd, args }) => cmd === 'read_file_content_checked' && args.path === '/poison.md');
+	notices.length = 0;
+
+	assert.equal(await launch(), 'restored');
+
+	// Not a sentence: the session has no language and the app ships 26 locales,
+	// so the mechanism reports the fact and MarkdownViewer picks the wording.
+	assert.deepEqual(notices, [{ deferredPath: '/poison.md' }]);
+});
+
+test('a launch that was not interrupted tells the user nothing', async () => {
+	reset(['/a.md']);
+	assert.equal(await launch(), 'restored');
+	assert.deepEqual(notices, [], 'the ordinary case is silent');
 });
 
 test('a deferred document is released once Markpad has read it', async () => {

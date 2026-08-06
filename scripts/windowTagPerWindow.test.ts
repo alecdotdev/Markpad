@@ -138,6 +138,7 @@ function makeSession(isMainWindow: boolean) {
 		},
 		onError: () => {},
 		onWarning: () => {},
+		onInterrupted: () => {},
 	});
 }
 

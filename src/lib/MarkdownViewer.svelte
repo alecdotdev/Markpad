@@ -542,6 +542,17 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			addToast(`${message}: ${String(error)}`, 'error');
 		},
 		onWarning: (message, error) => console.warn(message, error),
+		// The console line above says the same thing in more detail, but in a
+		// packaged build nobody can open that console: the recovery mechanism
+		// was diagnosing itself and writing the answer where no one could read
+		// it. A document missing its content needs an explanation on screen.
+		onInterrupted: ({ deferredPath }) =>
+			addToast(
+				deferredPath
+					? t('toast.restoreInterruptedDeferred', settings.language).replace('{path}', deferredPath)
+					: t('toast.restoreInterrupted', settings.language),
+				'warning',
+			),
 	});
 
 	$effect(() => {

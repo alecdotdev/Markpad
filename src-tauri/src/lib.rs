@@ -568,6 +568,21 @@ fn clear_window_state(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn save_restore_progress(app: AppHandle, json: String) -> Result<(), String> {
+    window_runtime::save_restore_progress(app, json)
+}
+
+#[tauri::command]
+fn load_restore_progress(app: AppHandle) -> Option<String> {
+    window_runtime::load_restore_progress(app)
+}
+
+#[tauri::command]
+fn clear_restore_progress(app: AppHandle) -> Result<(), String> {
+    window_runtime::clear_restore_progress(app)
+}
+
+#[tauri::command]
 fn set_window_meta(
     window: tauri::Window,
     state: State<'_, AppState>,
@@ -2852,7 +2867,10 @@ pub fn run() {
             remove_pinned_tag,
             save_window_state,
             load_window_state,
-            clear_window_state
+            clear_window_state,
+            save_restore_progress,
+            load_restore_progress,
+            clear_restore_progress
         ])
         .on_window_event(window_runtime::handle_window_event)
         .on_menu_event(|app, event| {
