@@ -420,8 +420,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Removing Markpad...'
         },
         tabs: {
-            untitled: 'Untitled',
-            home: 'Home'
+            untitled: 'Untitled'
         },
         common: {
             close: 'Close',
@@ -780,8 +779,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: '正在移除 Markpad...'
         },
         tabs: {
-            untitled: '无标题',
-            home: '主页'
+            untitled: '无标题'
         },
         common: {
             close: '关闭',
@@ -1056,8 +1054,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Markpad を削除中...'
         },
         tabs: {
-            untitled: '名前なし',
-            home: 'ホーム'
+            untitled: '名前なし'
         },
         common: {
             close: '閉じる',
@@ -1423,8 +1420,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: '正在移除 Markpad...'
         },
         tabs: {
-            untitled: '未命名',
-            home: '首頁'
+            untitled: '未命名'
         },
         common: {
             close: '關閉',
@@ -1765,8 +1761,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Markpad 제거 중...'
         },
         tabs: {
-            untitled: '제목 없음',
-            home: '홈'
+            untitled: '제목 없음'
         },
         common: {
             close: '닫기',
@@ -1994,8 +1989,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Удаление Markpad...'
         },
         tabs: {
-            untitled: 'Без названия',
-            home: 'Главная'
+            untitled: 'Без названия'
         },
         common: {
             close: 'Закрыть',
@@ -2221,8 +2215,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Eliminando Markpad...'
         },
         tabs: {
-            untitled: 'Sin título',
-            home: 'Inicio'
+            untitled: 'Sin título'
         },
         common: {
             close: 'Cerrar',
@@ -2448,8 +2441,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Suppression de Markpad...'
         },
         tabs: {
-            untitled: 'Sans titre',
-            home: 'Accueil'
+            untitled: 'Sans titre'
         },
         common: {
             close: 'Fermer',
@@ -2675,8 +2667,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Markpad wird entfernt...'
         },
         tabs: {
-            untitled: 'Unbenannt',
-            home: 'Startseite'
+            untitled: 'Unbenannt'
         },
         common: {
             close: 'Schließen',
@@ -2902,8 +2893,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Removendo Markpad...'
         },
         tabs: {
-            untitled: 'Sem título',
-            home: 'Início'
+            untitled: 'Sem título'
         },
         common: {
             close: 'Fechar',
@@ -3129,8 +3119,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Rimozione Markpad...'
         },
         tabs: {
-            untitled: 'Senza titolo',
-            home: 'Home'
+            untitled: 'Senza titolo'
         },
         common: {
             close: 'Chiudi',
@@ -3378,8 +3367,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Usuwanie Markpad...'
         },
         tabs: {
-            untitled: 'Bez tytułu',
-            home: 'Strona główna'
+            untitled: 'Bez tytułu'
         },
         common: {
             close: 'Zamknij',
@@ -3605,8 +3593,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Markpad verwijderen...'
         },
         tabs: {
-            untitled: 'Naamloos',
-            home: 'Startpagina'
+            untitled: 'Naamloos'
         },
         common: {
             close: 'Sluiten',
@@ -3832,8 +3819,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Tar bort Markpad...'
         },
         tabs: {
-            untitled: 'Namnlös',
-            home: 'Hem'
+            untitled: 'Namnlös'
         },
         common: {
             close: 'Stäng',
@@ -4059,8 +4045,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Đang gỡ cài đặt Markpad...'
         },
         tabs: {
-            untitled: 'Chưa đặt tên',
-            home: 'Trang chủ'
+            untitled: 'Chưa đặt tên'
         },
         common: {
             close: 'Đóng',
@@ -4286,8 +4271,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'A remover Markpad...'
         },
         tabs: {
-            untitled: 'Sem título',
-            home: 'Início'
+            untitled: 'Sem título'
         },
         common: {
             close: 'Fechar',
@@ -4513,8 +4497,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Se elimină Markpad...'
         },
         tabs: {
-            untitled: 'Fără titlu',
-            home: 'Acasă'
+            untitled: 'Fără titlu'
         },
         common: {
             close: 'Închidere',
@@ -4740,8 +4723,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Markpad eltávolítása...'
         },
         tabs: {
-            untitled: 'Névtelen',
-            home: 'Kezdőlap'
+            untitled: 'Névtelen'
         },
         common: {
             close: 'Bezárás',
@@ -4970,8 +4952,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Odstraňování Markpadu...'
         },
         tabs: {
-            untitled: 'Bez názvu',
-            home: 'Domů'
+            untitled: 'Bez názvu'
         },
         common: {
             close: 'Zavřít',
@@ -5200,8 +5181,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Odstraňovanie Markpadu...'
         },
         tabs: {
-            untitled: 'Bez názvu',
-            home: 'Domov'
+            untitled: 'Bez názvu'
         },
         common: {
             close: 'Zatvoriť',
@@ -5427,8 +5407,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Κατάργηση Markpad...'
         },
         tabs: {
-            untitled: 'Χωρίς τίτλο',
-            home: 'Αρχική'
+            untitled: 'Χωρίς τίτλο'
         },
         common: {
             close: 'Κλείσιμο',
@@ -5654,8 +5633,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Poistetaan Markpadia...'
         },
         tabs: {
-            untitled: 'Nimetön',
-            home: 'Koti'
+            untitled: 'Nimetön'
         },
         common: {
             close: 'Sulje',
@@ -5881,8 +5859,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Fjerner Markpad...'
         },
         tabs: {
-            untitled: 'Unavngivet',
-            home: 'Hjem'
+            untitled: 'Unavngivet'
         },
         common: {
             close: 'Luk',
@@ -6108,8 +6085,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Fjerner Markpad...'
         },
         tabs: {
-            untitled: 'Uten tittel',
-            home: 'Hjem'
+            untitled: 'Uten tittel'
         },
         common: {
             close: 'Lukk',
@@ -6335,8 +6311,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Mencopot Markpad...'
         },
         tabs: {
-            untitled: 'Tidak Berjudul',
-            home: 'Beranda'
+            untitled: 'Tidak Berjudul'
         },
         common: {
             close: 'Tutup',
@@ -6562,8 +6537,7 @@ export const translations: Record<LanguageCode, Translation> = {
             removingMarkpad: 'Markpad kaldırılıyor...'
         },
         tabs: {
-            untitled: 'Başlıksız',
-            home: 'Ana Sayfa'
+            untitled: 'Başlıksız'
         },
         common: {
             close: 'Kapat',

@@ -24,7 +24,8 @@ import { readSource } from './sourceTree.js';
  * halves became permanently true. From then on the home tab fell into the
  * markdown container and rendered an empty document. The later i18n pass
  * turned the title into `t('tabs.home', lang)`, which merely made the dead
- * half unrecoverable in 26 languages instead of one.
+ * half unrecoverable in 26 languages instead of one. (That key no longer
+ * exists — it was the home tab's title and outlived the tab by one release.)
  *
  * Nothing could see that coupling: a template string compared against a
  * localised title is invisible to the compiler, to `npm run check`, and to
@@ -240,8 +241,13 @@ test('the home screen is reached by tab kind, never by the tab title', () => {
 	openHomeTab();
 	const home = tabManager.activeTab!;
 
+	// `menu.home` rather than `tabs.home`: the latter was the home tab's own
+	// title key and went with the tab, since nothing was left to title. What
+	// the loop needs is only what each locale calls Home, and the menu item
+	// says that in all 26 — the claim being tested is about the title being
+	// ignored, not about which key it came from.
 	for (const { code } of getSupportedLanguages()) {
-		home.title = t('tabs.home', code);
+		home.title = t('menu.home', code);
 		assert.equal(showsDocumentContainer(), false, `the home screen disappears in locale ${code}`);
 	}
 
