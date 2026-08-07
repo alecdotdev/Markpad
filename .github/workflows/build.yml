@@ -329,7 +329,7 @@ jobs:
           # which no longer matches. signer sign reads the key/password from the
           # env above and writes <APPIMAGE>.sig, which the upload and the
           # latest.json job below both consume.
-          npm run tauri signer sign -- "$APPIMAGE" -k
+          npm run tauri signer sign -- "$APPIMAGE"
           if [ ! -f "$APPIMAGE.sig" ]; then
             echo "::error::signer sign did not produce $APPIMAGE.sig" >&2
             exit 1
