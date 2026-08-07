@@ -2800,7 +2800,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			);
 			unlisteners.push(
 				await appWindow.listen('menu-tab-undo', () => {
-					console.log('Received menu-tab-undo event');
 					handleUndoCloseTab();
 				}),
 			);
@@ -2870,7 +2869,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			unlisteners.push(await appWindow.listen('menu-app-quit',         () => appExit()));
 			unlisteners.push(
 				await appWindow.onCloseRequested(async (event) => {
-					console.log('onCloseRequested triggered');
 					if (isForceExiting) return;
 
 					// The red button is a native control, so it is NOT blocked

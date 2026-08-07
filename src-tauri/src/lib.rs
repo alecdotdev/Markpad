@@ -2607,7 +2607,6 @@ pub fn run() {
         )
         .setup(|app| {
             let args: Vec<String> = std::env::args().collect();
-            println!("Setup Args: {:?}", args);
 
             let label = "main";
 
