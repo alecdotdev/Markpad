@@ -36,6 +36,7 @@ import {
 	type RichContentLibraries,
 } from './utils/richContent.js';
 import { observeFoldLayout } from './utils/foldLayout.js';
+import { routeDroppedFile, type DropPane } from './utils/fileDrop.js';
 import {
 	findAnchorElement,
 	getAnchorScrollTop,
@@ -164,6 +165,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 	let isDragging = $state(false);
 	let dragTarget = $state<'editor' | 'preview' | null>(null);
+
+	function reportUnsupportedDrop(path: string) {
+		const filename = path.split(/[/\\]/).pop() || 'File';
+		addToast(t('toast.unsupportedFile').replace('{{filename}}', filename), 'error');
+	}
 	let editorPaneEl = $state<HTMLElement>();
 	let viewerPaneEl = $state<HTMLElement>();
 	let isProgrammaticScroll = false;
@@ -3015,20 +3021,29 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 						const paths = event.payload.paths;
 						const currentEditor = editorPane;
 						if (currentEditor) currentEditor.hideDragCaret();
-						if (dragTarget === 'editor' && currentEditor) {
+						// Both panes route through `routeDroppedFile`. The editor's
+						// branch used to look for an image and silently discard
+						// everything else, so a `.md` dropped there did nothing at
+						// all while the same drop on the preview opened it.
+						const pane: DropPane | null =
+							dragTarget === 'editor' && currentEditor
+								? 'editor'
+								: dragTarget === 'preview' || (!isSplit && !isEditing)
+									? 'preview'
+									: null;
+
+						if (pane) {
 							paths.forEach(path => {
-								const ext = path.split('.').pop()?.toLowerCase();
-								if (ext && ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
-									currentEditor.handleDroppedFile(path, x, y);
-								}
-							});
-						} else if (dragTarget === 'preview' || (!isSplit && !isEditing)) {
-							paths.forEach(path => {
-								if (hasMarkdownLinkExtension(path)) {
-									loadMarkdown(path);
-								} else {
-									const filename = path.split(/[\/\\]/).pop() || 'File';
-									addToast(t('toast.unsupportedFile').replace('{{filename}}', filename), 'error');
+								switch (routeDroppedFile(path, pane)) {
+									case 'insert':
+										currentEditor?.handleDroppedFile(path, x, y);
+										break;
+									case 'open':
+										loadMarkdown(path);
+										break;
+									case 'unsupported':
+										reportUnsupportedDrop(path);
+										break;
 								}
 							});
 						}
