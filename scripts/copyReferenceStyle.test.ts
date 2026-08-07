@@ -63,7 +63,7 @@ test('silence and disagreement both fall back to what the menu always did', () =
 });
 
 test('a document ABOUT markdown does not vote with its examples', () => {
-	// `samples/stress-test-hard.md` and this project's own notes are full of
+	// `samples/stress-test.md` and this project's own notes are full of
 	// both spellings inside fences. Counting those would make the syntax
 	// documentation the loudest voice in every vault.
 	const teaching = [
