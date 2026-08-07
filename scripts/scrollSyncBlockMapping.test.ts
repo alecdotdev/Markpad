@@ -49,9 +49,10 @@ import { installShimDom, parseHtml, NODE_ELEMENT, type ShimElement } from './ren
 installShimDom();
 
 const { processMarkdownHtml } = await import('../src/lib/utils/markdown.ts');
-const { getPreviewOffsetForSourceLine, getSourceLineAtPreviewOffset } = await import(
+const { getPreviewOffsetForSourceLine, getSourceLineAtPreviewOffset, measureAnchorBox } = await import(
 	'../src/lib/utils/previewAnchor.ts'
 );
+type OffsetLayoutNode = Parameters<typeof measureAnchorBox>[0];
 const {
 	getLineAtVerticalOffset,
 	getScrollSyncPositionFromPixels,
@@ -95,17 +96,30 @@ class DocumentBuilder {
 		this.push(`<p data-sourcepos="${line}:1-${line}:${text.length}">${text}</p>`, 1);
 	}
 
-	/** Three source lines — header, separator, one row — for a whole rendered table. */
+	/**
+	 * A pipe table: a header line, a separator line, then one source line per
+	 * row. comrak stamps a source range on the table, on every row and on every
+	 * cell — which is why the mapping descends inside a table at all, and why
+	 * the offsets those elements report are the ones that matter (see
+	 * `offsetParentOf`).
+	 */
 	table(rows: number, label: string) {
 		const start = this.line;
 		const end = start + rows + 1;
-		const body = Array.from(
-			{ length: rows },
-			(_, index) => `<tr><td>${label} ${index}</td><td>value ${index}</td></tr>`,
-		).join('');
+		const cell = (line: number, text: string, column: number, tag: 'td' | 'th') =>
+			`<${tag} data-sourcepos="${line}:${column}-${line}:${column + text.length}">${text}</${tag}>`;
+		const row = (line: number, cells: string, columns: number) =>
+			`<tr data-sourcepos="${line}:1-${line}:${columns}">${cells}</tr>`;
+
+		const body = Array.from({ length: rows }, (_, index) => {
+			const line = start + 2 + index;
+			return row(line, cell(line, `${label} ${index}`, 1, 'td') + cell(line, `value ${index}`, 11, 'td'), 20);
+		}).join('');
+
 		this.push(
-			`<table data-sourcepos="${start}:1-${end}:20"><thead><tr><th>${label}</th><th>value</th></tr></thead>` +
-				`<tbody>${body}</tbody></table>`,
+			`<table data-sourcepos="${start}:1-${end}:20"><thead>` +
+				row(start, cell(start, label, 1, 'th') + cell(start, 'value', 11, 'th'), 20) +
+				`</thead><tbody>${body}</tbody></table>`,
 			end - start + 1,
 		);
 	}
@@ -208,6 +222,7 @@ function buildStressDocument() {
 
 const BOXLESS = new Set(['BR', 'WBR']);
 const BLOCK_GAP = 16;
+const TABLE_INTERNALS = new Set(['TABLE', 'THEAD', 'TBODY']);
 
 /** Height of a block that has no laid-out children, in the units a browser would use. */
 function leafHeight(element: ShimElement, sourceLines: number): number {
@@ -218,9 +233,11 @@ function leafHeight(element: ShimElement, sourceLines: number): number {
 			return 38;
 		case 'H3':
 			return 32;
-		// Three source lines of pipe syntax; twelve rendered rows plus a header.
-		case 'TABLE':
-			return 34 * (element.querySelectorAll('tr').length || 1);
+		// A cell is a line of text and the padding around it, which is why a
+		// table is taller than the same number of source lines of prose.
+		case 'TD':
+		case 'TH':
+			return 34;
 		case 'PRE':
 			return 20 * sourceLines;
 		case 'LI':
@@ -273,9 +290,21 @@ function layOut(root: ShimElement, startTop = 0, gap = BLOCK_GAP): Map<ShimEleme
 			return height;
 		}
 
+		// A row's cells sit side by side: they share its top, and it is as tall as
+		// the tallest of them.
+		if (element.tagName === 'TR') {
+			let height = 0;
+			for (const child of children) height = Math.max(height, place(child, top));
+			boxes.set(element, { top, height });
+			return height;
+		}
+
+		// Nothing inside a table is separated by a collapsing margin.
+		const inner = TABLE_INTERNALS.has(element.tagName) ? 0 : gap;
+
 		let cursor = top;
 		children.forEach((child, index) => {
-			if (index > 0) cursor += gap;
+			if (index > 0) cursor += inner;
 			cursor += place(child, cursor);
 		});
 
@@ -300,26 +329,100 @@ function layOut(root: ShimElement, startTop = 0, gap = BLOCK_GAP): Map<ShimEleme
 const VIEWPORT = 800;
 const EDITOR_LINE_HEIGHT = 19;
 
+/* ------------------------------------------------------------------ */
+/* offset parents: the other thing the shim does not have              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `offsetTop` is not the distance to the top of the scroll content. It is the
+ * distance to the element's OFFSET PARENT, which CSSOM defines as the nearest
+ * positioned ancestor — OR the nearest `table`, `td` or `th`, positioned or
+ * not. Laying the document out as one stack of absolute tops, which is all the
+ * `measure` callback used to be handed, models a preview that contains neither.
+ * The real one contains both, and #205's remaining comments are what that costs.
+ *
+ * So the boxes below are converted into what a browser would actually report,
+ * and the production `measureAnchorBox` is what converts them back.
+ */
+function offsetParentOf(element: ShimElement, root: ShimElement): ShimElement {
+	for (let parent = element.parentElement; parent && parent !== root; parent = parent.parentElement) {
+		// A table is the offset parent of its own rows and cells...
+		if (parent.tagName === 'TABLE' || parent.tagName === 'TD' || parent.tagName === 'TH') return parent;
+		// ...and `.code-block-shell`, which `renderRichContent` wraps every code
+		// block in for the copy button, is `position: relative`.
+		if (parent.classList.contains('code-block-shell')) return parent;
+	}
+	return root;
+}
+
 type Preview = {
 	body: ShimElement;
+	/** What the app measures: `measureAnchorBox` over browser-shaped offsets. */
 	measure: (node: AnchorNode) => Box;
+	/** The control: `offsetTop` read raw, which is what the app used to do. */
+	rawMeasure: (node: AnchorNode) => Box;
 	contentHeight: number;
 	scrollMax: number;
 };
 
 function buildPreview(doc: DocumentBuilder, gap = BLOCK_GAP): Preview {
 	const body = parseHtml(processMarkdownHtml(doc.html(), FILE_PATH, new Set<string>())).body;
+	wrapCodeBlocks(body);
 	const boxes = layOut(body, 0, gap);
 
 	let contentHeight = 0;
 	for (const box of boxes.values()) contentHeight = Math.max(contentHeight, box.top + box.height);
 
+	const NO_BOX = { top: Number.NaN, height: Number.NaN };
+	const layouts = new Map<ShimElement, OffsetLayoutNode>();
+
+	function layoutOf(element: ShimElement): OffsetLayoutNode {
+		const existing = layouts.get(element);
+		if (existing) return existing;
+
+		if (element === body) {
+			const root = { offsetTop: 0, offsetHeight: contentHeight, offsetParent: null };
+			layouts.set(element, root);
+			return root;
+		}
+
+		const parent = offsetParentOf(element, body);
+		const parentTop = parent === body ? 0 : (boxes.get(parent) ?? NO_BOX).top;
+		const box = boxes.get(element) ?? NO_BOX;
+		const node = {
+			offsetTop: box.top - parentTop,
+			offsetHeight: box.height,
+			offsetParent: layoutOf(parent),
+		};
+		layouts.set(element, node);
+		return node;
+	}
+
 	return {
 		body,
-		measure: (node) => boxes.get(node as ShimElement) ?? { top: Number.NaN, height: Number.NaN },
+		measure: (node) => measureAnchorBox(layoutOf(node as ShimElement), layoutOf(body)),
+		rawMeasure: (node) => {
+			const layout = layoutOf(node as ShimElement);
+			return { top: layout.offsetTop, height: layout.offsetHeight };
+		},
 		contentHeight,
 		scrollMax: Math.max(0, contentHeight - VIEWPORT),
 	};
+}
+
+/**
+ * What `renderRichContent` does to every code block on its way into the
+ * preview: a `position: relative` shell around the `<pre>`, so the copy button
+ * has something to sit in. `processMarkdownHtml` does not do it, so a fixture
+ * built from that alone has no positioned ancestor anywhere in it.
+ */
+function wrapCodeBlocks(body: ShimElement) {
+	for (const pre of body.querySelectorAll('pre')) {
+		const shell = body.ownerDocument!.createElement('div');
+		shell.className = 'code-block-shell';
+		pre.replaceWith(shell);
+		shell.appendChild(pre);
+	}
 }
 
 type Editor = {
@@ -758,6 +861,75 @@ test('scrolling one pane down always moves the other pane down', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* the offsets a browser actually reports                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The last table in the fixture: far enough down that "the top of the document"
+ * and "inside this table" cannot be confused for one another.
+ */
+const LAST_TABLE = (() => {
+	const tables = PREVIEW.body.querySelectorAll('table');
+	return tables[tables.length - 1];
+})();
+
+const LAST_TABLE_RANGE = (() => {
+	const [start, end] = LAST_TABLE.getAttribute('data-sourcepos')!.split('-');
+	return { startLine: parseInt(start.split(':')[0], 10), endLine: parseInt(end.split(':')[0], 10) };
+})();
+
+test('a row reports an offset measured from its table, and a code block from its shell', () => {
+	const row = LAST_TABLE.querySelectorAll('tr')[7];
+	const pre = PREVIEW.body.querySelectorAll('pre').at(-1)!;
+
+	// Where they really are: near the end of a 21,000px document.
+	assert.ok(PREVIEW.measure(row).top > PREVIEW.scrollMax * 0.8);
+	assert.ok(PREVIEW.measure(pre).top > PREVIEW.scrollMax * 0.8);
+
+	// What `offsetTop` says: a couple of hundred pixels into the table, and the
+	// shell's padding into the code block. This is the whole defect — those two
+	// numbers used to be read as positions in the document.
+	assert.ok(PREVIEW.rawMeasure(row).top < 600, `the row's offsetTop was ${PREVIEW.rawMeasure(row).top}`);
+	assert.equal(PREVIEW.rawMeasure(pre).top, 0);
+});
+
+test('a line inside a table maps into that table, not to the top of the document', () => {
+	const line = LAST_TABLE_RANGE.startLine + 7;
+	const table = PREVIEW.measure(LAST_TABLE);
+
+	const offset = getPreviewOffsetForSourceLine(PREVIEW.body, line, PREVIEW.measure);
+	assert.ok(offset !== null);
+	assert.ok(
+		offset >= table.top && offset <= table.top + table.height,
+		`a line in a table at ${Math.round(table.top)}px resolved to ${Math.round(offset)}px`,
+	);
+
+	// The control: the same line, through raw `offsetTop`. The reporter's
+	// "one scroll down and it sends me to the top of the document".
+	const raw = getPreviewOffsetForSourceLine(PREVIEW.body, line, PREVIEW.rawMeasure);
+	assert.ok(raw !== null && raw < VIEWPORT, `the control must land in the first screenful, got ${raw}`);
+});
+
+test('an offset inside a table resolves to the row at it, not to the row after the last', () => {
+	const table = PREVIEW.measure(LAST_TABLE);
+	const offset = table.top + table.height / 2;
+
+	const line = getSourceLineAtPreviewOffset(PREVIEW.body, offset, PREVIEW.measure);
+	assert.ok(line !== null);
+	assert.ok(
+		line > LAST_TABLE_RANGE.startLine && line < LAST_TABLE_RANGE.endLine,
+		`halfway down the table resolved to line ${line} of ${LAST_TABLE_RANGE.startLine}-${LAST_TABLE_RANGE.endLine}`,
+	);
+
+	// The control, and the other half of the report: every row's raw box is far
+	// above an offset in document space, so the nearest of them is always the
+	// last one — the editor sticks at the end of the table until the reader has
+	// scrolled past the whole thing.
+	const raw = getSourceLineAtPreviewOffset(PREVIEW.body, offset, PREVIEW.rawMeasure);
+	assert.equal(raw, LAST_TABLE_RANGE.endLine);
+});
+
+/* ------------------------------------------------------------------ */
 /* what the mapping must never resolve to                              */
 /* ------------------------------------------------------------------ */
 
@@ -852,7 +1024,7 @@ test('a preview holding no annotated block falls back to the ratio', () => {
 	assert.equal(getSourceLineAtPreviewOffset(empty, 400, measure), null);
 	assert.equal(getPreviewOffsetForSourceLine(empty, 12, measure), null);
 
-	const emptyPreview: Preview = { body: empty, measure, contentHeight: 0, scrollMax: 600 };
+	const emptyPreview: Preview = { body: empty, measure, rawMeasure: measure, contentHeight: 0, scrollMax: 600 };
 	const position = previewPositionAt(emptyPreview, 300);
 	assert.equal(position.line, undefined);
 	assert.equal(position.section, 'body');

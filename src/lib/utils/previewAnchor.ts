@@ -63,6 +63,58 @@ export type AnchorBox = {
 
 type MeasureAnchorBox = (node: AnchorNode) => AnchorBox;
 
+/**
+ * The layout API `measureAnchorBox` reads, declared structurally for the same
+ * reason `AnchorNode` is: the shim has no layout, so a test supplies its own.
+ */
+export type OffsetLayoutNode = {
+	readonly offsetTop: number;
+	readonly offsetHeight: number;
+	readonly offsetParent: OffsetLayoutNode | null;
+};
+
+function offsetFromRoot(node: OffsetLayoutNode | null): number {
+	let total = 0;
+	for (let current = node; current; current = current.offsetParent) total += current.offsetTop;
+	return total;
+}
+
+/**
+ * Where an element sits inside `container`'s scroll content.
+ *
+ * `offsetTop` alone is not that. It is measured from the element's OFFSET
+ * PARENT, which CSSOM defines as the nearest ancestor that is positioned — or
+ * that is a `table`, `td` or `th`, whatever its position. The preview has both
+ * kinds inside it:
+ *
+ *   .markdown-body          <- the scroll container, the space scrollTop is in
+ *     table[data-sourcepos]      offsetTop measured from the container    ✔
+ *       tbody
+ *         tr[data-sourcepos]     offsetTop measured from the TABLE        ✘
+ *     div.code-block-shell       position: relative, added for the copy button
+ *       pre[data-sourcepos]      offsetTop measured from the SHELL        ✘
+ *
+ * comrak stamps a source range on every table row and cell, so the descent
+ * goes inside a table and reads a handful of table-relative offsets as if they
+ * were document offsets: a line in a table resolves to a couple of hundred
+ * pixels and the pane jumps to the top of the document, and every offset in the
+ * table is far below every row's box so the reverse direction sticks on the
+ * last row until the reader is past the whole table. Both are #205 comments,
+ * and the same is true of any code block.
+ *
+ * Summing the chain and subtracting the container's own puts the box back in
+ * the container's space. Subtracting rather than stopping at the container is
+ * what keeps it exact when the container is not itself an offset parent: both
+ * sums are then measured from the same ancestor above it, and the difference is
+ * the same distance either way.
+ */
+export function measureAnchorBox(element: OffsetLayoutNode, container: OffsetLayoutNode): AnchorBox {
+	return {
+		top: offsetFromRoot(element) - offsetFromRoot(container),
+		height: element.offsetHeight,
+	};
+}
+
 const ELEMENT_NODE = 1;
 
 /**
@@ -322,10 +374,10 @@ function findAnchorElementAtOffset(
  * Where to scroll so `line` sits `offset` pixels below the top of the viewport,
  * interpolating linearly across the resolved element for multi-line blocks.
  *
- * `elementTop` is `offsetTop`, matching what `getPreviewScrollAnchor` measures
- * on the way in. Both sides read the same property on the same element, so a
- * positioned ancestor above the scroll container shifts both by the same amount
- * and cancels out of the round trip.
+ * `elementTop` is the element's top in the scroll container's own space —
+ * `measureAnchorBox` above, which is also what `getPreviewScrollAnchor`
+ * measures on the way in. Both sides measure the same element the same way, so
+ * the round trip is exact.
  */
 export function getAnchorScrollTop(
 	elementTop: number,

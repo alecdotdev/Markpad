@@ -161,6 +161,21 @@ function defaultIdFactory(index: number): string {
 	return `mermaid-${Date.now()}-${index}-${Math.floor(Math.random() * 10000)}`;
 }
 
+/**
+ * A rendered diagram stands in for the `<pre>` it replaced, so it has to
+ * inherit that block's source range.
+ *
+ * Without it a diagram is the one thing in the preview that maps to no source
+ * line at all — not even through a descendant, because the whole subtree is
+ * replaced by Mermaid's SVG. Both halves of scroll sync then treat several
+ * hundred pixels of preview as belonging to whatever block is nearest, and the
+ * panes disagree by the height of the diagram for as long as it is on screen.
+ */
+function carrySourcepos(from: Element, to: Element) {
+	const sourcepos = from.getAttribute('data-sourcepos');
+	if (sourcepos) to.setAttribute('data-sourcepos', sourcepos);
+}
+
 const COPY_ICON_SVG =
 	'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
 
@@ -216,6 +231,7 @@ export async function renderRichContent(options: RenderRichContentOptions): Prom
 
 				const container = doc.createElement('div');
 				container.className = 'mermaid-diagram';
+				carrySourcepos(preEl, container);
 				// Kept so the PDF path can rebuild the diagram with a light theme
 				// instead of recolouring Mermaid's output.
 				rememberDiagramSource(container, mermaidCode);
@@ -226,6 +242,7 @@ export async function renderRichContent(options: RenderRichContentOptions): Prom
 				console.error('Failed to render Mermaid diagram:', error);
 				const errorDiv = doc.createElement('div');
 				errorDiv.className = 'mermaid-error';
+				carrySourcepos(preEl, errorDiv);
 				errorDiv.style.color = 'red';
 				errorDiv.style.padding = '1em';
 				errorDiv.textContent = `Error rendering Mermaid diagram: ${error}`;
