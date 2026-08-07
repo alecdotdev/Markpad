@@ -129,7 +129,7 @@ test('with restore enabled resolved titled tabs stay open for the snapshot', () 
 
 test('auto-save fast path silently saves titled tabs before the walk', () => {
 	const handler = closeHandler();
-	const fastPath = offsetOf(handler, 'settings.autoSave && !settings.confirmBeforeSave');
+	const fastPath = offsetOf(handler, 'if (settings.autoSave) {');
 	const walk = offsetOf(handler, 'canCloseTab(dirty.id)');
 	assert.ok(fastPath < walk, 'the silent save runs before the per-tab walk');
 });

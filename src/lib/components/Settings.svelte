@@ -940,11 +940,23 @@
 								</div>
 							</div>
 
-							<div class="setting-item" class:modified={modified.editorMaxWidth}>
+<div class="setting-item">
+								<label for="editor-word-wrap">{t('settings.wordWrap', settings.language)}</label>
+								<div class="select-wrapper">
+									<select id="editor-word-wrap" bind:value={settings.wordWrap}>
+										<option value="off">{t('menu.wordWrapOff', settings.language)}</option>
+										<option value="on">{t('menu.wordWrapOn', settings.language)}</option>
+										<option value="wordWrapColumn">{t('menu.wordWrapColumn', settings.language)}</option>
+									</select>
+									<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+								</div>
+							</div>
+
+							<div class="setting-item" class:modified={modified.editorMaxWidth} class:inactive={settings.wordWrap !== 'wordWrapColumn'}>
 								<label for="editor-max-width">{t('settings.wrapColumn', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
-										<button class="spin-btn minus" onclick={() => stepSetting(settings.editorMaxWidth, -EDITOR_MAX_WIDTH_RANGE.step, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)} aria-label={t('common.decrease', settings.language)}>
+										<button class="spin-btn minus" disabled={settings.wordWrap !== 'wordWrapColumn'} onclick={() => stepSetting(settings.editorMaxWidth, -EDITOR_MAX_WIDTH_RANGE.step, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)} aria-label={t('common.decrease', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
@@ -960,8 +972,9 @@
 											onblur={(e) => commitNumberInput(e, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)}
 											onkeydown={(e) => handleNumberKeydown(e, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)}
 											class="number-input"
+											disabled={settings.wordWrap !== 'wordWrapColumn'}
 										/>
-										<button class="spin-btn plus" onclick={() => stepSetting(settings.editorMaxWidth, EDITOR_MAX_WIDTH_RANGE.step, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)} aria-label={t('common.increase', settings.language)}>
+										<button class="spin-btn plus" disabled={settings.wordWrap !== 'wordWrapColumn'} onclick={() => stepSetting(settings.editorMaxWidth, EDITOR_MAX_WIDTH_RANGE.step, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
@@ -970,18 +983,7 @@
 								</div>
 							</div>
 
-							<div class="setting-item">
-								<label for="editor-word-wrap">{t('settings.wordWrap', settings.language)}</label>
-								<div class="select-wrapper">
-									<select id="editor-word-wrap" bind:value={settings.wordWrap}>
-										<option value="off">{t('menu.wordWrapOff', settings.language)}</option>
-										<option value="on">{t('menu.wordWrapOn', settings.language)}</option>
-										<option value="wordWrapColumn">{t('menu.wordWrapColumn', settings.language)}</option>
-									</select>
-									<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-								</div>
-							</div>
-
+							
 							<div class="setting-item">
 								<label for="editor-line-numbers">{t('settings.lineNumbers', settings.language)}</label>
 								<label class="toggle">
@@ -1022,10 +1024,10 @@
 								</label>
 							</div>
 
-							<div class="setting-item">
+							<div class="setting-item" class:inactive={!settings.statusBar}>
 								<label for="editor-word-count">{t('settings.wordCount', settings.language)}</label>
 								<label class="toggle">
-									<input id="editor-word-count" type="checkbox" checked={settings.wordCount} onchange={() => settings.toggleWordCount()} />
+									<input id="editor-word-count" type="checkbox" checked={settings.wordCount} disabled={!settings.statusBar} onchange={() => settings.toggleWordCount()} />
 									<span class="toggle-slider"></span>
 								</label>
 							</div>
@@ -1315,14 +1317,19 @@
 									<input id="appearance-restore-state" type="checkbox" checked={settings.restoreStateOnReopen} onchange={() => settings.toggleRestoreStateOnReopen()} />
 									<span class="toggle-slider"></span>
 								</label>
+								<span class="slider-value">{t('settings.restoreStateOnReopenHint', settings.language)}</span>
 							</div>
 
 							<div class="setting-item">
-								<label for="appearance-start-editor">{t('settings.startInEditor', settings.language)}</label>
-								<label class="toggle">
-									<input id="appearance-start-editor" type="checkbox" checked={settings.startInEditor} onchange={() => settings.toggleStartInEditor()} />
-									<span class="toggle-slider"></span>
-								</label>
+								<label for="appearance-open-file-mode">{t('settings.openFileMode', settings.language)}</label>
+								<div class="select-wrapper">
+									<select id="appearance-open-file-mode" bind:value={settings.openFileMode}>
+										<option value="preview">{t('settings.preview', settings.language)}</option>
+										<option value="editor">{t('settings.editor', settings.language)}</option>
+										<option value="split">{t('menu.splitView', settings.language)}</option>
+									</select>
+									<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+								</div>
 							</div>
 							<div class="setting-item">
 								<label for="appearance-new-file-mode">{t('settings.newFileDefaultMode', settings.language)}</label>
@@ -1342,6 +1349,14 @@
 							<label for="appearance-toc">{t('settings.showTableOfContents', settings.language)}</label>
 							<label class="toggle">
 								<input id="appearance-toc" type="checkbox" checked={settings.showToc} onchange={() => settings.toggleToc()} />
+								<span class="toggle-slider"></span>
+							</label>
+						</div>
+
+						<div class="setting-item">
+							<label for="appearance-toc-follows-editor">{t('settings.tocFollowsEditor', settings.language)}</label>
+							<label class="toggle">
+								<input id="appearance-toc-follows-editor" type="checkbox" checked={settings.tocFollowsEditor} onchange={() => settings.toggleTocFollowsEditor()} />
 								<span class="toggle-slider"></span>
 							</label>
 						</div>
@@ -1564,14 +1579,6 @@
 							<label for="files-auto-save">{t('settings.autoSave', settings.language)}</label>
 							<label class="toggle">
 								<input id="files-auto-save" type="checkbox" checked={settings.autoSave} onchange={() => settings.toggleAutoSave()} />
-								<span class="toggle-slider"></span>
-							</label>
-						</div>
-
-						<div class="setting-item">
-							<label for="files-confirm-before-save">{t('settings.confirmBeforeSave', settings.language)}</label>
-							<label class="toggle">
-								<input id="files-confirm-before-save" type="checkbox" checked={settings.confirmBeforeSave} onchange={() => settings.toggleConfirmBeforeSave()} />
 								<span class="toggle-slider"></span>
 							</label>
 						</div>
@@ -2001,6 +2008,24 @@
 
 	.reset-text-btn:hover:not(.disabled) {
 		color: var(--color-accent-fg);
+	}
+
+	/*
+	 * A control whose prerequisite is off. It stays visible and readable — the
+	 * reader needs to see that the setting exists, and where it went — but says
+	 * plainly that nothing it does can take effect yet. The prerequisite is
+	 * always the row directly above it.
+	 */
+	.setting-item.inactive label:first-child,
+	.setting-item.inactive .slider-container,
+	.setting-item.inactive .toggle {
+		opacity: 0.45;
+	}
+
+	.setting-item.inactive .toggle,
+	.setting-item.inactive .number-input,
+	.setting-item.inactive .spin-btn {
+		cursor: default;
 	}
 
 	.reset-text-btn.disabled {

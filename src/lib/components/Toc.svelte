@@ -1,10 +1,19 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
+
 	import { settings } from '../stores/settings.svelte.js';
 	import { t } from '../utils/i18n.js';
+	import { activeTocIdForLine, sourceLineOf } from '../utils/tocFollow.js';
 
-	let { markdownBody, htmlContent, onBeforeJump, collapsedHeaders, ontoggleFold, oncopyref, oncontext, onjump, onshowTooltip, onhideTooltip } = $props<{
+	let { markdownBody, htmlContent, activeLine = null, onBeforeJump, collapsedHeaders, ontoggleFold, oncopyref, oncontext, onjump, onshowTooltip, onhideTooltip } = $props<{
 		markdownBody: HTMLElement | null;
 		htmlContent: string;
+		/**
+		 * The source line at the top of the EDITOR's viewport, or `null` when the
+		 * outline should follow the preview alone (the setting is off, or nothing
+		 * is being edited). See `tocFollow.ts`.
+		 */
+		activeLine?: number | null;
 		onBeforeJump?: () => void;
 		collapsedHeaders?: Set<string>;
 		ontoggleFold?: (id: string) => void;
@@ -21,6 +30,8 @@
 		level: number;
 		isBlock: boolean;
 		hasChildren?: boolean;
+		/** Where this entry starts in the source, for following the editor. */
+		line: number | null;
 	}
 
 	let items = $state<TocItem[]>([]);
@@ -43,7 +54,7 @@
 				const anchor = h.querySelector('a.anchor') as HTMLElement | null;
 				const id = h.id || (anchor ? anchor.id : '');
 				if (id) {
-					result.push({ id, text: text.trim(), level: parseInt(h.tagName[1], 10), isBlock: false });
+					result.push({ id, text: text.trim(), level: parseInt(h.tagName[1], 10), isBlock: false, line: sourceLineOf(h.dataset.sourcepos) });
 				}
 			}
 
@@ -51,7 +62,7 @@
 			for (const el of Array.from(blockAnchors)) {
 				const id = el.id;
 				const label = el.getAttribute('data-label') || id;
-				result.push({ id, text: label, level: 0, isBlock: true });
+				result.push({ id, text: label, level: 0, isBlock: true, line: sourceLineOf(el.dataset.sourcepos) });
 			}
 
 			const allIds = new Map<string, number>();
@@ -75,8 +86,8 @@
 				}
 			}
 
-			const currentFingerprint = items.map(i => `${i.id}-${i.text}-${i.level}`).join('|');
-			const newFingerprint = result.map(i => `${i.id}-${i.text}-${i.level}`).join('|');
+			const currentFingerprint = items.map(i => `${i.id}-${i.text}-${i.level}-${i.line}`).join('|');
+			const newFingerprint = result.map(i => `${i.id}-${i.text}-${i.level}-${i.line}`).join('|');
 			
 			if (currentFingerprint !== newFingerprint) {
 				items = result;
@@ -168,6 +179,27 @@
 		}
 	}
 
+	/**
+	 * Following the EDITOR, when the setting asks for it (#169).
+	 *
+	 * `handleScroll` above cannot answer here: it reads rendered boxes, and the
+	 * pane being scrolled is the one with no boxes to read — in editor-only mode
+	 * the preview never scrolls at all, and in split view it follows only while
+	 * scroll sync is on. The position therefore arrives as a source line and is
+	 * resolved by comparison instead. A click still wins until its scroll
+	 * settles, exactly as it does against the preview's handler.
+	 */
+	$effect(() => {
+		const line = activeLine;
+		if (line === null || clickLock) return;
+
+		const next = activeTocIdForLine(visibleItems, line);
+		if (next === null || next === untrack(() => activeId)) return;
+
+		activeId = next;
+		untrack(scrollTocIntoView);
+	});
+
 	$effect(() => {
 		// Capture the element the listener was attached to: the cleanup must
 		// detach from that same node, not from whatever `markdownBody` points at
@@ -193,8 +225,7 @@
 			scrollTocIntoView();
 			
 			const item = items.find(i => i.id === id);
-			const sourceLine = Number(el.dataset.sourcepos?.match(/^(\d+):/)?.[1]);
-			if (item) onjump?.(id, item.text, Number.isInteger(sourceLine) ? sourceLine : null);
+			if (item) onjump?.(id, item.text, sourceLineOf(el.dataset.sourcepos));
 
 			// highlight element persistently until scroll
 			if (activeTargetEl) activeTargetEl.classList.remove('toc-target-active');
