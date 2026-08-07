@@ -1,4 +1,5 @@
-use comrak::{markdown_to_html, Anchorizer, Options};
+use comrak::nodes::NodeValue;
+use comrak::{markdown_to_html, parse_document, Anchorizer, Arena, Options};
 use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::fs;
@@ -372,6 +373,31 @@ fn escape_html_attribute(value: &str) -> String {
         }
     }
     escaped
+}
+
+/// The comrak configuration the preview is rendered with.
+///
+/// Extracted because a second reader of the document — `heading_anchors`, for
+/// the editor's link completion — has to parse it the same way the renderer
+/// does, or it reports ids for headings the renderer never made and misses the
+/// ones it did.
+fn markdown_options<'a>() -> Options<'a> {
+    let mut options = Options::default();
+    options.extension.strikethrough = true;
+    options.extension.table = true;
+    options.extension.autolink = true;
+    options.extension.tasklist = true;
+    options.extension.superscript = false;
+    options.extension.footnotes = true;
+    options.extension.description_lists = true;
+    // `header_ids` in 0.18; the option only ever set the *prefix* prepended to
+    // the anchorized heading text, and 0.52 renamed it to say so. `Some("")`
+    // means "ids on, no prefix" in both spellings.
+    options.extension.header_id_prefix = Some(String::new());
+    options.render.r#unsafe = true;
+    options.render.hardbreaks = true;
+    options.render.sourcepos = true;
+    options
 }
 
 /// The anchor id comrak assigns to a heading with this text. We call comrak's
@@ -1584,21 +1610,7 @@ fn convert_markdown(content: &str) -> String {
     let processed_links = process_wikilinks(&processed_embeds);
     let masked_math = mask_math_spans(&processed_links);
 
-    let mut options = Options::default();
-    options.extension.strikethrough = true;
-    options.extension.table = true;
-    options.extension.autolink = true;
-    options.extension.tasklist = true;
-    options.extension.superscript = false;
-    options.extension.footnotes = true;
-    options.extension.description_lists = true;
-    // `header_ids` in 0.18; the option only ever set the *prefix* prepended to
-    // the anchorized heading text, and 0.52 renamed it to say so. `Some("")`
-    // means "ids on, no prefix" in both spellings.
-    options.extension.header_id_prefix = Some(String::new());
-    options.render.r#unsafe = true;
-    options.render.hardbreaks = true;
-    options.render.sourcepos = true;
+    let options = markdown_options();
 
     let html = markdown_to_html(&masked_math.text, &options);
     annotate_task_checkboxes(restore_math_spans(&html, &masked_math), raw_buffer)
@@ -1753,6 +1765,144 @@ async fn open_markdown_preview(
     })
     .await
     .unwrap_or_else(|e| Err(e.to_string()))
+}
+
+/// A heading, and the id a link has to name to reach it.
+#[derive(serde::Serialize)]
+struct HeadingAnchor {
+    /// 1-based line in the buffer the caller passed, for ordering the list.
+    line: u32,
+    level: u8,
+    /// What the heading reads as — the completion's label, and what a
+    /// `[[#…]]` wikilink is written with.
+    text: String,
+    /// What `[…](#…)` has to say. This is the id comrak renders, duplicates
+    /// included: a second "Objectives" is `objectives-1`, and offering the
+    /// bare slug for it would link to the first one.
+    slug: String,
+}
+
+/// Every heading in `markdown`, with the anchor comrak gives it.
+///
+/// Parsed rather than scanned for `#`, because a `# comment` inside a fenced
+/// code block is not a heading and this document is full of shell examples.
+/// The parse uses `markdown_options()` — the renderer's own configuration —
+/// so what comes back is what is actually on screen.
+///
+/// ONE anchorizer for the whole document, not one per heading. comrak numbers
+/// repeated headings (`objectives`, `objectives-1`, …) and this list has to
+/// carry the same numbering or completion hands the reader a link to the wrong
+/// section. That is the opposite of `heading_anchor_id`, which is deliberately
+/// fresh per lookup: a wikilink names a heading by TEXT, and text can only
+/// ever address the first heading that reads that way.
+///
+/// The SAME preprocessing the renderer runs, for the same reason: comrak never
+/// sees the buffer. `[[note#Setup]]` is a link by the time it is parsed, so the
+/// heading reads "note > Setup" and is anchorized as such; parsing the raw
+/// buffer instead reports an id for a heading that was never rendered. The
+/// steps are line-preserving (`line_preserving_transforms`), so the sourcepos
+/// numbers still address the caller's buffer.
+///
+/// Math is masked before the parse and comes back after it. Its token is put
+/// back as the source it stands for, which is what the renderer's own
+/// `restore_math_spans` writes into an anchor — and the two agree because
+/// anchorizing is a per-character map with no collapsing, so doing it to the
+/// pieces and doing it to the whole give the same string.
+fn heading_anchors(markdown: &str) -> Vec<HeadingAnchor> {
+    let autolinks = process_parenthesized_autolinks(markdown);
+    let embeds = process_internal_embeds(&autolinks);
+    let preprocessed = process_wikilinks(&embeds);
+    let masked = mask_math_spans(&preprocessed);
+
+    let arena = Arena::new();
+    let options = markdown_options();
+    let root = parse_document(&arena, &masked.text, &options);
+    let mut anchorizer = Anchorizer::new();
+    let mut anchors = Vec::new();
+
+    for node in root.descendants() {
+        let (level, line) = {
+            let data = node.data.borrow();
+            match data.value {
+                NodeValue::Heading(heading) => (heading.level, data.sourcepos.start.line),
+                _ => continue,
+            }
+        };
+
+        let text = unmask_math_text(&collect_inline_text(node), &masked);
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        anchors.push(HeadingAnchor {
+            line: line as u32,
+            level,
+            slug: anchorizer.anchorize(text.trim()),
+            text: text.trim().to_owned(),
+        });
+    }
+
+    anchors
+}
+
+/// The text a heading reads as, which is what comrak anchorizes: the literals
+/// of its inline children, with the emphasis and link markup dropped.
+fn collect_inline_text<'a>(node: &'a comrak::nodes::AstNode<'a>) -> String {
+    let mut text = String::new();
+    for descendant in node.descendants() {
+        match &descendant.data.borrow().value {
+            NodeValue::Text(literal) => text.push_str(literal),
+            NodeValue::Code(code) => text.push_str(&code.literal),
+            _ => {}
+        }
+    }
+    text
+}
+
+/// Puts masked math back into a piece of *text*, which is the spelling a text
+/// node gets. The rendered anchor is built from the same source
+/// (`restore_math_spans`, its `anchored` branch), so anchorizing this gives
+/// the id that is on the heading.
+fn unmask_math_text(text: &str, masked: &MaskedMath) -> String {
+    if masked.spans.is_empty() {
+        return text.to_owned();
+    }
+
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(masked.prefix.as_str()) {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + masked.prefix.len()..];
+        let digits = after
+            .as_bytes()
+            .iter()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count();
+        let index = if digits > 0 && after[digits..].starts_with(MATH_MASK_SUFFIX) {
+            after[..digits].parse::<usize>().ok()
+        } else {
+            None
+        };
+        match index.and_then(|index| masked.spans.get(index)) {
+            Some(span) => {
+                out.push_str(&span.text);
+                rest = &after[digits + MATH_MASK_SUFFIX.len_utf8()..];
+            }
+            None => {
+                out.push_str(&rest[at..at + masked.prefix.len()]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+#[tauri::command]
+async fn list_heading_anchors(markdown: String) -> Result<Vec<HeadingAnchor>, String> {
+    tauri::async_runtime::spawn_blocking(move || Ok(heading_anchors(&markdown)))
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -2722,6 +2872,7 @@ pub fn run() {
             open_markdown,
             open_markdown_preview,
             render_markdown,
+            list_heading_anchors,
             window_runtime::send_markdown_path,
             read_file_content_checked,
             canonicalize_path,
@@ -4073,6 +4224,122 @@ mod tests {
         }
     }
 
+    /// The list the editor completes from has to name the ids that are on
+    /// screen. Rendering the same document and reading its `id=` attributes
+    /// back is the only check that cannot drift from comrak with it.
+    #[test]
+    fn heading_anchors_are_the_ids_the_renderer_writes() {
+        let markdown = concat!(
+            "# 11. Mermaid Diagrams\n\n",
+            "Prose.\n\n",
+            "## Objectives\n\n",
+            "Prose.\n\n",
+            "## Objectives\n\n",
+            "Setext heading\n",
+            "---\n\n",
+            "## A **bold** word and `code`\n\n",
+            "## 1. 概述\n\n",
+            "```bash\n",
+            "# not a heading, a shell comment\n",
+            "```\n",
+        );
+
+        let anchors = heading_anchors(markdown);
+        let texts: Vec<&str> = anchors.iter().map(|a| a.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "11. Mermaid Diagrams",
+                "Objectives",
+                "Objectives",
+                "Setext heading",
+                "A bold word and code",
+                "1. 概述",
+            ],
+            "a fenced `#` line is not a heading, and setext headings are",
+        );
+
+        let html = convert_markdown(markdown);
+        for anchor in &anchors {
+            assert!(
+                html.contains(&format!("id=\"{}\"", anchor.slug)),
+                "id {:?} for heading {:?} is not in the rendered document: {html}",
+                anchor.slug,
+                anchor.text,
+            );
+        }
+
+        // The repeated heading is numbered, or completion would offer one link
+        // for two sections and silently reach only the first.
+        let objectives: Vec<&str> = anchors
+            .iter()
+            .filter(|a| a.text == "Objectives")
+            .map(|a| a.slug.as_str())
+            .collect();
+        assert_eq!(objectives, vec!["objectives", "objectives-1"]);
+
+        // And the line numbers are the buffer's, so the list can be ordered
+        // and a completion can say where it points.
+        assert_eq!(anchors[0].line, 1);
+        assert_eq!(anchors[0].level, 1);
+        assert_eq!(anchors[1].level, 2);
+    }
+
+    /// comrak never sees the buffer: four preprocessing steps run first, and
+    /// two of them rewrite what a heading READS as. A completion list built
+    /// from the raw text reports ids for headings that were never rendered.
+    /// Measured, before this was fixed:
+    ///
+    ///     ## Wiki [[note#Setup]] here   rendered wiki-note--setup-here
+    ///                                   raw      wiki-notesetup-here
+    ///     ## See $[a](b)$ inline        rendered see-ab-inline
+    ///                                   raw      see-a-inline
+    ///
+    /// Every case is checked against the id the renderer actually wrote, so
+    /// this cannot drift with a change to the preprocessing chain.
+    #[test]
+    fn heading_anchors_match_the_renderer_through_every_preprocessing_step() {
+        for markdown in [
+            // Math: masked before the parse, restored after it.
+            "## A heading with $x_1$\n",
+            "## 关于 $x_1$ 的说明\n",
+            "## Solve $x + 1 = 2$ now\n",
+            "## $$E = mc^2$$\n",
+            "## Escaped \\$5 and $y_2$\n",
+            // Math whose source looks like markup. The renderer anchorizes the
+            // source; parsing the buffer would see a link and take its text.
+            "## See $[a](b)$ inline\n",
+            "## Math $a*b*c$ here\n",
+            // A wikilink is a LINK by the time comrak parses it, and its text
+            // is the "Note > Heading" spelling `process_wikilinks` chose.
+            "## Wiki [[note#Setup]] here\n",
+            "## Wiki [[#Setup|jump]] here\n",
+            // Ordinary inline markup, which comrak strips for the id.
+            "## A [real link](https://x.dev) here\n",
+            "## Code `let x = 1;` here\n",
+            "## A **bold** and *italic* heading\n",
+        ] {
+            let html = convert_markdown(markdown);
+            let rendered = html
+                .split("id=\"")
+                .nth(1)
+                .and_then(|rest| rest.split('"').next())
+                .unwrap_or_default()
+                .to_owned();
+            let ours = heading_anchors(markdown)
+                .first()
+                .map(|anchor| anchor.slug.clone())
+                .unwrap_or_default();
+
+            assert!(!rendered.is_empty(), "no id rendered for {markdown:?}");
+            assert_eq!(
+                ours, rendered,
+                "completion would offer {ours:?} for {markdown:?}, but the \
+                 renderer wrote {rendered:?}",
+            );
+        }
+    }
+
     #[test]
     fn wikilink_targets_survive_punctuation_in_the_heading() {
         // "1. 概述" used to become "1.-概述" while comrak rendered "1-概述",
@@ -4623,10 +4890,14 @@ mod tests {
         // rather than a participant in it. `restore_math_spans` also runs on
         // the rendered HTML — it is the second half of `mask_math_spans`,
         // which *is* registered, and it never sees the source buffer.
+        // `markdown_options` returns the parser configuration and never
+        // touches the text at all; it is shared with `heading_anchors`, which
+        // has to parse the document the way the renderer does.
         let not_a_transform = [
             "markdown_to_html",
             "annotate_task_checkboxes",
             "restore_math_spans",
+            "markdown_options",
         ];
 
         let mut found: Vec<String> = call
