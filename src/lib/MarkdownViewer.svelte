@@ -1175,10 +1175,15 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	}
 
 	/**
-	 * The source line at the top of the editor's viewport, for the outline to
-	 * follow (#169). Held here rather than read from the editor because this is
-	 * where that line already arrives — the same position scroll sync sends,
-	 * whether or not sync is on and whether or not the preview is even visible.
+	 * The source line the reader is on, for the outline to follow (#169).
+	 *
+	 * BOTH panes answer here, which is the point: the outline used to decide by
+	 * rendered box, and only the preview has those. A source line is something
+	 * either pane can produce — the editor sends one on every scroll (the same
+	 * position scroll sync uses, whether or not sync is on), and the preview
+	 * already computes one for the tab's reading position. One rule then picks
+	 * the entry, so the two panes cannot disagree about which heading is
+	 * current while both are on screen.
 	 */
 	let tocActiveLine = $state<number | null>(null);
 
@@ -1254,9 +1259,13 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				tabManager.updateTabScrollPercentage(tabManager.activeTabId, percentage);
 			}
 
+			// One descent, two consumers: the tab's reading position, and the
+			// outline. Both want the line at the top of the preview, and this is
+			// already the only place it is measured.
 			const anchorLine = getPreviewScrollAnchor(target);
 			if (anchorLine !== null) {
 				tabManager.updateTabAnchorLine(tabManager.activeTabId, anchorLine);
+				tocActiveLine = anchorLine;
 			}
 		}
 
@@ -3434,7 +3443,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 									onpointerdown={startTocResize}
 									onkeydown={handleTocResizeKeyDown}></div>
 								<Toc
-									activeLine={settings.tocFollowsEditor && (isEditing || isSplit) ? tocActiveLine : null} 
+									activeLine={tocActiveLine} 
 										{markdownBody} 
 										htmlContent={sanitizedHtml}
 										onBeforeJump={pushScrollHistory} 

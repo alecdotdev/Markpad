@@ -1317,7 +1317,6 @@
 									<input id="appearance-restore-state" type="checkbox" checked={settings.restoreStateOnReopen} onchange={() => settings.toggleRestoreStateOnReopen()} />
 									<span class="toggle-slider"></span>
 								</label>
-								<span class="slider-value">{t('settings.restoreStateOnReopenHint', settings.language)}</span>
 							</div>
 
 							<div class="setting-item">
@@ -1349,14 +1348,6 @@
 							<label for="appearance-toc">{t('settings.showTableOfContents', settings.language)}</label>
 							<label class="toggle">
 								<input id="appearance-toc" type="checkbox" checked={settings.showToc} onchange={() => settings.toggleToc()} />
-								<span class="toggle-slider"></span>
-							</label>
-						</div>
-
-						<div class="setting-item">
-							<label for="appearance-toc-follows-editor">{t('settings.tocFollowsEditor', settings.language)}</label>
-							<label class="toggle">
-								<input id="appearance-toc-follows-editor" type="checkbox" checked={settings.tocFollowsEditor} onchange={() => settings.toggleTocFollowsEditor()} />
 								<span class="toggle-slider"></span>
 							</label>
 						</div>
