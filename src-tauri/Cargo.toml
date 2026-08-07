@@ -31,11 +31,18 @@ tauri-plugin-window-state = ">=2.2.2, <3"
 serde = { version = "1", features = ["derive"] }
 comrak = "0.54"
 serde_json = "1"
-tauri-plugin-prevent-default = "2.0.0-rc.1"
+tauri-plugin-prevent-default = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 notify = "6"
 regex = "1"
+# For the `asset:` protocol handler in `asset_protocol`. All three are already
+# in the lock file as transitive dependencies of tauri, so naming them here
+# adds no crate to the build.
+http = "1"
+http-range = "0.1"
+percent-encoding = "2"
+tauri-utils = "2"
 
 reqwest = "0.12"
 zip = { version = "2.1", default-features = false, features = ["deflate", "time"] }

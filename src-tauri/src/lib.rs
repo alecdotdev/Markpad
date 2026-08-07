@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// between into an `<img src>`, destroying the prose *and* renumbering every
 /// task checkbox below it. Not matching (rather than matching and bailing out)
 /// also leaves the later, well-formed embed free to render.
-static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[(.*?)\]\]").unwrap());
+static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[(.*?)\]\]").expect("valid regex literal"));
 /// `[[target]]` / `[[target|alias]]` where the target names a heading — either
 /// in this document (`#Setup`) or in another file (`Notes#Setup`). The `#` is
 /// required: a wikilink without one is a bare note link, which Markpad has
@@ -29,20 +29,20 @@ static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[(
 /// `process_wikilinks` re-checks that the target half really has one.
 /// The inner text stops at the first `]`, as the narrower `[[#…]]` pattern
 /// this replaced also did.
-static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]]*#[^\]]*)\]\]").unwrap());
+static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]]*#[^\]]*)\]\]").expect("valid regex literal"));
 /// ` ^block-id` at the end of a line. The leading whitespace is captured
 /// because Obsidian also accepts a block id alone on the line after the block
 /// it names, and `\s+` then spans the newline: the replacement has to put that
 /// newline back, or the anchor is folded onto the previous line and every line
 /// below it moves up one (see the line contract in `mod tests`).
 static BLOCK_ID_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?m)(\s+)\^([a-zA-Z0-9_-]+)$").unwrap());
-static HIGHLIGHT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"==([^=\n]+)==").unwrap());
+    LazyLock::new(|| Regex::new(r"(?m)(\s+)\^([a-zA-Z0-9_-]+)$").expect("valid regex literal"));
+static HIGHLIGHT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"==([^=\n]+)==").expect("valid regex literal"));
 /// Obsidian's inline footnote `^[text]`, which is a single-line form — the
 /// multi-line spelling is the separate `[^ref]` + `[^ref]: …` pair. Excluding
 /// the newline also keeps the line contract: collapsing a wrapped `^[…]` into
 /// one `[^ifn-N]` reference renumbered every line below it.
-static INLINE_FOOTNOTE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\^\[([^\]\n]+)\]").unwrap());
+static INLINE_FOOTNOTE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\^\[([^\]\n]+)\]").expect("valid regex literal"));
 /// The rendered task-list `<input>` this pass is allowed to mark.
 ///
 /// The boolean attributes are matched as an unordered set rather than in a
@@ -56,10 +56,10 @@ static TASK_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"<li data-sourcepos="(?<sourcepos>(?<line>\d+):\d+-\d+:\d+)">(?<input><input type="checkbox"(?: (?:checked|disabled)="")* />)"#,
     )
-    .unwrap()
+    .expect("valid regex literal")
 });
 static TASK_SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX]\](?:\s|$)").unwrap()
+    Regex::new(r"^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX]\](?:\s|$)").expect("valid regex literal")
 });
 
 /// Distinguishes the temp files of `atomic_write` calls that share a process.
@@ -543,81 +543,11 @@ fn validate_vsix_archive_limits<R: std::io::Read + std::io::Seek>(
     Ok(())
 }
 
+mod asset_protocol;
+mod error;
 mod tab_transfer;
 mod window_runtime;
 use window_runtime::{AppState, WatcherState};
-
-#[tauri::command]
-async fn show_window(window: tauri::Window) {
-    window_runtime::show_window(window).await;
-}
-
-#[tauri::command]
-fn save_window_state(app: AppHandle, json: String) -> Result<(), String> {
-    window_runtime::save_window_state(app, json)
-}
-
-#[tauri::command]
-fn load_window_state(app: AppHandle) -> Option<String> {
-    window_runtime::load_window_state(app)
-}
-
-#[tauri::command]
-fn clear_window_state(app: AppHandle) -> Result<(), String> {
-    window_runtime::clear_window_state(app)
-}
-
-#[tauri::command]
-fn set_window_meta(
-    window: tauri::Window,
-    state: State<'_, AppState>,
-    tag_name: Option<String>,
-    tag_color: Option<String>,
-    active_tab_title: String,
-    tab_count: usize,
-) {
-    window_runtime::set_window_meta(window, state, tag_name, tag_color, active_tab_title, tab_count)
-}
-
-#[tauri::command]
-fn list_viewer_windows(state: State<'_, AppState>) -> Vec<window_runtime::WindowListEntry> {
-    window_runtime::list_viewer_windows(state)
-}
-
-#[tauri::command]
-fn is_window_tag_taken(window: tauri::Window, state: State<'_, AppState>, name: String) -> bool {
-    window_runtime::is_window_tag_taken(window, state, name)
-}
-
-#[tauri::command]
-fn offer_tab_to_window(
-    app: AppHandle,
-    state: State<'_, tab_transfer::TabTransferBroker>,
-    target_label: String,
-    token: String,
-) -> Result<(), String> {
-    window_runtime::offer_tab_to_window(app, state, target_label, token)
-}
-
-#[tauri::command]
-fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
-    window_runtime::focus_window(app, label)
-}
-
-#[tauri::command]
-fn list_pinned_tags(app: AppHandle) -> Vec<window_runtime::PinnedTag> {
-    window_runtime::list_pinned_tags(app)
-}
-
-#[tauri::command]
-fn save_pinned_tag(app: AppHandle, name: String, color: String, files: Vec<String>) -> Result<(), String> {
-    window_runtime::save_pinned_tag(app, name, color, files)
-}
-
-#[tauri::command]
-fn remove_pinned_tag(app: AppHandle, name: String) -> Result<(), String> {
-    window_runtime::remove_pinned_tag(app, name)
-}
 
 /// Byte ranges of code regions — fenced code blocks and inline code spans —
 /// paired with CommonMark's rules. The regex alternation previously used for
@@ -684,7 +614,7 @@ fn code_region_ranges(content: &str) -> Vec<(usize, usize)> {
                     if seg_start < line_start {
                         push_inline_code_spans(content, seg_start, line_start, &mut regions);
                     }
-                    fence = Some((marker.unwrap(), run_len, line_start));
+                    fence = Some((marker.expect("fence marker"), run_len, line_start));
                 }
             }
         }
@@ -2031,34 +1961,48 @@ async fn save_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
     .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Async because `reveal` blocks its caller until the file manager answers:
+/// on Windows it spawns a COM worker for `SHOpenFolderAndSelectItems` and
+/// joins it, on macOS it waits for `open -R`. Selecting a file on a network
+/// volume makes that wait the share's, and on the main thread it would stall
+/// every window until it returns.
 #[tauri::command]
-fn open_file_folder(path: String) -> Result<(), String> {
-    opener::reveal(path).map_err(|e| e.to_string())
+async fn open_file_folder(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || opener::reveal(path).map_err(|e| e.to_string()))
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Async because a rename is a round trip to whatever holds the path — on a
+/// network or removable volume, seconds of blocking I/O for a metadata
+/// operation that looks instant on a local disk.
 #[tauri::command]
-fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
-    fs::rename(old_path, new_path).map_err(|e| e.to_string())
+async fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::rename(old_path, new_path).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Async because arming a watcher opens the watched path, and an unreachable
+/// one costs the full share timeout before it fails — `\\wsl$\…` with the
+/// distro stopped is the case that prompted this. Inserting the new watcher
+/// also drops the window's previous one, and that drop joins its thread.
+///
+/// `State` is resolved inside the closure rather than taken as a parameter:
+/// `State<'_, _>` borrows from the app and cannot cross into a `'static`
+/// blocking task. It is injected by Tauri either way, so the command's
+/// frontend-facing arguments are unchanged.
 #[tauri::command]
-fn watch_file(
-    window: tauri::Window,
-    handle: AppHandle,
-    state: State<'_, WatcherState>,
-    path: String,
-) -> Result<(), String> {
-    window_runtime::watch_file(window, handle, state, path)
-}
-
-#[tauri::command]
-fn unwatch_file(window: tauri::Window, state: State<'_, WatcherState>) -> Result<(), String> {
-    window_runtime::unwatch_file(window, state)
-}
-
-#[tauri::command]
-fn send_markdown_path(state: State<'_, AppState>) -> Vec<String> {
-    window_runtime::send_markdown_path(state)
+async fn watch_file(window: tauri::Window, handle: AppHandle, path: String) -> Result<(), String> {
+    let state_handle = handle.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = state_handle.state::<WatcherState>();
+        window_runtime::watch_file(window, handle, state, path)
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -2067,35 +2011,6 @@ fn save_theme(app: AppHandle, theme: String) -> Result<(), String> {
     fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
     let theme_path = config_dir.join("theme.txt");
     atomic_write(&theme_path, theme.as_bytes()).map_err(|e| e.to_string())
-}
-
-/// Answer the uninstall entry point that pre-2.7 custom installs left behind.
-///
-/// Those installs wrote `UninstallString = "…\Markpad.exe" --uninstall`, and
-/// Add/Remove Programs still runs it on any machine whose registry entry was
-/// never rewritten. The code that used to serve it is gone, so hand the request
-/// to the NSIS uninstaller sitting beside us. When there is none to hand it to,
-/// fall through and start normally: an editor window is a poor answer, but it
-/// is a visible one, and a click that does nothing at all is worse.
-#[cfg(target_os = "windows")]
-fn forward_legacy_uninstall() {
-    if !std::env::args().any(|arg| arg == "--uninstall") {
-        return;
-    }
-
-    let Ok(exe) = std::env::current_exe() else {
-        return;
-    };
-    let Some(uninstaller) = exe.parent().map(|dir| dir.join("uninstall.exe")) else {
-        return;
-    };
-    if !uninstaller.is_file() {
-        return;
-    }
-
-    if std::process::Command::new(&uninstaller).spawn().is_ok() {
-        std::process::exit(0);
-    }
 }
 
 fn theme_slug(value: &str) -> String {
@@ -2593,9 +2508,17 @@ fn copy_file_to_img_blocking(
     Ok(rel_path)
 }
 
+/// Async because `fs::copy` streams the whole file. On a network or removable
+/// volume that is seconds of blocking I/O, and on the main thread it would
+/// stall every window until the copy completes — the same reason its sibling
+/// `copy_file_to_img` already runs on the blocking pool.
 #[tauri::command]
-fn copy_file(src: String, dest: String) -> Result<(), String> {
-    fs::copy(src, dest).map(|_| ()).map_err(|e| e.to_string())
+async fn copy_file(src: String, dest: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::copy(src, dest).map(|_| ()).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -2633,8 +2556,6 @@ pub fn run() {
 
     #[cfg(target_os = "windows")]
     {
-        forward_legacy_uninstall();
-
         std::env::set_var(
             "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
             "--enable-features=SmoothScrolling",
@@ -2645,6 +2566,18 @@ pub fn run() {
         .manage(AppState::new())
         .manage(WatcherState::new())
         .manage(tab_transfer::TabTransferBroker::new())
+        // Replaces Tauri's own `asset:` handler, which reads the file on the
+        // thread the webview calls it on — see `asset_protocol` for why that
+        // freezes every window on an unreachable path. Registering the scheme
+        // here is what suppresses the built-in one.
+        .register_asynchronous_uri_scheme_protocol("asset", |ctx, request, responder| {
+            let scope = ctx.app_handle().asset_protocol_scope();
+            tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(asset_protocol::respond(&request, &|path| {
+                    scope.is_allowed(path)
+                }));
+            });
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
@@ -2675,22 +2608,8 @@ pub fn run() {
         )
         .setup(|app| {
             let args: Vec<String> = std::env::args().collect();
-            println!("Setup Args: {:?}", args);
 
-            let current_exe = std::env::current_exe().unwrap_or_default();
-            let exe_name = current_exe
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_lowercase();
-            let is_installer_mode =
-                args.iter().any(|arg| arg == "--install") || exe_name.contains("installer");
-
-            let label = if is_installer_mode {
-                "installer"
-            } else {
-                "main"
-            };
+            let label = "main";
 
             let mut window_builder = tauri::WebviewWindowBuilder::new(
                 app,
@@ -2794,15 +2713,6 @@ pub fn run() {
                 window_runtime::bring_to_front(&window);
             }
 
-            // If installer, force size (this will be saved to installer-state, not main-state)
-            if is_installer_mode {
-                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                    width: 450.0,
-                    height: 650.0,
-                }));
-                let _ = window.center();
-            }
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2812,7 +2722,7 @@ pub fn run() {
             open_markdown,
             open_markdown_preview,
             render_markdown,
-            send_markdown_path,
+            window_runtime::send_markdown_path,
             read_file_content_checked,
             canonicalize_path,
             read_file_as_data_url,
@@ -2824,8 +2734,8 @@ pub fn run() {
             open_file_folder,
             rename_file,
             watch_file,
-            unwatch_file,
-            show_window,
+            window_runtime::unwatch_file,
+            window_runtime::show_window,
             save_theme,
             get_system_fonts,
             get_os_type,
@@ -2842,17 +2752,20 @@ pub fn run() {
             tab_transfer::complete_detached_tab,
             tab_transfer::cancel_detached_tab,
             create_transfer_window,
-            set_window_meta,
-            list_viewer_windows,
-            is_window_tag_taken,
-            offer_tab_to_window,
-            focus_window,
-            list_pinned_tags,
-            save_pinned_tag,
-            remove_pinned_tag,
-            save_window_state,
-            load_window_state,
-            clear_window_state
+            window_runtime::set_window_meta,
+            window_runtime::list_viewer_windows,
+            window_runtime::is_window_tag_taken,
+            window_runtime::offer_tab_to_window,
+            window_runtime::focus_window,
+            window_runtime::list_pinned_tags,
+            window_runtime::save_pinned_tag,
+            window_runtime::remove_pinned_tag,
+            window_runtime::save_window_state,
+            window_runtime::load_window_state,
+            window_runtime::clear_window_state,
+            window_runtime::save_restore_progress,
+            window_runtime::load_restore_progress,
+            window_runtime::clear_restore_progress
         ])
         .on_window_event(window_runtime::handle_window_event)
         .on_menu_event(|app, event| {

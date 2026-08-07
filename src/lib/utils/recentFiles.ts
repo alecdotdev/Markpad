@@ -47,7 +47,7 @@ export function renameRecentFile(stored: readonly string[], oldPath: string, new
 }
 
 export function readStoredRecentFiles(): string[] {
-	if (typeof localStorage === 'undefined') return [];
+	if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return [];
 	return parseRecentFiles(localStorage.getItem(RECENT_FILES_KEY));
 }
 
@@ -89,6 +89,6 @@ export function updateStoredRecentFiles(mutate: (current: string[]) => string[])
  * A null key is localStorage being cleared wholesale.
  */
 export function isRecentFilesStorageEvent(event: Pick<StorageEvent, 'key' | 'storageArea'>): boolean {
-	if (typeof localStorage !== 'undefined' && event.storageArea && event.storageArea !== localStorage) return false;
+	if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function' && event.storageArea && event.storageArea !== localStorage) return false;
 	return event.key === null || event.key === RECENT_FILES_KEY;
 }

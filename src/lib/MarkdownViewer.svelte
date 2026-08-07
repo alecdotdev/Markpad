@@ -544,6 +544,17 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			addToast(`${message}: ${String(error)}`, 'error');
 		},
 		onWarning: (message, error) => console.warn(message, error),
+		// The console line above says the same thing in more detail, but in a
+		// packaged build nobody can open that console: the recovery mechanism
+		// was diagnosing itself and writing the answer where no one could read
+		// it. A document missing its content needs an explanation on screen.
+		onInterrupted: ({ deferredPath }) =>
+			addToast(
+				deferredPath
+					? t('toast.restoreInterruptedDeferred', settings.language).replace('{path}', deferredPath)
+					: t('toast.restoreInterrupted', settings.language),
+				'warning',
+			),
 	});
 
 	$effect(() => {
@@ -641,9 +652,20 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		await windowSession.persistState();
 	}
 
+	// Exit discards the snapshot on purpose — it is how "quit" differs from
+	// closing the window — but only once startup is over. Until `init` sets
+	// `mode` to 'app', the file on disk is still the only complete record of
+	// the session: `restore()` has rebuilt the tab list but is partway through
+	// reading those files back. That window is short unless a restored path is
+	// unreachable, and then it is the share timeout, once per tab, serially —
+	// which is exactly when the user starts looking for a way out. The loading
+	// screen renders the ☰ menu while every keyboard shortcut is inert
+	// (`handleKeyDown` returns on `mode !== 'app'`), so Exit is the control
+	// they reach. Discarding there costs them the session they were waiting
+	// for; falling through to a plain close writes it back instead.
 	async function appExit() {
 		await savePinnedTagIfNeeded();
-		if (settings.restoreStateOnReopen) {
+		if (settings.restoreStateOnReopen && mode === 'app') {
 			const hasUnsaved = tabManager.tabs.some((t) => t.isDirty || (t.path === '' && t.rawContent.trim() !== ''));
 			if (hasUnsaved) {
 				const response = await askCustom(t('modal.areYouSureYouWantToExit', settings.language), {
@@ -2790,7 +2812,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			);
 			unlisteners.push(
 				await appWindow.listen('menu-tab-undo', () => {
-					console.log('Received menu-tab-undo event');
 					handleUndoCloseTab();
 				}),
 			);
@@ -2860,7 +2881,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			unlisteners.push(await appWindow.listen('menu-app-quit',         () => appExit()));
 			unlisteners.push(
 				await appWindow.onCloseRequested(async (event) => {
-					console.log('onCloseRequested triggered');
 					if (isForceExiting) return;
 
 					// The red button is a native control, so it is NOT blocked

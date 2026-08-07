@@ -250,7 +250,7 @@ export interface PersistedSetting<T> {
  * hop. It also makes redundant writes free in the ordinary single-window case.
  */
 export function writeStoredSetting(key: string, value: string | null): boolean {
-	if (typeof localStorage === 'undefined') return false;
+	if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return false;
 	const current = localStorage.getItem(key);
 	if (value === null) {
 		if (current === null) return false;
@@ -264,7 +264,7 @@ export function writeStoredSetting(key: string, value: string | null): boolean {
 
 /** Applies everything currently in localStorage onto `target`. */
 function loadPersistedSettings<T>(target: T, entries: readonly PersistedSetting<T>[]): void {
-	if (typeof localStorage === 'undefined') return;
+	if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return;
 	for (const entry of entries) {
 		entry.load(target, localStorage.getItem(entry.key));
 	}
@@ -295,7 +295,7 @@ function installPersistedSettings<T>(target: T, entries: readonly PersistedSetti
 		if (typeof window === 'undefined') return;
 		const entriesByKey = new Map(entries.map((entry) => [entry.key, entry]));
 		const onStorage = (event: StorageEvent) => {
-			if (event.storageArea && typeof localStorage !== 'undefined' && event.storageArea !== localStorage) return;
+			if (event.storageArea && typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function' && event.storageArea !== localStorage) return;
 			// A null key means the whole store was cleared; re-read everything.
 			if (event.key === null) {
 				loadPersistedSettings(target, entries);
@@ -365,7 +365,7 @@ export class SettingsStore {
 	confirmBeforeSave = $state(false);
 
 	constructor() {
-		if (typeof localStorage === 'undefined') return;
+		if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return;
 
 		const entries = createSettingsPersistence();
 

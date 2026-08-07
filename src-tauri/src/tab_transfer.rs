@@ -149,7 +149,7 @@ impl TabTransferBroker {
 
     fn stage(&self, payload: String, source_label: String) -> String {
         let token = self.next_token();
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = crate::window_runtime::lock_recover(&self.inner);
         inner.entries.insert(
             token.clone(),
             PendingTransfer {
@@ -171,7 +171,7 @@ impl TabTransferBroker {
     }
 
     pub fn set_target_label(&self, token: &str, target_label: String) -> Result<(), String> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = crate::window_runtime::lock_recover(&self.inner);
         let entry = inner
             .entries
             .get_mut(token)
@@ -185,7 +185,7 @@ impl TabTransferBroker {
     /// first claim stamps the entry so the source's timeout can tell a dead
     /// transfer from one that is merely still rendering.
     fn claim(&self, token: &str, now: Instant) -> Option<PendingTransfer> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = crate::window_runtime::lock_recover(&self.inner);
         let entry = inner.entries.get_mut(token)?;
         if entry.claimed_at.is_none() {
             entry.claimed_at = Some(now);
@@ -194,11 +194,11 @@ impl TabTransferBroker {
     }
 
     fn peek(&self, token: &str) -> Option<PendingTransfer> {
-        self.inner.lock().unwrap().entries.get(token).cloned()
+        crate::window_runtime::lock_recover(&self.inner).entries.get(token).cloned()
     }
 
     fn take(&self, token: &str) -> Option<PendingTransfer> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = crate::window_runtime::lock_recover(&self.inner);
         inner.insertion_order.retain(|entry| entry != token);
         inner.entries.remove(token)
     }

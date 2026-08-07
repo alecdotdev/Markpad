@@ -272,7 +272,9 @@ export const translations: Record<LanguageCode, Translation> = {
             savedNewerEdits: 'Saved — staying in edit mode because you have newer edits',
             openExportedFileFailed: 'Could not open exported file',
             partialDocument: 'Cannot edit yet — this file is not fully loaded',
-            lossySaveBlocked: 'Not saved: this file is not UTF-8, so parts of it became "�" when it was opened. Saving would destroy the original — use "Save As" to write a copy'
+            lossySaveBlocked: 'Not saved: this file is not UTF-8, so parts of it became "�" when it was opened. Saving would destroy the original — use "Save As" to write a copy',
+            restoreInterrupted: 'Markpad did not finish restoring your session last time',
+            restoreInterruptedDeferred: 'Markpad did not finish opening {path} last time, so it was skipped. Open it yourself to try again'
         },
         externalChange: {
             message: 'This file changed on disk while you had unsaved changes.',
@@ -388,37 +390,6 @@ export const translations: Record<LanguageCode, Translation> = {
             followSystem: 'Follow System',
             defaultLight: 'Default Light',
             defaultDark: 'Default Dark'
-        },
-        installer: {
-            markdownViewer: 'Markdown Viewer',
-            current: 'Current:',
-            target: 'Target:',
-            simpleMarkdownViewer: 'A simple markdown viewer',
-            justMe: 'Just Me',
-            allUsers: 'All Users',
-            registerMd: 'Register as default for .md files',
-            createDesktopShortcut: 'Create desktop shortcut',
-            addToStartMenu: 'Add to Start Menu',
-            launchAfterInstallation: 'Launch after installation',
-            installedFor: 'Installed for:',
-            repairFileAssociations: 'Repair file associations',
-            launchAfterUpdate: 'Launch after update',
-            uninstall: 'Uninstall',
-            updateRepair: 'Update / Repair',
-            installForAllUsers: 'Install for All Users',
-            installNow: 'Install Now',
-            requiresAdmin: 'Requires Administrator privileges',
-            updating: 'Updating',
-            installing: 'Installing',
-            markpad: 'Markpad...',
-            accessDenied: 'Access denied. Please run as Administrator.'
-        },
-        uninstaller: {
-            uninstallMarkpad: 'Uninstall Markpad?',
-            removeApplication: 'This will remove the application and all its shortcuts.',
-            cancel: 'Cancel',
-            uninstall: 'Uninstall',
-            removingMarkpad: 'Removing Markpad...'
         },
         tabs: {
             untitled: 'Untitled',
@@ -749,37 +720,6 @@ export const translations: Record<LanguageCode, Translation> = {
             defaultLight: '默认浅色',
             defaultDark: '默认深色'
         },
-        installer: {
-            markdownViewer: 'Markdown 查看器',
-            current: '当前:',
-            target: '目标:',
-            simpleMarkdownViewer: '一个简单的 Markdown 查看器',
-            justMe: '仅我',
-            allUsers: '所有用户',
-            registerMd: '注册为 .md 文件的默认程序',
-            createDesktopShortcut: '创建桌面快捷方式',
-            addToStartMenu: '添加到开始菜单',
-            launchAfterInstallation: '安装后启动',
-            installedFor: '已安装为:',
-            repairFileAssociations: '修复文件关联',
-            launchAfterUpdate: '更新后启动',
-            uninstall: '卸载',
-            updateRepair: '更新 / 修复',
-            installForAllUsers: '为所有用户安装',
-            installNow: '立即安装',
-            requiresAdmin: '需要管理员权限',
-            updating: '正在更新',
-            installing: '正在安装',
-            markpad: 'Markpad...',
-            accessDenied: '访问被拒绝。请以管理员身份运行。'
-        },
-        uninstaller: {
-            uninstallMarkpad: '卸载 Markpad？',
-            removeApplication: '这将移除应用程序及其所有快捷方式。',
-            cancel: '取消',
-            uninstall: '卸载',
-            removingMarkpad: '正在移除 Markpad...'
-        },
         tabs: {
             untitled: '无标题',
             home: '主页'
@@ -1024,37 +964,6 @@ export const translations: Record<LanguageCode, Translation> = {
             followSystem: 'システムに従う',
             defaultLight: 'デフォルトの明るい',
             defaultDark: 'デフォルトの暗い'
-        },
-        installer: {
-            markdownViewer: 'Markdown ビューア',
-            current: '現在:',
-            target: 'ターゲット:',
-            simpleMarkdownViewer: 'シンプルな Markdown ビューア',
-            justMe: '私のみ',
-            allUsers: 'すべてのユーザー',
-            registerMd: '.md ファイルのデフォルトとして登録',
-            createDesktopShortcut: 'デスクトップショートカットを作成',
-            addToStartMenu: 'スタートメニューに追加',
-            launchAfterInstallation: 'インストール後に起動',
-            installedFor: 'インストール先:',
-            repairFileAssociations: 'ファイル関連付けを修復',
-            launchAfterUpdate: '更新後に起動',
-            uninstall: 'アンインストール',
-            updateRepair: '更新 / 修復',
-            installForAllUsers: 'すべてのユーザーにインストール',
-            installNow: '今すぐインストール',
-            requiresAdmin: '管理者権限が必要',
-            updating: '更新中',
-            installing: 'インストール中',
-            markpad: 'Markpad...',
-            accessDenied: 'アクセスが拒否されました。管理者として実行してください。'
-        },
-        uninstaller: {
-            uninstallMarkpad: 'Markpad をアンインストールしますか？',
-            removeApplication: 'これにより、アプリケーションとそのすべてのショートカットが削除されます。',
-            cancel: 'キャンセル',
-            uninstall: 'アンインストール',
-            removingMarkpad: 'Markpad を削除中...'
         },
         tabs: {
             untitled: '名前なし',
@@ -1392,37 +1301,6 @@ export const translations: Record<LanguageCode, Translation> = {
             defaultLight: '預設淺色',
             defaultDark: '預設深色'
         },
-        installer: {
-            markdownViewer: 'Markdown 檢視器',
-            current: '目前版本：',
-            target: '目標版本：',
-            simpleMarkdownViewer: '簡易 Markdown 檢視器',
-            justMe: '僅限我自己',
-            allUsers: '所有使用者',
-            registerMd: '設為 .md 檔案的預設程式',
-            createDesktopShortcut: '建立桌面捷徑',
-            addToStartMenu: '新增至開始功能表',
-            launchAfterInstallation: '安裝後啟動',
-            installedFor: '安裝對象：',
-            repairFileAssociations: '修復檔案關聯',
-            launchAfterUpdate: '更新後啟動',
-            uninstall: '解除安裝',
-            updateRepair: '更新 / 修復',
-            installForAllUsers: '為所有使用者安裝',
-            installNow: '立即安裝',
-            requiresAdmin: '需要系統管理員權限',
-            updating: '正在更新',
-            installing: '正在安裝',
-            markpad: 'Markpad...',
-            accessDenied: '存取遭拒，請以系統管理員身分執行。'
-        },
-        uninstaller: {
-            uninstallMarkpad: '解除安裝 Markpad？',
-            removeApplication: '這將移除應用程式及其所有捷徑。',
-            cancel: '取消',
-            uninstall: '解除安裝',
-            removingMarkpad: '正在移除 Markpad...'
-        },
         tabs: {
             untitled: '未命名',
             home: '首頁'
@@ -1734,37 +1612,6 @@ export const translations: Record<LanguageCode, Translation> = {
             embed: '삽입하려면 놓으세요',
             open: '열려면 놓으세요'
         },
-        installer: {
-            markdownViewer: '마크다운 뷰어',
-            current: '현재:',
-            target: '대상:',
-            simpleMarkdownViewer: '간단한 마크다운 뷰어',
-            justMe: '나만',
-            allUsers: '모든 사용자',
-            registerMd: '.md 파일의 기본 프로그램으로 등록',
-            createDesktopShortcut: '바탕화면 바로가기 만들기',
-            addToStartMenu: '시작 메뉴에 추가',
-            launchAfterInstallation: '설치 후 실행',
-            installedFor: '설치 대상:',
-            repairFileAssociations: '파일 연결 복구',
-            launchAfterUpdate: '업데이트 후 실행',
-            uninstall: '제거',
-            updateRepair: '업데이트/복구',
-            installForAllUsers: '모든 사용자를 위해 설치',
-            installNow: '지금 설치',
-            requiresAdmin: '관리자 권한이 필요합니다',
-            updating: '업데이트 중',
-            installing: '설치 중',
-            markpad: 'Markpad...',
-            accessDenied: '액세스가 거부되었습니다. 관리자 권한으로 다시 실행해 주세요.'
-        },
-        uninstaller: {
-            uninstallMarkpad: 'Markpad를 제거하시겠습니까?',
-            removeApplication: '응용 프로그램과 모든 바로 가기가 삭제됩니다.',
-            cancel: '취소',
-            uninstall: '제거',
-            removingMarkpad: 'Markpad 제거 중...'
-        },
         tabs: {
             untitled: '제목 없음',
             home: '홈'
@@ -1987,13 +1834,6 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Увеличить',
             zoomOut: 'Уменьшить'
         },
-        uninstaller: {
-            uninstallMarkpad: 'Вы хотите удалить Markpad?',
-            removeApplication: 'Приложение и все его ярлыки будут удалены.',
-            cancel: 'Отмена',
-            uninstall: 'Удалить',
-            removingMarkpad: 'Удаление Markpad...'
-        },
         tabs: {
             untitled: 'Без названия',
             home: 'Главная'
@@ -2213,13 +2053,6 @@ export const translations: Record<LanguageCode, Translation> = {
             changeTheme: 'Cambiar tema',
             zoomIn: 'Acercar',
             zoomOut: 'Alejar'
-        },
-        uninstaller: {
-            uninstallMarkpad: '¿Desea desinstalar Markpad?',
-            removeApplication: 'Se eliminará la aplicación y todos sus accesos directos.',
-            cancel: 'Cancelar',
-            uninstall: 'Desinstalar',
-            removingMarkpad: 'Eliminando Markpad...'
         },
         tabs: {
             untitled: 'Sin título',
@@ -2441,13 +2274,6 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Zoom avant',
             zoomOut: 'Zoom arrière'
         },
-        uninstaller: {
-            uninstallMarkpad: 'Voulez-vous désinstaller Markpad ?',
-            removeApplication: 'L\'application et tous ses raccourcis seront supprimés.',
-            cancel: 'Annuler',
-            uninstall: 'Désinstaller',
-            removingMarkpad: 'Suppression de Markpad...'
-        },
         tabs: {
             untitled: 'Sans titre',
             home: 'Accueil'
@@ -2667,13 +2493,6 @@ export const translations: Record<LanguageCode, Translation> = {
             changeTheme: 'Thema ändern',
             zoomIn: 'Vergrößern',
             zoomOut: 'Verkleinern'
-        },
-        uninstaller: {
-            uninstallMarkpad: 'Möchten Sie Markpad deinstallieren?',
-            removeApplication: 'Die Anwendung und alle ihre Verknüpfungen werden entfernt.',
-            cancel: 'Abbrechen',
-            uninstall: 'Deinstallieren',
-            removingMarkpad: 'Markpad wird entfernt...'
         },
         tabs: {
             untitled: 'Unbenannt',
@@ -2895,13 +2714,6 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Aumentar zoom',
             zoomOut: 'Diminuir zoom'
         },
-        uninstaller: {
-            uninstallMarkpad: 'Deseja desinstalar o Markpad?',
-            removeApplication: 'O aplicativo e todos os seus atalhos serão removidos.',
-            cancel: 'Cancelar',
-            uninstall: 'Desinstalar',
-            removingMarkpad: 'Removendo Markpad...'
-        },
         tabs: {
             untitled: 'Sem título',
             home: 'Início'
@@ -3121,13 +2933,6 @@ export const translations: Record<LanguageCode, Translation> = {
             changeTheme: 'Cambia tema',
             zoomIn: 'Zoom avanti',
             zoomOut: 'Zoom indietro'
-        },
-        uninstaller: {
-            uninstallMarkpad: 'Vuoi disinstallare Markpad?',
-            removeApplication: 'L\'applicazione e tutti i suoi collegamenti verranno rimossi.',
-            cancel: 'Annulla',
-            uninstall: 'Disinstalla',
-            removingMarkpad: 'Rimozione Markpad...'
         },
         tabs: {
             untitled: 'Senza titolo',
@@ -3371,13 +3176,6 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Powiększ',
             zoomOut: 'Pomniejsz'
         },
-        uninstaller: {
-            uninstallMarkpad: 'Czy chcesz odinstalować Markpad?',
-            removeApplication: 'Spowoduje to usunięcie aplikacji i wszystkich jej skrótów.',
-            cancel: 'Anuluj',
-            uninstall: 'Odinstaluj',
-            removingMarkpad: 'Usuwanie Markpad...'
-        },
         tabs: {
             untitled: 'Bez tytułu',
             home: 'Strona główna'
@@ -3597,13 +3395,6 @@ export const translations: Record<LanguageCode, Translation> = {
             changeTheme: 'Wijzig thema',
             zoomIn: 'Inzoomen',
             zoomOut: 'Uitzoomen'
-        },
-        uninstaller: {
-            uninstallMarkpad: 'Wil je Markpad verwijderen?',
-            removeApplication: 'Hiermee wordt de applicatie en alle snelkoppelingen verwijderd.',
-            cancel: 'Annuleren',
-            uninstall: 'Verwijderen',
-            removingMarkpad: 'Markpad verwijderen...'
         },
         tabs: {
             untitled: 'Naamloos',
@@ -3825,13 +3616,6 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Zooma in',
             zoomOut: 'Zooma ut'
         },
-        uninstaller: {
-            uninstallMarkpad: 'Vill du avinstallera Markpad?',
-            removeApplication: 'Detta tar bort programmet och alla dess genvägar.',
-            cancel: 'Avbryt',
-            uninstall: 'Avinstallera',
-            removingMarkpad: 'Tar bort Markpad...'
-        },
         tabs: {
             untitled: 'Namnlös',
             home: 'Hem'
@@ -4051,13 +3835,6 @@ export const translations: Record<LanguageCode, Translation> = {
             changeTheme: 'Thay đổi chủ đề',
             zoomIn: 'Phóng to',
             zoomOut: 'Thu nhỏ'
-        },
-        uninstaller: {
-            uninstallMarkpad: 'Bạn có muốn gỡ cài đặt Markpad không?',
-            removeApplication: 'Thao tác này sẽ xóa ứng dụng và tất cả lối tắt của nó.',
-            cancel: 'Hủy',
-            uninstall: 'Gỡ cài đặt',
-            removingMarkpad: 'Đang gỡ cài đặt Markpad...'
         },
         tabs: {
             untitled: 'Chưa đặt tên',
@@ -4279,13 +4056,6 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Aumentar zoom',
             zoomOut: 'Diminuir zoom'
         },
-        uninstaller: {
-            uninstallMarkpad: 'Pretende desinstalar o Markpad?',
-            removeApplication: 'Isto irá remover a aplicação e todos os seus atalhos.',
-            cancel: 'Cancelar',
-            uninstall: 'Desinstalar',
-            removingMarkpad: 'A remover Markpad...'
-        },
         tabs: {
             untitled: 'Sem título',
             home: 'Início'
@@ -4506,13 +4276,6 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Mărire',
             zoomOut: 'Micșorare'
         },
-        uninstaller: {
-            uninstallMarkpad: 'Doriți să dezinstalați Markpad?',
-            removeApplication: 'Aceasta va elimina aplicația și toate comenzile rapide ale acesteia.',
-            cancel: 'Anulare',
-            uninstall: 'Dezinstalare',
-            removingMarkpad: 'Se elimină Markpad...'
-        },
         tabs: {
             untitled: 'Fără titlu',
             home: 'Acasă'
@@ -4732,13 +4495,6 @@ export const translations: Record<LanguageCode, Translation> = {
             changeTheme: 'Téma váltása',
             zoomIn: 'Nagyítás',
             zoomOut: 'Kicsinyítés'
-        },
-        uninstaller: {
-            uninstallMarkpad: 'Eltávolítja a Markpad-et?',
-            removeApplication: 'Ez eltávolítja az alkalmazást és minden parancsikonját.',
-            cancel: 'Mégse',
-            uninstall: 'Eltávolítás',
-            removingMarkpad: 'Markpad eltávolítása...'
         },
         tabs: {
             untitled: 'Névtelen',
@@ -4963,13 +4719,6 @@ export const translations: Record<LanguageCode, Translation> = {
             undock: 'zrušit pevné',
             switchSide: 'Switch side',
         },
-        uninstaller: {
-            uninstallMarkpad: 'Chcete odinstalovat Markpad?',
-            removeApplication: 'Tím se odstraní aplikace a všechny její zástupce.',
-            cancel: 'Zrušit',
-            uninstall: 'Odinstalovat',
-            removingMarkpad: 'Odstraňování Markpadu...'
-        },
         tabs: {
             untitled: 'Bez názvu',
             home: 'Domů'
@@ -5193,13 +4942,6 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Priblížiť',
             zoomOut: 'Oddialiť'
         },
-        uninstaller: {
-            uninstallMarkpad: 'Chcete odinštalovať Markpad?',
-            removeApplication: 'Tým sa odstráni aplikácia a všetky jej odkazy.',
-            cancel: 'Zrušiť',
-            uninstall: 'Odinštalovať',
-            removingMarkpad: 'Odstraňovanie Markpadu...'
-        },
         tabs: {
             untitled: 'Bez názvu',
             home: 'Domov'
@@ -5419,13 +5161,6 @@ export const translations: Record<LanguageCode, Translation> = {
             changeTheme: 'Αλλαγή θέματος',
             zoomIn: 'Μεγέθυνση',
             zoomOut: 'Σμίκρυνση'
-        },
-        uninstaller: {
-            uninstallMarkpad: 'Θέλετε να απεγκαταστήσετε το Markpad;',
-            removeApplication: 'Αυτό θα καταργήσει την εφαρμογή και όλες τις συντομεύσεις της.',
-            cancel: 'Ακύρωση',
-            uninstall: 'Απεγκατάσταση',
-            removingMarkpad: 'Κατάργηση Markpad...'
         },
         tabs: {
             untitled: 'Χωρίς τίτλο',
@@ -5647,13 +5382,6 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Lähennä',
             zoomOut: 'Loitonna'
         },
-        uninstaller: {
-            uninstallMarkpad: 'Haluatko poistaa Markpadin asennuksen?',
-            removeApplication: 'Tämä poistaa sovelluksen ja kaikki sen pikakuvakkeet.',
-            cancel: 'Peruuta',
-            uninstall: 'Poista asennus',
-            removingMarkpad: 'Poistetaan Markpadia...'
-        },
         tabs: {
             untitled: 'Nimetön',
             home: 'Koti'
@@ -5873,13 +5601,6 @@ export const translations: Record<LanguageCode, Translation> = {
             changeTheme: 'Skift tema',
             zoomIn: 'Zoom ind',
             zoomOut: 'Zoom ud'
-        },
-        uninstaller: {
-            uninstallMarkpad: 'Vil du afinstallere Markpad?',
-            removeApplication: 'Dette fjerner applikationen og alle dens genveje.',
-            cancel: 'Annuller',
-            uninstall: 'Afinstaller',
-            removingMarkpad: 'Fjerner Markpad...'
         },
         tabs: {
             untitled: 'Unavngivet',
@@ -6101,13 +5822,6 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Zoom inn',
             zoomOut: 'Zoom ut'
         },
-        uninstaller: {
-            uninstallMarkpad: 'Vil du avinstallere Markpad?',
-            removeApplication: 'Dette fjerner applikasjonen og alle snarveiene dens.',
-            cancel: 'Avbryt',
-            uninstall: 'Avinstaller',
-            removingMarkpad: 'Fjerner Markpad...'
-        },
         tabs: {
             untitled: 'Uten tittel',
             home: 'Hjem'
@@ -6328,13 +6042,6 @@ export const translations: Record<LanguageCode, Translation> = {
             zoomIn: 'Perbesar',
             zoomOut: 'Perkecil'
         },
-        uninstaller: {
-            uninstallMarkpad: 'Apakah Anda ingin mencopot pemasangan Markpad?',
-            removeApplication: 'Tindakan ini akan menghapus aplikasi dan semua pintasannya.',
-            cancel: 'Batal',
-            uninstall: 'Copot Pemasangan',
-            removingMarkpad: 'Mencopot Markpad...'
-        },
         tabs: {
             untitled: 'Tidak Berjudul',
             home: 'Beranda'
@@ -6554,13 +6261,6 @@ export const translations: Record<LanguageCode, Translation> = {
             changeTheme: 'Temayı Değiştir',
             zoomIn: 'Yakınlaştır',
             zoomOut: 'Uzaklaştır'
-        },
-        uninstaller: {
-            uninstallMarkpad: 'Markpad\'i kaldırmak istiyor musunuz?',
-            removeApplication: 'Bu, uygulamayı ve tüm kısayollarını kaldıracak.',
-            cancel: 'İptal',
-            uninstall: 'Kaldır',
-            removingMarkpad: 'Markpad kaldırılıyor...'
         },
         tabs: {
             untitled: 'Başlıksız',

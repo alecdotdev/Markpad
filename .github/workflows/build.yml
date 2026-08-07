@@ -232,6 +232,72 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
 
+      # tauri/linuxdeploy bundles libwayland-client.so.0 (and other host-graphics
+      # libraries) from the ubuntu-24.04 runner into the AppImage. On a host whose
+      # Mesa is newer than the runner's, that older bundled libwayland-client
+      # shadows the system one and breaks host libEGL: WebKit's WebProcess aborts
+      # with "Could not create default EGL display: EGL_BAD_PARAMETER" and the
+      # window comes up blank. These libraries are on the AppImage excludelist
+      # precisely because they must come from the host. Strip them, repack, and
+      # re-sign so the updater signature still matches. See #498; #463 fixed the
+      # separate WebKitGTK version pin.
+      - name: Strip host-coupled libraries from AppImage
+        if: matrix.platform == 'ubuntu-24.04'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' | head -1)
+          if [ -z "$APPIMAGE" ]; then
+            echo "::error::No AppImage found to repackage" >&2
+            exit 1
+          fi
+          APPIMAGE=$(realpath "$APPIMAGE")
+          echo "Repackaging $APPIMAGE"
+
+          # appimagetool + a type2 runtime. --appimage-extract-and-run (below) and
+          # --appimage-extract both unpack without libfuse2, which the runner lacks.
+          tools=$(mktemp -d)
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O "$tools/appimagetool"
+          wget -q https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64 -O "$tools/runtime-x86_64"
+          chmod +x "$tools/appimagetool"
+
+          work=$(mktemp -d)
+          ( cd "$work" && "$APPIMAGE" --appimage-extract >/dev/null )
+          libdir="$work/squashfs-root/usr/lib"
+
+          # Host-coupled graphics libraries (AppImageCommunity/pkg2appimage
+          # excludelist). libwayland-client.so.0 is the one that actually breaks
+          # EGL; the rest belong to the host graphics stack for the same reason.
+          for lib in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1 \
+                     libwayland-server.so.0 libxcb-render.so.0 libxcb-shm.so.0; do
+            rm -fv "$libdir/$lib"
+          done
+          if [ -e "$libdir/libwayland-client.so.0" ]; then
+            echo "::error::libwayland-client.so.0 still bundled after strip" >&2
+            exit 1
+          fi
+
+          # Repack in place so the filename (and updater target) is unchanged.
+          ARCH=x86_64 "$tools/appimagetool" --appimage-extract-and-run \
+            --runtime-file "$tools/runtime-x86_64" \
+            "$work/squashfs-root" "$APPIMAGE"
+
+          # Re-sign: tauri build already produced a .sig for the pre-strip file,
+          # which no longer matches. signer sign reads the key/password from the
+          # env above and writes <APPIMAGE>.sig, which the upload and the
+          # latest.json job below both consume.
+          npm run tauri signer sign -- "$APPIMAGE"
+          if [ ! -f "$APPIMAGE.sig" ]; then
+            echo "::error::signer sign did not produce $APPIMAGE.sig" >&2
+            exit 1
+          fi
+
+          echo "Repacked and re-signed:"
+          ls -la "$APPIMAGE" "$APPIMAGE.sig"
+
       - name: Upload Linux Artifacts
         if: matrix.platform == 'ubuntu-24.04'
         shell: bash

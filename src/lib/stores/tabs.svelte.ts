@@ -184,7 +184,7 @@ class TabManager {
 	windowTag = $state<{ name: string; color: string; pinned: boolean } | null>(null);
 
 	constructor() {
-		if (typeof localStorage !== 'undefined') {
+		if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
 			const saved = localStorage.getItem('editor.splitScrollSync');
 			if (saved !== null) {
 				this.splitScrollSyncPreference = saved === 'true';
@@ -193,7 +193,7 @@ class TabManager {
 	}
 
 	private saveSplitScrollSyncPreference() {
-		if (typeof localStorage !== 'undefined') {
+		if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
 			localStorage.setItem('editor.splitScrollSync', String(this.splitScrollSyncPreference));
 		}
 	}

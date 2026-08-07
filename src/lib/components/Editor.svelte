@@ -181,7 +181,7 @@
 	}
 
 	self.MonacoEnvironment = {
-		getWorker: function (_moduleId: any, label: string) {
+		getWorker: function (_moduleId: string, label: string) {
 			if (label === "json") {
 				return new jsonWorker();
 			}
