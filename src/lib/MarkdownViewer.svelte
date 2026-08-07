@@ -41,9 +41,11 @@ import {
 	getAnchorScrollTop,
 	getPreviewOffsetForSourceLine,
 	getSourceLineAtPreviewOffset,
+	measureAnchorBox,
 	PREVIEW_ANCHOR_OFFSET,
 	type AnchorBox,
 	type AnchorNode,
+	type OffsetLayoutNode,
 } from './utils/previewAnchor.js';
 import {
 	addFrontMatterListItems,
@@ -1060,10 +1062,14 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 						// line (see scripts/previewAnchorRestore.test.ts for the rate).
 						const match = findAnchorElement(body, tab.anchorLine);
 						if (match) {
-							const el = match.element as HTMLElement;
+							// Through the same measurement the sync path uses: an anchor
+							// inside a table or a code block resolves to an element whose
+							// `offsetTop` is measured from that table or that block's shell,
+							// and restoring to it would open the tab at the top instead.
+							const box = measurePreviewBox(match.element);
 							body.scrollTop = getAnchorScrollTop(
-								el.offsetTop,
-								el.offsetHeight,
+								box.top,
+								box.height,
 								match,
 								tab.anchorLine,
 								PREVIEW_ANCHOR_OFFSET,
@@ -1101,16 +1107,22 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		const panel = target.querySelector<HTMLElement>('.frontmatter' + '-panel');
 		if (!panel) return 0;
 
-		return Math.max(0, Math.min(getPreviewScrollMax(target), panel.offsetTop + panel.offsetHeight));
+		// In the same space as `target.scrollTop`, which is what it is compared
+		// against — see `measurePreviewBox`.
+		const box = measurePreviewBox(panel);
+		return Math.max(0, Math.min(getPreviewScrollMax(target), box.top + box.height));
 	}
 
-	// `offsetTop` is relative to the offset parent rather than to the scroll
-	// container, but every measurement in the sync path reads the same property
-	// on elements sharing one offset parent, so the difference is a constant that
-	// cancels — the same reasoning `getAnchorScrollTop` documents for the restore.
+	// Not `element.offsetTop`: that is measured from the element's offset parent,
+	// and the preview is full of them — every `<table>` is the offset parent of
+	// its own rows and cells, and `.code-block-shell` is positioned. See
+	// `measureAnchorBox` for what reading those raw does to the mapping.
 	function measurePreviewBox(node: AnchorNode): AnchorBox {
-		const element = node as HTMLElement;
-		return { top: element.offsetTop, height: element.offsetHeight };
+		if (!markdownBody) return { top: Number.NaN, height: Number.NaN };
+		return measureAnchorBox(
+			node as unknown as OffsetLayoutNode,
+			markdownBody as unknown as OffsetLayoutNode,
+		);
 	}
 
 	function getPreviewScrollSyncPosition(target: HTMLElement): ScrollSyncPosition {
