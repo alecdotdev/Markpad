@@ -77,7 +77,6 @@ export const translations: Record<LanguageCode, Translation> = {
             toolbarsSettings: 'Toolbar Settings',
             fileSettings: 'File Settings',
             autoSave: 'Auto-save edits',
-            confirmBeforeSave: 'Ask for confirmation before saving',
             resetEditorSettings: 'Reset editor settings',
             resetFontSettings: 'Reset font settings',
 			resetPreviewSettings: 'Reset preview settings',
@@ -100,7 +99,9 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Show Whitespace',
             showTabs: 'Show Tabs',
             restoreStateOnReopen: 'Restore State on Reopen',
-            startInEditor: 'Start in Editor',
+            restoreStateOnReopenHint: 'also keeps tabs open when a window closes',
+            openFileMode: 'Open existing files in',
+            tocFollowsEditor: 'Table of Contents Follows Editor Scrolling',
             newFileDefaultMode: 'New file opens in editor',
             showRecentFiles: 'Show Recent Files',
             showTableOfContents: 'Show Table of Contents',
@@ -435,8 +436,10 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: '显示空白',
             showTabs: '显示标签',
             restoreStateOnReopen: '重新打开时恢复状态',
-            startInEditor: '在编辑器中启动',
-            newFileDefaultMode: '新文件在编辑器中打开',
+            restoreStateOnReopenHint: '同时决定关闭窗口时是否保留标签页',
+            openFileMode: '打开已有文件时',
+            tocFollowsEditor: '目录跟随编辑器滚动',
+            newFileDefaultMode: '新建文件在编辑器中打开',
             showRecentFiles: '显示最近文件',
             showTableOfContents: '显示目录',
             zenMode: '禅模式',
@@ -467,7 +470,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: '文件',
             fileSettings: '文件设置',
             autoSave: '自动保存编辑',
-            confirmBeforeSave: '保存前进行确认'
         },
         colors: {
             default: '默认',
@@ -756,7 +758,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: '空白を表示',
             showTabs: 'タブを表示',
             restoreStateOnReopen: '再オープン時に状態を復元',
-            startInEditor: 'エディタで開始',
             newFileDefaultMode: '新しいファイルをエディタで開く',
             showRecentFiles: '最近のファイルを表示',
             showTableOfContents: '目次を表示',
@@ -784,7 +785,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'ファイル',
             fileSettings: 'ファイル設定',
             autoSave: '編集を自動保存',
-            confirmBeforeSave: '保存前に確認する'
         },
         colors: {
             default: 'デフォルト',
@@ -989,7 +989,6 @@ export const translations: Record<LanguageCode, Translation> = {
             toolbarsSettings: '工具列設定',
             fileSettings: '檔案設定',
             autoSave: '自動儲存編輯內容',
-            confirmBeforeSave: '儲存前先確認',
             resetEditorSettings: '重設編輯器設定',
             resetFontSettings: '重設字型設定',
             resetPreviewSettings: '重設預覽設定',
@@ -1012,8 +1011,10 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: '顯示空白字元',
             showTabs: '顯示分頁欄',
             restoreStateOnReopen: '重新開啟時還原狀態',
-            startInEditor: '以編輯器啟動',
-            newFileDefaultMode: '新檔案以編輯器開啟',
+            restoreStateOnReopenHint: '同時決定關閉視窗時是否保留分頁',
+            openFileMode: '開啟既有檔案時',
+            tocFollowsEditor: '目錄跟隨編輯器捲動',
+            newFileDefaultMode: '新建檔案以編輯器開啟',
             showRecentFiles: '顯示最近的檔案',
             showTableOfContents: '顯示目錄',
             zenMode: '專注模式',
@@ -1339,7 +1340,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: '공백 표시',
             showTabs: '탭 표시',
             restoreStateOnReopen: '다시 열 때 상태 복원',
-            startInEditor: '편집기에서 시작',
             newFileDefaultMode: '새 파일을 편집기에서 열기',
             showRecentFiles: '최근 파일 표시',
             showTableOfContents: '목차 표시',
@@ -1376,7 +1376,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: '파일',
             fileSettings: '파일 설정',
             autoSave: '편집 내용 자동 저장',
-            confirmBeforeSave: '저장 전 확인'
         },
         colors: {
             default: '기본',
@@ -1635,7 +1634,6 @@ export const translations: Record<LanguageCode, Translation> = {
             appearanceSettings: 'Настройки внешнего вида',
             fileSettings: 'Настройки файлов',
             autoSave: 'Автосохранение изменений',
-            confirmBeforeSave: 'Спрашивать подтверждение перед сохранением',
             resetEditorSettings: 'Сбросить настройки редактора',
             resetFontSettings: 'Сбросить настройки шрифта',
             font: 'Шрифт',
@@ -1652,7 +1650,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Показывать пробелы',
             showTabs: 'Показывать вкладки',
             restoreStateOnReopen: 'Восстановить состояние при повторном открытии',
-            startInEditor: 'Запускать в редакторе',
             newFileDefaultMode: 'Новый файл открывается в редакторе',
             showRecentFiles: 'Показывать недавние файлы',
             showTableOfContents: 'Показывать оглавление',
@@ -1869,7 +1866,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Mostrar espacios',
             showTabs: 'Mostrar pestañas',
             restoreStateOnReopen: 'Restaurar estado al reabrir',
-            startInEditor: 'Iniciar en editor',
             newFileDefaultMode: 'Nuevo archivo se abre en el editor',
             showRecentFiles: 'Mostrar archivos recientes',
             showTableOfContents: 'Mostrar tabla de contenidos',
@@ -1897,7 +1893,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Archivos',
             fileSettings: 'Configuración de archivos',
             autoSave: 'Guardar cambios automáticamente',
-            confirmBeforeSave: 'Pedir confirmación antes de guardar'
         },
         colors: {
             default: 'Predeterminado',
@@ -2089,7 +2084,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Afficher les espaces',
             showTabs: 'Afficher les onglets',
             restoreStateOnReopen: 'Restaurer l\'état à la réouverture',
-            startInEditor: 'Démarrer dans l\'éditeur',
             newFileDefaultMode: 'Nouveau fichier s\'ouvre dans l\'éditeur',
             showRecentFiles: 'Afficher les fichiers récents',
             showTableOfContents: 'Afficher la table des matières',
@@ -2117,7 +2111,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Fichiers',
             fileSettings: 'Paramètres des fichiers',
             autoSave: 'Enregistrement automatique des modifications',
-            confirmBeforeSave: 'Demander confirmation avant d\'enregistrer'
         },
         colors: {
             default: 'Par défaut',
@@ -2309,7 +2302,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Leerzeichen anzeigen',
             showTabs: 'Tabs anzeigen',
             restoreStateOnReopen: 'Zustand beim erneuten Öffnen wiederherstellen',
-            startInEditor: 'Im Editor starten',
             newFileDefaultMode: 'Neue Datei im Editor öffnen',
             showRecentFiles: 'Zuletzt geöffnete Dateien anzeigen',
             showTableOfContents: 'Inhaltsverzeichnis anzeigen',
@@ -2337,7 +2329,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Dateien',
             fileSettings: 'Datei-Einstellungen',
             autoSave: 'Änderungen automatisch speichern',
-            confirmBeforeSave: 'Vor dem Speichern bestätigen'
         },
         colors: {
             default: 'Standard',
@@ -2529,7 +2520,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Mostrar espaços',
             showTabs: 'Mostrar abas',
             restoreStateOnReopen: 'Restaurar estado ao reabrir',
-            startInEditor: 'Iniciar no editor',
             newFileDefaultMode: 'Novo arquivo abre no editor',
             showRecentFiles: 'Mostrar arquivos recentes',
             showTableOfContents: 'Mostrar tabela de conteúdos',
@@ -2557,7 +2547,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Arquivos',
             fileSettings: 'Configurações de arquivos',
             autoSave: 'Salvar edições automaticamente',
-            confirmBeforeSave: 'Pedir confirmação antes de salvar'
         },
         colors: {
             default: 'Padrão',
@@ -2749,7 +2738,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Mostra spazi',
             showTabs: 'Mostra schede',
             restoreStateOnReopen: 'Ripristina stato alla riapertura',
-            startInEditor: 'Avvia in editor',
             newFileDefaultMode: 'Nuovo file apre nell\'editor',
             showRecentFiles: 'Mostra file recenti',
             showTableOfContents: 'Mostra indice',
@@ -2777,7 +2765,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'File',
             fileSettings: 'Impostazioni file',
             autoSave: 'Salvataggio automatico delle modifiche',
-            confirmBeforeSave: 'Chiedi conferma prima di salvare'
         },
         colors: {
             default: 'Predefinito',
@@ -2971,7 +2958,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Pokaż białe znaki',
             showTabs: 'Pokaż karty',
             restoreStateOnReopen: 'Przywróć stan przy ponownym otwarciu',
-            startInEditor: 'Startuj w edytorze',
             newFileDefaultMode: 'Nowy plik otwiera się w edytorze',
             showRecentFiles: 'Pokaż ostatnie pliki',
             showTableOfContents: 'Pokaż spis treści',
@@ -3009,7 +2995,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Pliki',
             fileSettings: 'Ustawienia plików',
             autoSave: 'Autozapis zmian',
-            confirmBeforeSave: 'Pytaj o potwierdzenie przed zapisem'
         },
         colors: {
             default: 'Domyślny',
@@ -3211,7 +3196,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Toon witruimte',
             showTabs: 'Toon tabbladen',
             restoreStateOnReopen: 'Herstel status bij heropenen',
-            startInEditor: 'Start in editor',
             newFileDefaultMode: 'Nieuw bestand opent in editor',
             showRecentFiles: 'Toon recente bestanden',
             showTableOfContents: 'Toon inhoudsopgave',
@@ -3239,7 +3223,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Bestanden',
             fileSettings: 'Bestandsinstellingen',
             autoSave: 'Wijzigingen automatisch opslaan',
-            confirmBeforeSave: 'Bevestiging vragen voor opslaan'
         },
         colors: {
             default: 'Standaard',
@@ -3431,7 +3414,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Visa blanksteg',
             showTabs: 'Visa flikar',
             restoreStateOnReopen: 'Återställ tillstånd vid återöppning',
-            startInEditor: 'Starta i redigerare',
             newFileDefaultMode: 'Ny fil öppnas i redigeraren',
             showRecentFiles: 'Visa senaste filer',
             showTableOfContents: 'Visa innehållsförteckning',
@@ -3459,7 +3441,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Filer',
             fileSettings: 'Filinställningar',
             autoSave: 'Spara ändringar automatiskt',
-            confirmBeforeSave: 'Fråga om bekräftelse innan sparande'
         },
         colors: {
             default: 'Standard',
@@ -3651,7 +3632,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Hiển thị khoảng trắng',
             showTabs: 'Hiển thị tab',
             restoreStateOnReopen: 'Khôi phục trạng thái khi mở lại',
-            startInEditor: 'Bắt đầu trong trình chỉnh sửa',
             newFileDefaultMode: 'Tệp mới mở trong trình chỉnh sửa',
             showRecentFiles: 'Hiển thị tệp gần đây',
             showTableOfContents: 'Hiển thị mục lục',
@@ -3679,7 +3659,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Tệp',
             fileSettings: 'Cài đặt tệp',
             autoSave: 'Tự động lưu chỉnh sửa',
-            confirmBeforeSave: 'Hỏi xác nhận trước khi lưu'
         },
         colors: {
             default: 'Mặc định',
@@ -3871,7 +3850,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Mostrar espaços em branco',
             showTabs: 'Mostrar separadores',
             restoreStateOnReopen: 'Restaurar estado ao reabrir',
-            startInEditor: 'Iniciar no editor',
             newFileDefaultMode: 'Novo ficheiro abre no editor',
             showRecentFiles: 'Mostrar ficheiros recentes',
             showTableOfContents: 'Mostrar índice',
@@ -3899,7 +3877,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Ficheiros',
             fileSettings: 'Definições de ficheiros',
             autoSave: 'Guardar edições automaticamente',
-            confirmBeforeSave: 'Pedir confirmação antes de guardar'
         },
         colors: {
             default: 'Predefinição',
@@ -4091,7 +4068,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Afișare spații',
             showTabs: 'Afișare file',
             restoreStateOnReopen: 'Restaurare stare la redeschidere',
-            startInEditor: 'Pornire în editor',
             newFileDefaultMode: 'Fișier nou se deschide în editor',
             showRecentFiles: 'Afișare fișiere recente',
             showTableOfContents: 'Afișare cuprins',
@@ -4119,7 +4095,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Fișiere',
             fileSettings: 'Setări fișiere',
             autoSave: 'Salvare automată a modificărilor',
-            confirmBeforeSave: 'Solicită confirmare înainte de salvare'
         },
         colors: {
             default: 'Implicit',
@@ -4311,7 +4286,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Szóközök megjelenítése',
             showTabs: 'Lapok megjelenítése',
             restoreStateOnReopen: 'Állapot visszaállítása újranyitáskor',
-            startInEditor: 'Indítás szerkesztőben',
             newFileDefaultMode: 'Új fájl megnyílik a szerkesztőben',
             showRecentFiles: 'Legutóbbi fájlok megjelenítése',
             showTableOfContents: 'Tartalomjegyzék megjelenítése',
@@ -4339,7 +4313,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Fájlok',
             fileSettings: 'Fájlbeállítások',
             autoSave: 'Módosítások automatikus mentése',
-            confirmBeforeSave: 'Mentés előtt kérjen megerősítést'
         },
         colors: {
             default: 'Alapértelmezett',
@@ -4531,7 +4504,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Zobrazit mezery',
             showTabs: 'Zobrazit karty',
             restoreStateOnReopen: 'Obnovit stav při opětovném otevření',
-            startInEditor: 'Spustit v editoru',
             newFileDefaultMode: 'Nový soubor se otevře v editoru',
             showRecentFiles: 'Zobrazit nedávné soubory',
             showTableOfContents: 'Zobrazit obsah',
@@ -4559,7 +4531,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Soubory',
             fileSettings: 'Nastavení souborů',
             autoSave: 'Automaticky ukládat úpravy',
-            confirmBeforeSave: 'Před uložením se zeptat na potvrzení'
         },
         colors: {
             default: 'Výchozí',
@@ -4757,7 +4728,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Zobraziť medzery',
             showTabs: 'Zobraziť karty',
             restoreStateOnReopen: 'Obnoviť stav pri opätovnom otvorení',
-            startInEditor: 'Spustiť v editore',
             newFileDefaultMode: 'Nový súbor sa otvorí v editore',
             showRecentFiles: 'Zobraziť nedávne súbory',
             showTableOfContents: 'Zobraziť obsah',
@@ -4785,7 +4755,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Súbory',
             fileSettings: 'Nastavenia súborov',
             autoSave: 'Automaticky ukladať úpravy',
-            confirmBeforeSave: 'Pred uložením sa opýtať na potvrdenie'
         },
         colors: {
             default: 'Predvolené',
@@ -4977,7 +4946,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Εμφάνιση κενών',
             showTabs: 'Εμφάνιση καρτελών',
             restoreStateOnReopen: 'Επαναφορά κατάστασης κατά την επανεκκίνηση',
-            startInEditor: 'Έναρξη στον επεξεργαστή',
             newFileDefaultMode: 'Νέο αρχείο ανοίγει στον επεξεργαστή',
             showRecentFiles: 'Εμφάνιση πρόσφατων αρχείων',
             showTableOfContents: 'Εμφάνιση περιεχομένων',
@@ -5005,7 +4973,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Αρχεία',
             fileSettings: 'Ρυθμίσεις αρχείων',
             autoSave: 'Αυτόματη αποθήκευση αλλαγών',
-            confirmBeforeSave: 'Ζήτηση επιβεβαίωσης πριν την αποθήκευση'
         },
         colors: {
             default: 'Προεπιλογή',
@@ -5197,7 +5164,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Näytä välilyönnit',
             showTabs: 'Näytä välilehdet',
             restoreStateOnReopen: 'Palauta tila uudelleen avattaessa',
-            startInEditor: 'Aloita editorissa',
             newFileDefaultMode: 'Uusi tiedosto avautuu editorissa',
             showRecentFiles: 'Näytä viimeisimmät tiedostot',
             showTableOfContents: 'Näytä sisällysluettelo',
@@ -5225,7 +5191,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Tiedostot',
             fileSettings: 'Tiedostoasetukset',
             autoSave: 'Tallenna muutokset automaattisesti',
-            confirmBeforeSave: 'Pyydä vahvistus ennen tallennusta'
         },
         colors: {
             default: 'Oletus',
@@ -5417,7 +5382,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Vis mellemrum',
             showTabs: 'Vis faner',
             restoreStateOnReopen: 'Gendan tilstand ved genåbning',
-            startInEditor: 'Start i editor',
             newFileDefaultMode: 'Ny fil åpnes i redigeringsprogram',
             showRecentFiles: 'Vis seneste filer',
             showTableOfContents: 'Vis indholdsfortegnelse',
@@ -5445,7 +5409,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Filer',
             fileSettings: 'Filindstillinger',
             autoSave: 'Gem ændringer automatisk',
-            confirmBeforeSave: 'Bed om bekræftelse før der gemmes'
         },
         colors: {
             default: 'Standard',
@@ -5637,7 +5600,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Vis mellomrom',
             showTabs: 'Vis faner',
             restoreStateOnReopen: 'Gjenopprett tilstand ved gjenåpning',
-            startInEditor: 'Start i redigeringsprogram',
             newFileDefaultMode: 'Ny fil åbnes i editor',
             showRecentFiles: 'Vis nylige filer',
             showTableOfContents: 'Vis innholdsfortegnelse',
@@ -5665,7 +5627,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Filer',
             fileSettings: 'Filinnstillinger',
             autoSave: 'Lagre endringer automatisk',
-            confirmBeforeSave: 'Be om bekreftelse før lagring'
         },
         colors: {
             default: 'Standard',
@@ -5857,7 +5818,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Tampilkan Spasi',
             showTabs: 'Tampilkan Tab',
             restoreStateOnReopen: 'Pulihkan Status saat Dibuka Kembali',
-            startInEditor: 'Mulai di Editor',
             newFileDefaultMode: 'File baru terbuka di editor',
             showRecentFiles: 'Tampilkan File Terbaru',
             showTableOfContents: 'Tampilkan Daftar Isi',
@@ -5885,7 +5845,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Berkas',
             fileSettings: 'Pengaturan berkas',
             autoSave: 'Simpan otomatis perubahan',
-            confirmBeforeSave: 'Minta konfirmasi sebelum menyimpan'
         },
         colors: {
             default: 'Default',
@@ -6077,7 +6036,6 @@ export const translations: Record<LanguageCode, Translation> = {
             showWhitespace: 'Boşlukları Göster',
             showTabs: 'Sekmeleri Göster',
             restoreStateOnReopen: 'Yeniden Açıldığında Durumu Geri Yükle',
-            startInEditor: 'Editörde Başlat',
             newFileDefaultMode: 'Yeni dosya editörde açılır',
             showRecentFiles: 'Son Dosyaları Göster',
             showTableOfContents: 'İçindekileri Göster',
@@ -6105,7 +6063,6 @@ export const translations: Record<LanguageCode, Translation> = {
             files: 'Dosyalar',
             fileSettings: 'Dosya ayarları',
             autoSave: 'Düzenlemeleri otomatik kaydet',
-            confirmBeforeSave: 'Kaydetmeden önce onay iste'
         },
         colors: {
             default: 'Varsayılan',

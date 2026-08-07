@@ -1174,7 +1174,17 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		markdownBody.scrollTop = targetScroll;
 	}
 
+	/**
+	 * The source line at the top of the editor's viewport, for the outline to
+	 * follow (#169). Held here rather than read from the editor because this is
+	 * where that line already arrives — the same position scroll sync sends,
+	 * whether or not sync is on and whether or not the preview is even visible.
+	 */
+	let tocActiveLine = $state<number | null>(null);
+
 	function handleEditorScrollSync(position: ScrollSyncPosition) {
+		if (position.line !== undefined) tocActiveLine = position.line;
+
 		if (tabManager.activeTab?.isScrollSynced) {
 			scrollPreviewToSyncPosition(position);
 		}
@@ -1524,10 +1534,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	 */
 	async function flushBeforeLeavingEditableMode(tab: Tab) {
 		if (!tab.isDirty || tab.path === '') return;
-		// `confirmBeforeSave` disables the silent background save entirely
-		// (the Settings label promises confirmation before each write), so it
-		// disables this flush too.
-		if (!settings.autoSave || settings.confirmBeforeSave) return;
+		// Auto-save off means edits are kept until the user saves them, so
+		// leaving the pane must not write either — the close dialog asks.
+		if (!settings.autoSave) return;
 
 		const success = await saveContent(tab.id);
 		if (!success) {
@@ -1694,13 +1703,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	 * cancelled and a manual Cmd+S becomes the only path again.
 	 */
 	$effect(() => {
-		// Disable background auto-save in two cases:
-		//   1. The user turned `autoSave` off entirely.
-		//   2. The user enabled `confirmBeforeSave` — the Settings UI label
-		//      promises confirmation before each save, so silent debounced
-		//      writes contradict that contract. With this flag on, saves
-		//      happen only via Cmd+S or via the close/toggle modals.
-		if (!settings.autoSave || settings.confirmBeforeSave) {
+		// With auto-save off, saves happen only via Cmd+S or via the
+		// close/toggle modals, so every armed timer is dropped.
+		if (!settings.autoSave) {
 			untrack(() => {
 				for (const t of autoSaveTimers.values()) clearTimeout(t);
 				autoSaveTimers.clear();
@@ -2916,7 +2921,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 							// walk. `saveContent` cancels each tab's pending timer
 							// itself, so no writer here can be raced by its own
 							// debounce.
-							if (settings.autoSave && !settings.confirmBeforeSave) {
+							if (settings.autoSave) {
 								for (const tab of dirtyTabs.filter((t) => t.path !== '')) {
 									const ok = await saveContent(tab.id);
 									if (!ok) {
@@ -3428,7 +3433,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 									tabindex="0"
 									onpointerdown={startTocResize}
 									onkeydown={handleTocResizeKeyDown}></div>
-								<Toc 
+								<Toc
+									activeLine={settings.tocFollowsEditor && (isEditing || isSplit) ? tocActiveLine : null} 
 										{markdownBody} 
 										htmlContent={sanitizedHtml}
 										onBeforeJump={pushScrollHistory} 
