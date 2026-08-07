@@ -103,16 +103,24 @@ test('the editor position reaches the outline whether or not scroll sync is on',
 		viewerSource,
 		/function handleEditorScrollSync\(position: ScrollSyncPosition\) \{\s*\n\s*if \(position\.line !== undefined\) tocActiveLine = position\.line;/,
 	);
-	// And it is only handed over when the setting is on and an editor is on
-	// screen — a reading-only tab leaves the outline to the preview's handler.
-	assert.match(
-		viewerSource,
-		/activeLine=\{settings\.tocFollowsEditor && \(isEditing \|\| isSplit\) \? tocActiveLine : null\}/,
-	);
+	// And it is only handed over while an editor is on screen — a reading-only
+	// tab leaves the outline to the preview's own scroll handler.
+	assert.match(viewerSource, /activeLine=\{isEditing \|\| isSplit \? tocActiveLine : null\}/);
 });
 
-test('the preference is off by default, persisted, and reachable from settings', () => {
-	assert.match(settingsSource, /tocFollowsEditor = \$state\(false\)/);
-	assert.match(settingsSource, /booleanSetting\('editor\.tocFollowsEditor'/);
-	assert.match(settingsComponentSource, /settings\.toggleTocFollowsEditor\(\)/);
+test('there is no preference for it, because the preview never had one', () => {
+	// The outline has always followed the preview unconditionally. This is the
+	// same feature answering for the other pane, so a switch would have made
+	// half of one behaviour optional and left the reader to work out which half.
+	assert.doesNotMatch(settingsSource, /tocFollowsEditor/);
+	assert.doesNotMatch(settingsComponentSource, /tocFollowsEditor/);
+});
+
+test('the current entry is centred in the outline, not merely kept on screen', () => {
+	// `block: 'nearest'` scrolls the least it can: the highlight walked down to
+	// the last visible row and stayed pinned there, and what came next was
+	// never shown. Both callers share this one function, so the preview gets it
+	// too.
+	assert.match(tocSource, /scrollIntoView\(\{ block: 'center', behavior: 'smooth' \}\)/);
+	assert.doesNotMatch(tocSource, /scrollIntoView\(\{ block: 'nearest'/);
 });

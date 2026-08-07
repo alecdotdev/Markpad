@@ -118,6 +118,11 @@ test('an inactive row is dimmed rather than hidden', () => {
 test('the restore preference says that it also governs closing', () => {
 	// It decides whether resolved tabs stay open when a window closes, which
 	// "Restore State on Reopen" does not lead anyone to expect.
-	assert.match(settingsComponentSource, /t\('settings\.restoreStateOnReopenHint', settings\.language\)/);
+	// As a help affordance rather than a sentence beside the control: a caption
+	// competes with the label for the same glance.
+	assert.match(
+		settingsComponentSource,
+		/<span class="setting-help" title=\{t\('settings\.restoreStateOnReopenHint', settings\.language\)\}>/,
+	);
 	assert.match(viewerSource, /!settings\.restoreStateOnReopen \|\| dirty\.path === ''/);
 });

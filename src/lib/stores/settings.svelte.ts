@@ -356,7 +356,6 @@ export class SettingsStore {
 	editorMaxWidth = $state(80);
 	previewMaxWidth = $state(DEFAULT_PREVIEW_MAX_WIDTH);
 	pinnedToc = $state(false);
-	tocFollowsEditor = $state(false);
 	tocSide = $state<'left' | 'right'>('left');
 	tocWidth = $state(240);
 	osType = $state<OSType>('unknown');
@@ -503,10 +502,6 @@ export class SettingsStore {
 
 	toggleNewFileDefaultMode() {
 		this.newFileDefaultMode = !this.newFileDefaultMode;
-	}
-
-	toggleTocFollowsEditor() {
-		this.tocFollowsEditor = !this.tocFollowsEditor;
 	}
 
 	togglePinnedToc() {
@@ -714,7 +709,6 @@ export function createSettingsPersistence(): PersistedSetting<SettingsStore>[] {
 			load: (s, savedPreviewMaxWidth) => { s.previewMaxWidth = normalizePreviewMaxWidth(savedPreviewMaxWidth); },
 		},
 		booleanSetting('editor.pinnedToc', (s) => s.pinnedToc, (s, v) => { s.pinnedToc = v; }),
-		booleanSetting('editor.tocFollowsEditor', (s) => s.tocFollowsEditor, (s, v) => { s.tocFollowsEditor = v; }),
 		{
 			key: 'editor.tocSide',
 			read: (s) => s.tocSide,

@@ -172,15 +172,25 @@
 		}
 	}
 
+	/**
+	 * Keep the current entry in the MIDDLE of the outline, not merely on screen.
+	 *
+	 * `block: 'nearest'` scrolls the least it can get away with, so the outline
+	 * sat still until the current entry crossed an edge and then jumped by one
+	 * row — the reader saw the highlight walk down to the last visible line and
+	 * stay pinned there, with no idea what came next. Centring costs the same
+	 * one call and keeps the entries either side of where you are visible,
+	 * which is the reason to look at an outline while scrolling at all.
+	 */
 	function scrollTocIntoView() {
 		if (tocContainer && activeId) {
 			const activeEl = tocContainer.querySelector(`[data-id="${CSS.escape(activeId)}"]`);
-			if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+			if (activeEl) activeEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
 		}
 	}
 
 	/**
-	 * Following the EDITOR, when the setting asks for it (#169).
+	 * Following the EDITOR (#169).
 	 *
 	 * `handleScroll` above cannot answer here: it reads rendered boxes, and the
 	 * pane being scrolled is the one with no boxes to read — in editor-only mode

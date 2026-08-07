@@ -3434,7 +3434,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 									onpointerdown={startTocResize}
 									onkeydown={handleTocResizeKeyDown}></div>
 								<Toc
-									activeLine={settings.tocFollowsEditor && (isEditing || isSplit) ? tocActiveLine : null} 
+									activeLine={isEditing || isSplit ? tocActiveLine : null} 
 										{markdownBody} 
 										htmlContent={sanitizedHtml}
 										onBeforeJump={pushScrollHistory} 
