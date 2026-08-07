@@ -544,6 +544,7 @@ fn validate_vsix_archive_limits<R: std::io::Read + std::io::Seek>(
 }
 
 mod asset_protocol;
+mod error;
 mod tab_transfer;
 mod window_runtime;
 use window_runtime::{AppState, WatcherState};

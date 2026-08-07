@@ -84,12 +84,9 @@ pub struct PinnedTag {
     pub files: Vec<String>,
 }
 
-fn pinned_tags_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| error.to_string())?;
-    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+fn pinned_tags_path(app: &AppHandle) -> Result<std::path::PathBuf, crate::error::Error> {
+    let dir = app.path().app_config_dir()?;
+    fs::create_dir_all(&dir)?;
     Ok(dir.join("pinned-tags.json"))
 }
 
@@ -187,12 +184,13 @@ fn update_pinned_tags(
     lock: &Mutex<()>,
     path: &Path,
     edit: impl FnOnce(&mut Vec<PinnedTag>),
-) -> Result<(), String> {
+) -> Result<(), crate::error::Error> {
     let _guard = lock_recover(lock);
     let mut tags = read_pinned_tags_at(path);
     edit(&mut tags);
-    let json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
-    crate::atomic_write(path, json.as_bytes()).map_err(|error| error.to_string())
+    let json = serde_json::to_string(&tags)?;
+    crate::atomic_write(path, json.as_bytes())?;
+    Ok(())
 }
 
 fn save_pinned_tag_at(
@@ -201,7 +199,7 @@ fn save_pinned_tag_at(
     name: String,
     color: String,
     files: Vec<String>,
-) -> Result<(), String> {
+) -> Result<(), crate::error::Error> {
     update_pinned_tags(lock, path, move |tags| {
         if let Some(tag) = tags.iter_mut().find(|tag| tag.name == name) {
             tag.color = color;
@@ -212,7 +210,7 @@ fn save_pinned_tag_at(
     })
 }
 
-fn remove_pinned_tag_at(lock: &Mutex<()>, path: &Path, name: String) -> Result<(), String> {
+fn remove_pinned_tag_at(lock: &Mutex<()>, path: &Path, name: String) -> Result<(), crate::error::Error> {
     update_pinned_tags(lock, path, move |tags| {
         tags.retain(|tag| tag.name != name);
     })
@@ -232,14 +230,14 @@ pub fn save_pinned_tag(
 ) -> Result<(), String> {
     let path = pinned_tags_path(&app)?;
     let state = app.state::<AppState>();
-    save_pinned_tag_at(&state.pinned_tags, &path, name, color, files)
+    save_pinned_tag_at(&state.pinned_tags, &path, name, color, files).map_err(String::from)
 }
 
 #[tauri::command]
 pub fn remove_pinned_tag(app: AppHandle, name: String) -> Result<(), String> {
     let path = pinned_tags_path(&app)?;
     let state = app.state::<AppState>();
-    remove_pinned_tag_at(&state.pinned_tags, &path, name)
+    remove_pinned_tag_at(&state.pinned_tags, &path, name).map_err(String::from)
 }
 
 #[tauri::command]
@@ -349,9 +347,9 @@ pub async fn show_window(window: tauri::Window) {
     let _ = window.set_focus();
 }
 
-fn window_state_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+fn window_state_path(app: &AppHandle) -> Result<std::path::PathBuf, crate::error::Error> {
+    let dir = app.path().app_config_dir()?;
+    fs::create_dir_all(&dir)?;
     Ok(dir.join("window-state-v2.json"))
 }
 
@@ -383,9 +381,9 @@ pub fn clear_window_state(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn restore_progress_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+fn restore_progress_path(app: &AppHandle) -> Result<std::path::PathBuf, crate::error::Error> {
+    let dir = app.path().app_config_dir()?;
+    fs::create_dir_all(&dir)?;
     Ok(dir.join("restore-progress-v1.json"))
 }
 
