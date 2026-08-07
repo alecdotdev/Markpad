@@ -17,7 +17,7 @@
 		onBeforeJump?: () => void;
 		collapsedHeaders?: Set<string>;
 		ontoggleFold?: (id: string) => void;
-		oncopyref?: (text: string) => void;
+		oncopyref?: (text: string, slug: string) => void;
 		oncontext?: (e: MouseEvent, item: TocItem) => void;
 		onjump?: (id: string, text: string, sourceLine: number | null) => void;
 		onshowTooltip?: (e: MouseEvent, text: string, shortcut?: string, align?: 'top' | 'right' | 'left' | 'below') => void;
@@ -308,7 +308,7 @@
 								class="toc-link {activeId === item.id ? 'active' : ''}"
 								data-id={item.id}
 								onclick={() => jumpTo(item.id)}
-								oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); oncontext ? oncontext(e, item) : oncopyref?.(item.text); }}
+								oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); oncontext ? oncontext(e, item) : oncopyref?.(item.text, item.id); }}
 								use:checkTruncation>
 								{item.text}
 							</button>
