@@ -1317,9 +1317,6 @@
 									<input id="appearance-restore-state" type="checkbox" checked={settings.restoreStateOnReopen} onchange={() => settings.toggleRestoreStateOnReopen()} />
 									<span class="toggle-slider"></span>
 								</label>
-								<span class="setting-help" title={t('settings.restoreStateOnReopenHint', settings.language)}>
-									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-								</span>
 							</div>
 
 							<div class="setting-item">
@@ -2020,17 +2017,6 @@
 	.setting-item.inactive .number-input,
 	.setting-item.inactive .spin-btn {
 		cursor: default;
-	}
-
-	/*
-	 * The "what else does this do?" affordance. A sentence beside the control
-	 * competes with the label for the same glance; this asks to be hovered.
-	 */
-	.setting-help {
-		display: inline-flex;
-		align-items: center;
-		color: var(--color-fg-muted);
-		cursor: help;
 	}
 
 	.reset-text-btn.disabled {

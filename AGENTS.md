@@ -158,6 +158,27 @@ All file operations go through Rust commands - never use Node.js fs APIs.
 - **Frontend**: `npm test` runs the behavior tests in `scripts/*.test.ts` (`node --test --import tsx`)
 - **CI**: Runs `npm audit`, `npm run check`, `npm test` and `cargo test` on PRs
 
+### Testing a change by hand
+
+Open `samples/stress-test-hard.md` unless the change points somewhere else.
+It is 3,164 lines — 124 headings, 543 table rows, three Mermaid diagrams,
+eight code languages, footnotes, math, raw HTML, seven scripts — so scroll
+sync, the outline, folding, search and render performance all have somewhere
+to go wrong in it. Short samples are why the defects in #474 and #515 reached
+users: the suite in `scripts/` scored 100% on both.
+
+Launch the dev build **detached**, or an agent's backgrounded shell takes the
+window down with it mid-test:
+
+```bash
+(nohup npm run dev > /tmp/vite.log 2>&1 &)                              # vite on :1420
+(nohup ./src-tauri/target/debug/Markpad "$PWD/samples/stress-test-hard.md" \
+    > /tmp/markpad.log 2>&1 &)                                          # opens that file
+```
+
+`npm run tauri dev` is the ordinary way to run it interactively; the split
+above exists because the Tauri CLI is a child of the calling process group.
+
 ## Notes
 
 - No ESLint or Prettier configured - rely on TypeScript strict mode

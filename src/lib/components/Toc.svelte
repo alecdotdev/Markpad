@@ -141,35 +141,21 @@
 		return result;
 	});
 
+	/**
+	 * The preview's scroll clears the highlight a click left on its target.
+	 *
+	 * Which entry is CURRENT is no longer decided here. This used to walk the
+	 * visible entries, `querySelector` each one out of the preview and measure
+	 * its box against the container — a lookup and a layout read per heading,
+	 * per scroll event, and an answer only the preview could give. Both panes
+	 * now send a source line instead (`activeLine`), and one rule picks the
+	 * entry from it.
+	 */
 	function handleScroll() {
-		if (!markdownBody || items.length === 0) return;
-		
-		if (!clickLock && activeTargetEl) {
-			activeTargetEl.classList.remove('toc-target-active');
-			activeTargetEl = null;
-		}
+		if (clickLock || !activeTargetEl) return;
 
-		if (clickLock) return;
-
-		const containerRect = markdownBody.getBoundingClientRect();
-		let currentActive = visibleItems[0]?.id || null;
-
-		for (const item of visibleItems) {
-			const el = markdownBody.querySelector(`[id="${CSS.escape(item.id)}"]`);
-			if (el) {
-				const rect = el.getBoundingClientRect();
-				if (rect.top - containerRect.top < 150) {
-					currentActive = item.id;
-				} else {
-					break;
-				}
-			}
-		}
-
-		if (activeId !== currentActive) {
-			activeId = currentActive;
-			scrollTocIntoView();
-		}
+		activeTargetEl.classList.remove('toc-target-active');
+		activeTargetEl = null;
 	}
 
 	/**
@@ -190,14 +176,16 @@
 	}
 
 	/**
-	 * Following the EDITOR (#169).
+	 * Which entry the reader is on, from whichever pane they are scrolling.
 	 *
-	 * `handleScroll` above cannot answer here: it reads rendered boxes, and the
-	 * pane being scrolled is the one with no boxes to read — in editor-only mode
-	 * the preview never scrolls at all, and in split view it follows only while
-	 * scroll sync is on. The position therefore arrives as a source line and is
-	 * resolved by comparison instead. A click still wins until its scroll
-	 * settles, exactly as it does against the preview's handler.
+	 * This is the whole of #169. The outline used to decide by rendered box,
+	 * which only the preview has: in editor-only mode the preview never
+	 * scrolls, and in split view it moves only while scroll sync is on, so the
+	 * outline sat still. A source line is something both panes can produce, and
+	 * resolving it is a comparison rather than a layout read.
+	 *
+	 * A click still wins until its own scroll settles — the same `clickLock`
+	 * the preview's handler respected.
 	 */
 	$effect(() => {
 		const line = activeLine;

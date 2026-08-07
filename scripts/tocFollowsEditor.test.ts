@@ -1,24 +1,26 @@
 /**
- * #169, the half that was missing: the outline highlights the heading you are
- * reading, but only ever answered to the PREVIEW.
+ * #169: the outline highlights the heading you are reading, but only ever
+ * answered to the PREVIEW.
  *
- * `Toc.svelte`'s `handleScroll` decides by rendered box — it asks each heading
- * element where it is on screen. That question has no answer while the editor
- * is the pane being scrolled: in editor-only mode the preview never scrolls,
- * and in split view it moves only while scroll sync is on. So the outline sat
- * still exactly where the reporter said it did.
+ * `Toc.svelte` decided by rendered box — `querySelector` each visible entry
+ * out of the preview and measure it against the container, per entry, per
+ * scroll event. That question has no answer while the editor is the pane being
+ * scrolled: in editor-only mode the preview never scrolls, and in split view
+ * it moves only while scroll sync is on. So the outline sat still exactly
+ * where the reporter said it did.
  *
- * The editor's position is a source line, and every outline entry already has
- * one (`data-sourcepos` on the rendered heading), so the same question is
- * answered by comparison instead. What matters is that the two rules AGREE:
- * both are live in split view with sync on, and a disagreement would show as
- * the highlight flickering between two entries as the panes settle.
+ * A SOURCE LINE is something both panes can produce — the editor sends one on
+ * every scroll, and the preview already computes one for the tab's reading
+ * position — so the rule is now one comparison over a list, fed by either.
+ * That the two panes share it is the property worth having: in split view with
+ * sync on both are live at once, and two rules could disagree as the panes
+ * settle and flicker the highlight between two entries.
  */
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { readSource } from './sourceTree.js';
+import { readSource, sliceBetween } from './sourceTree.js';
 
 import { activeTocIdForLine, sourceLineOf } from '../src/lib/utils/tocFollow.js';
 
@@ -103,9 +105,30 @@ test('the editor position reaches the outline whether or not scroll sync is on',
 		viewerSource,
 		/function handleEditorScrollSync\(position: ScrollSyncPosition\) \{\s*\n\s*if \(position\.line !== undefined\) tocActiveLine = position\.line;/,
 	);
-	// And it is only handed over while an editor is on screen — a reading-only
-	// tab leaves the outline to the preview's own scroll handler.
-	assert.match(viewerSource, /activeLine=\{isEditing \|\| isSplit \? tocActiveLine : null\}/);
+});
+
+test('the preview feeds the same state, off the line it already measures', () => {
+	// `getPreviewScrollAnchor` is computed on every preview scroll for the
+	// tab's reading position. Taking the outline's answer from it is what makes
+	// this one rule rather than two — and it costs nothing, because the descent
+	// it does was already happening on that event.
+	const handler = sliceBetween(viewerSource, 'function handleScroll(e: Event)', '\n\tfunction ');
+	assert.match(handler, /const anchorLine = getPreviewScrollAnchor\(target\);/);
+	assert.match(handler, /tocActiveLine = anchorLine;/);
+	// One input, from whichever pane moved last.
+	assert.match(viewerSource, /activeLine=\{tocActiveLine\}/);
+});
+
+test('the outline no longer measures the preview to decide', () => {
+	// The loop this replaces did a `querySelector` and a `getBoundingClientRect`
+	// per visible entry on every scroll event, and could only ever answer for
+	// one of the two panes.
+	const handler = sliceBetween(tocSource, 'function handleScroll()', '\n\tfunction ');
+	assert.doesNotMatch(handler, /getBoundingClientRect/);
+	assert.doesNotMatch(handler, /querySelector/);
+	// What it still does: a click leaves a highlight on its target, and the
+	// next scroll takes it off.
+	assert.match(handler, /activeTargetEl\.classList\.remove\('toc-target-active'\)/);
 });
 
 test('there is no preference for it, because the preview never had one', () => {

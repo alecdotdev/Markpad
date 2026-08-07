@@ -17,6 +17,11 @@
  *   * "Word Count" — rendered inside the status bar. With the status bar off,
  *     turning it on shows nothing at all.
  *
+ * A fourth — that "Restore State on Reopen" also decides whether resolved tabs
+ * stay open when a window closes — was left alone. Saying so needs a real
+ * tooltip, and a `title` attribute is not one: it only changes the cursor and
+ * waits a second before a browser chrome bubble the app does not control.
+ *
  * The first is a behaviour change and is tested as one. The other two are the
  * UI admitting a dependency that was always there, so what is pinned is the
  * gate, plus the layout rule that the prerequisite is the row above.
@@ -113,16 +118,3 @@ test('an inactive row is dimmed rather than hidden', () => {
 	assert.match(settingsComponentSource, /\.setting-item\.inactive[\s\S]{0,200}?opacity: 0\.45/);
 });
 
-/* ------------------------------------------------------------- D: the hint */
-
-test('the restore preference says that it also governs closing', () => {
-	// It decides whether resolved tabs stay open when a window closes, which
-	// "Restore State on Reopen" does not lead anyone to expect.
-	// As a help affordance rather than a sentence beside the control: a caption
-	// competes with the label for the same glance.
-	assert.match(
-		settingsComponentSource,
-		/<span class="setting-help" title=\{t\('settings\.restoreStateOnReopenHint', settings\.language\)\}>/,
-	);
-	assert.match(viewerSource, /!settings\.restoreStateOnReopen \|\| dirty\.path === ''/);
-});
