@@ -151,7 +151,7 @@ export async function parseAndApplyVscodeTheme(themeJsonStr: string, name: strin
 		// editor, so the dynamic import resolves from cache).
 		const monaco = await import('monaco-editor');
 		if (monaco) {
-			const rules: any[] = [];
+			const rules: Array<CSSRule> = [];
 			const tokenColors = theme.tokenColors || [];
 
 			for (const item of tokenColors) {

@@ -181,7 +181,7 @@
 	}
 
 	self.MonacoEnvironment = {
-		getWorker: function (_moduleId: any, label: string) {
+		getWorker: function (_moduleId: string, label: string) {
 			if (label === "json") {
 				return new jsonWorker();
 			}
@@ -1688,7 +1688,7 @@
 		]);
 	}
 
-	export function runEditorAction(actionId: string, payload?: any) {
+	export function runEditorAction(actionId: string, payload?: Record<string, unknown>) {
 		if (!editor) return;
 		editor.focus();
 		if (actionId === 'insert-table-grid' && payload && typeof payload === 'object') {
@@ -1701,7 +1701,7 @@
 	export const getValue = () => editor?.getValue() || "";
 	export const setValue = (val: string) => editor?.setValue(val);
 	export const focus = () => editor?.focus();
-	export const restoreViewState = (state: any) => editor?.restoreViewState(state);
+	export const restoreViewState = (state: unknown) => editor?.restoreViewState(state);
 </script>
 
 <div class="editor-outer">
