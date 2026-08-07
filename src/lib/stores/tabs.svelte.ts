@@ -67,7 +67,7 @@ export interface Tab {
 	 */
 	history: string[];
 	historyIndex: number;
-	editorViewState: unknown; // monaco.editor.ICodeEditorViewState | null
+	editorViewState: any; // monaco.editor.ICodeEditorViewState | null
 	/**
 	 * Where the reader was, written down three ways because none of them
 	 * survives everything. Re-activating a tab tries them in that order and
@@ -694,7 +694,7 @@ class TabManager {
 		}
 	}
 
-	updateTabEditorState(id: string, viewState: unknown) {
+	updateTabEditorState(id: string, viewState: any) {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
 			tab.editorViewState = viewState;
