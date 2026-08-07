@@ -2117,6 +2117,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		if (mode !== 'app') return;
 		const isInsideEditor = (e.target as HTMLElement).closest('.editor-container');
 		if (isInsideEditor) return;
+		// Text fields keep the webview's own editing menu (Cut/Copy/Paste);
+		// the document menu below is about the rendered preview and has no
+		// edit items, so swallowing the native one leaves no way to paste.
+		if ((e.target as HTMLElement).closest('input, textarea, [contenteditable="true"]')) return;
 		e.preventDefault();
 
 		const selection = window.getSelection();

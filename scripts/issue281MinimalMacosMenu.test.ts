@@ -18,8 +18,25 @@ test('macOS native menu keeps only application-level actions', () => {
 	assert.match(menuSetup, /PredefinedMenuItem::services\(app, None\)/);
 	assert.match(menuSetup, /PredefinedMenuItem::hide\(app, None\)/);
 	assert.doesNotMatch(menuSetup, /PredefinedMenuItem::(?:hide_others|show_all)/);
-	assert.match(menuSetup, /\.items\(&\[&app_submenu\]\)/);
-	assert.doesNotMatch(menuSetup, /SubmenuBuilder::new\(app, "(?:File|Edit|Window)"\)/);
+	assert.match(menuSetup, /\.items\(&\[&app_submenu, &edit_submenu\]\)/);
+	assert.doesNotMatch(menuSetup, /SubmenuBuilder::new\(app, "(?:File|Window)"\)/);
+});
+
+// Document actions stay in the in-window controls (#281), but Edit is not a
+// document menu: macOS routes ⌘X/⌘C/⌘V/⌘A through the main menu to the
+// first responder, so dropping it left every native input unable to paste
+// (#526).
+test('macOS menu keeps the standard Edit items so text fields can paste', () => {
+	const menuSetup = sliceBetween(
+		tauriLib,
+		'#[cfg(target_os = "macos")]\n            {\n                use tauri::menu',
+		'\n            let config_dir',
+	);
+
+	assert.match(menuSetup, /SubmenuBuilder::new\(app, "Edit"\)/);
+	for (const item of ['undo', 'redo', 'cut', 'copy', 'paste', 'select_all']) {
+		assert.match(menuSetup, new RegExp(`PredefinedMenuItem::${item}\\(app, None\\)`));
+	}
 });
 
 test('native Settings opens only the focused window settings modal', () => {

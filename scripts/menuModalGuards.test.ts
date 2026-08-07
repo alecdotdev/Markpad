@@ -19,6 +19,16 @@ test('titlebar menus close before a document context menu opens', () => {
 	assert.match(titleBar, /window\.addEventListener\('blur', handleGlobalDismiss\)/);
 });
 
-test('modal backdrop consumes context-menu events', () => {
-	assert.match(modal, /oncontextmenu=\{\(e\) => \{ e\.preventDefault\(\); e\.stopPropagation\(\); \}\}/);
+test('modal backdrop consumes context-menu events outside text fields', () => {
+	assert.match(
+		modal,
+		/if \(\(e\.target as HTMLElement\)\.closest\('input, textarea'\)\) return;\n\t\t\te\.preventDefault\(\);\n\t\t\te\.stopPropagation\(\);/,
+	);
+});
+
+test('text fields keep the webview edit menu so paste stays reachable', () => {
+	assert.match(
+		viewer,
+		/if \(\(e\.target as HTMLElement\)\.closest\('input, textarea, \[contenteditable="true"\]'\)\) return;\n\t\te\.preventDefault\(\);/,
+	);
 });
