@@ -165,6 +165,20 @@ All file operations go through Rust commands - never use Node.js fs APIs.
 - Uses Monaco Editor for text editing
 - Supports Windows, macOS, and Linux
 
+## Merging a contribution from outside the project
+
+Use **Rebase and merge**, never **Squash and merge**.
+
+A squash merge rewrites the author of the resulting commit to the account that
+opened the pull request. A contribution carried in on someone else's behalf —
+a sample document, a fixture, a patch pasted into an issue and committed with
+`--author=` — then lands with no trace of the person who wrote it, and they do
+not appear in the repository's contributor list. `master` is protected, so it
+cannot be fixed afterwards without the revert-and-re-land dance this rule
+exists to avoid. Happened once, in #516.
+
+Squash remains the right default for the project's own pull requests.
+
 ## Versioning
 
 When bumping the app version, update both files in the same commit:
