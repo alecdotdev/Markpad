@@ -38,12 +38,6 @@ static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]]*#
 /// below it moves up one (see the line contract in `mod tests`).
 static BLOCK_ID_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)(\s+)\^([a-zA-Z0-9_-]+)$").expect("valid regex literal"));
-static HIGHLIGHT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"==([^=\n]+)==").expect("valid regex literal"));
-/// Obsidian's inline footnote `^[text]`, which is a single-line form — the
-/// multi-line spelling is the separate `[^ref]` + `[^ref]: …` pair. Excluding
-/// the newline also keeps the line contract: collapsing a wrapped `^[…]` into
-/// one `[^ifn-N]` reference renumbered every line below it.
-static INLINE_FOOTNOTE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\^\[([^\]\n]+)\]").expect("valid regex literal"));
 /// The rendered task-list `<input>` this pass is allowed to mark.
 ///
 /// The boolean attributes are matched as an unordered set rather than in a
@@ -413,6 +407,12 @@ fn markdown_options<'a>() -> Options<'a> {
     // and a `+` list all come through untouched. See `syntax_coexistence`,
     // `the_syntaxes_that_would_misread_ordinary_text` and
     // `an_empty_table_cell_is_not_a_spoiler`.
+    //
+    // `==highlight==` and `^[a note]` are parsed rather than pre-rewritten.
+    // The regexes these replace could not see across a line break or past a
+    // nested `]`, and each needed its own scan to avoid firing inside code.
+    options.extension.highlight = true;
+    options.extension.inline_footnotes = true;
     options.extension.insert = true;
     options.extension.footnotes = true;
     options.extension.description_lists = true;
@@ -946,42 +946,12 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
         processed = Cow::Owned(replaced.into_owned());
     }
 
-    // 3. Convert ==highlight== to <mark>highlight</mark>
-    if HIGHLIGHT_RE.is_match(&processed) {
-        let regions = code_region_ranges(&processed);
-        let replaced = HIGHLIGHT_RE.replace_all(&processed, |caps: &Captures| {
-            let full = caps.get(0).unwrap();
-            if in_code_region(&regions, full.start()) {
-                return full.as_str().to_string();
-            }
-            format!("<mark>{}</mark>", caps.get(1).unwrap().as_str())
-        });
-        processed = Cow::Owned(replaced.into_owned());
-    }
-
-    // 4. Convert ^[inline footnote] to a footnote reference
-    if INLINE_FOOTNOTE_RE.is_match(&processed) {
-        let regions = code_region_ranges(&processed);
-        let mut footnote_defs = String::new();
-        let mut fn_count = 0usize;
-        let replaced = INLINE_FOOTNOTE_RE.replace_all(&processed, |caps: &Captures| {
-            let full = caps.get(0).unwrap();
-            if in_code_region(&regions, full.start()) {
-                return full.as_str().to_string();
-            }
-            fn_count += 1;
-            let label = format!("ifn-{}", fn_count);
-            footnote_defs.push_str(&format!(
-                "\n[^{}]: {}\n",
-                label,
-                caps.get(1).unwrap().as_str()
-            ));
-            format!("[^{}]", label)
-        });
-        let mut out = replaced.into_owned();
-        out.push_str(&footnote_defs);
-        processed = Cow::Owned(out);
-    }
+    // `==highlight==` and `^[inline footnote]` were rewritten here too, by two
+    // more regexes with two more code-region scans each. comrak parses both
+    // itself now (`extension.highlight`, `extension.inline_footnotes`), and the
+    // parser is better at it than the patterns were: a highlight may span a
+    // line break, and an inline footnote may contain brackets. Both stopped at
+    // those. See `markdown_options`.
 
     processed
 }
@@ -3597,19 +3567,33 @@ mod tests {
 
     #[test]
     fn highlight_protection_survives_quadruple_backtick_inline_code() {
+        // Asserted through the renderer rather than through `process_wikilinks`:
+        // highlighting is comrak's now, so the protection is the parser's own
+        // rather than a code-region scan this crate performs. The property is
+        // the same one — a `==…==` inside a code span is text.
         let input = "```` ``` ```` intro\n\n`==not highlighted==` but ==this is==\n";
-        let out = process_wikilinks(input);
-        assert!(out.contains("`==not highlighted==`"), "got: {out}");
-        assert!(out.contains("<mark>this is</mark>"), "got: {out}");
+        let out = convert_markdown(input);
+        assert!(out.contains("==not highlighted=="), "got: {out}");
+        assert!(!out.contains(">not highlighted</mark>"), "got: {out}");
+        // comrak's `<mark>` carries a `data-sourcepos`, which the regex's did
+        // not — matched loosely so this asserts the highlight, not the markup.
+        assert!(out.contains(">this is</mark>"), "got: {out}");
     }
 
     #[test]
     fn wikilinks_and_inline_footnotes_in_code_spans_stay_literal() {
         let input = "`[[#heading]]` and `^[not a footnote]` but [[#real|jump]]\n";
+
         let out = process_wikilinks(input);
         assert!(out.contains("`[[#heading]]`"), "got: {out}");
-        assert!(out.contains("`^[not a footnote]`"), "got: {out}");
         assert!(out.contains("[jump](#real)"), "got: {out}");
+
+        // The footnote half moved to comrak with `inline_footnotes`, so the
+        // rewriter passing it through is no longer evidence of anything. What
+        // matters is that the RENDERED document still has it as code.
+        let html = convert_markdown(input);
+        assert!(html.contains("^[not a footnote]"), "got: {html}");
+        assert!(!html.contains("not a footnote</p>"), "it became a footnote: {html}");
     }
 
     /// A document that has BOTH kinds of code region, with the inline span at
@@ -4187,9 +4171,13 @@ mod tests {
     fn a_stray_backtick_does_not_swallow_later_highlights_or_wikilinks() {
         let input = "Use the ` character.\n\n==important== and [[#Some Heading|jump]]\n\nThen `run()` finishes.\n";
 
-        let out = process_wikilinks(input);
-        assert!(out.contains("<mark>important</mark>"), "got: {out}");
-        assert!(out.contains("(#some-heading)"), "got: {out}");
+        // The wikilink half is still this crate's, and is still asserted on the
+        // rewriter. The highlight half is comrak's, so it is asserted on the
+        // rendered document.
+        assert!(process_wikilinks(input).contains("(#some-heading)"));
+        let out = convert_markdown(input);
+        assert!(out.contains(">important</mark>"), "got: {out}");
+        assert!(out.contains(">run()</code>"), "got: {out}");
     }
 
     #[test]
@@ -4429,6 +4417,25 @@ mod tests {
         assert!(html.contains("<td data-sourcepos=\"3:2-3:4\">1</td>"), "{html}");
         assert!(!html.contains("1 || 3"), "the `||` was swallowed: {html}");
         assert!(!html.contains("class=\"spoiler\""), "{html}");
+    }
+
+    /// What moving these two to comrak bought, beyond two fewer preprocessors.
+    ///
+    /// Both regexes were single-line and stopped at the first delimiter they
+    /// saw. The parser has the block structure, so it does not have to.
+    #[test]
+    fn the_parser_reaches_where_the_patterns_could_not() {
+        // `==([^=\n]+)==` could not cross a line break, so a highlight that
+        // wrapped came out as literal `==` on both sides.
+        let wrapped = convert_markdown("==a highlight that\nwraps a line==\n");
+        assert!(wrapped.contains("</mark>"), "got: {wrapped}");
+        assert!(!wrapped.contains("=="), "got: {wrapped}");
+
+        // `\^\[([^\]\n]+)\]` stopped at the first `]`, so a note containing
+        // brackets lost its tail and left a stray `]` in the paragraph.
+        let nested = convert_markdown("text^[a note with [brackets] inside]\n");
+        assert!(nested.contains("a note with [brackets] inside"), "got: {nested}");
+        assert!(!nested.contains("inside]</p>"), "the tail was dropped: {nested}");
     }
 
     #[test]
