@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// between into an `<img src>`, destroying the prose *and* renumbering every
 /// task checkbox below it. Not matching (rather than matching and bailing out)
 /// also leaves the later, well-formed embed free to render.
-static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[(.*?)\]\]").unwrap());
+static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[(.*?)\]\]").expect("valid regex literal"));
 /// `[[target]]` / `[[target|alias]]` where the target names a heading — either
 /// in this document (`#Setup`) or in another file (`Notes#Setup`). The `#` is
 /// required: a wikilink without one is a bare note link, which Markpad has
@@ -29,20 +29,20 @@ static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[(
 /// `process_wikilinks` re-checks that the target half really has one.
 /// The inner text stops at the first `]`, as the narrower `[[#…]]` pattern
 /// this replaced also did.
-static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]]*#[^\]]*)\]\]").unwrap());
+static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]]*#[^\]]*)\]\]").expect("valid regex literal"));
 /// ` ^block-id` at the end of a line. The leading whitespace is captured
 /// because Obsidian also accepts a block id alone on the line after the block
 /// it names, and `\s+` then spans the newline: the replacement has to put that
 /// newline back, or the anchor is folded onto the previous line and every line
 /// below it moves up one (see the line contract in `mod tests`).
 static BLOCK_ID_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?m)(\s+)\^([a-zA-Z0-9_-]+)$").unwrap());
-static HIGHLIGHT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"==([^=\n]+)==").unwrap());
+    LazyLock::new(|| Regex::new(r"(?m)(\s+)\^([a-zA-Z0-9_-]+)$").expect("valid regex literal"));
+static HIGHLIGHT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"==([^=\n]+)==").expect("valid regex literal"));
 /// Obsidian's inline footnote `^[text]`, which is a single-line form — the
 /// multi-line spelling is the separate `[^ref]` + `[^ref]: …` pair. Excluding
 /// the newline also keeps the line contract: collapsing a wrapped `^[…]` into
 /// one `[^ifn-N]` reference renumbered every line below it.
-static INLINE_FOOTNOTE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\^\[([^\]\n]+)\]").unwrap());
+static INLINE_FOOTNOTE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\^\[([^\]\n]+)\]").expect("valid regex literal"));
 /// The rendered task-list `<input>` this pass is allowed to mark.
 ///
 /// The boolean attributes are matched as an unordered set rather than in a
@@ -56,10 +56,10 @@ static TASK_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"<li data-sourcepos="(?<sourcepos>(?<line>\d+):\d+-\d+:\d+)">(?<input><input type="checkbox"(?: (?:checked|disabled)="")* />)"#,
     )
-    .unwrap()
+    .expect("valid regex literal")
 });
 static TASK_SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX]\](?:\s|$)").unwrap()
+    Regex::new(r"^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX]\](?:\s|$)").expect("valid regex literal")
 });
 
 /// Distinguishes the temp files of `atomic_write` calls that share a process.
@@ -613,7 +613,7 @@ fn code_region_ranges(content: &str) -> Vec<(usize, usize)> {
                     if seg_start < line_start {
                         push_inline_code_spans(content, seg_start, line_start, &mut regions);
                     }
-                    fence = Some((marker.unwrap(), run_len, line_start));
+                    fence = Some((marker.expect("fence marker"), run_len, line_start));
                 }
             }
         }
