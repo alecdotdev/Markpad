@@ -64,6 +64,7 @@ parts:
       - libjavascriptcoregtk-4.1-0
     build-snaps:
       - node/20/stable
+      - rustup/latest/stable
     override-build: |
       set -e
       craftctl set version="$(node -p "require('./package.json').version")"
