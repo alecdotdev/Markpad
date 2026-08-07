@@ -2821,8 +2821,35 @@ pub fn run() {
                     )
                     .build()?;
 
+                // WKWebView declines ⌘X/⌘C/⌘V/⌘A/⌘Z in plain inputs and hands
+                // them to the main menu, so without an Edit submenu those keys
+                // are dead in every native field (settings, modals). Monaco is
+                // unaffected either way: it preventDefault()s the key first, so
+                // the menu never sees it and its own paste handler still runs.
+                let edit_submenu = SubmenuBuilder::new(app, "Edit")
+                    .item(&PredefinedMenuItem::undo(app, None)?)
+                    .item(&PredefinedMenuItem::redo(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::cut(app, None)?)
+                    .item(&PredefinedMenuItem::copy(app, None)?)
+                    .item(&PredefinedMenuItem::paste(app, None)?)
+                    .item(&PredefinedMenuItem::select_all(app, None)?)
+                    .build()?;
+
+                // ⌘M and ⌃⌘F are window-server actions, not document actions:
+                // there is no web API the in-window controls could bind them
+                // to, so they only exist as long as a menu item carries them.
+                // Full Screen belongs in a View menu by convention, but View
+                // would hold that one item and nothing else — Markpad's view
+                // actions are all in-window (#281) — so it rides here instead.
+                let window_submenu = SubmenuBuilder::new(app, "Window")
+                    .item(&PredefinedMenuItem::minimize(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::fullscreen(app, None)?)
+                    .build()?;
+
                 let menu = MenuBuilder::new(app)
-                    .items(&[&app_submenu])
+                    .items(&[&app_submenu, &edit_submenu, &window_submenu])
                     .build()?;
 
                 app.set_menu(menu)?;
