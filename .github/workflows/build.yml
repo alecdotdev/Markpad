@@ -284,8 +284,8 @@ jobs:
       - name: Strip host-coupled libraries from AppImage
         if: matrix.platform == 'ubuntu-24.04'
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -329,7 +329,7 @@ jobs:
           # which no longer matches. signer sign reads the key/password from the
           # env above and writes <APPIMAGE>.sig, which the upload and the
           # latest.json job below both consume.
-          npm run tauri signer sign -- "$APPIMAGE" -k "$TAURI_SIGNING_PRIVATE_KEY" -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+          npm run tauri signer sign -- "$APPIMAGE" -k
           if [ ! -f "$APPIMAGE.sig" ]; then
             echo "::error::signer sign did not produce $APPIMAGE.sig" >&2
             exit 1
