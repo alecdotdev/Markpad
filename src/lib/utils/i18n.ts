@@ -6788,7 +6788,7 @@ for (const [language, sections] of Object.entries(interactiveLabelTranslations) 
 export function t(key: string, lang: LanguageCode = 'en'): string {
     const keys = key.split('.');
     
-    const getValue = (dict: Record<string, unknown>) => {
+    const getValue = (dict: any) => {
         let res = dict;
         for (const k of keys) {
             if (res && typeof res === 'object' && k in res) res = res[k];
