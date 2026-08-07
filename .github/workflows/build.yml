@@ -68,6 +68,45 @@ jobs:
 
           echo "$legacy still serves a feed for $GITHUB_REPOSITORY."
 
+      # A download table, above the generated changelog.
+      #
+      # GitHub's asset list is one flat, alphabetically sorted column: there is
+      # no way to group it by platform, and the file names alone do not say
+      # which of the two Windows executables installs and which does not. The
+      # release BODY is the one part of that page this repository controls, so
+      # the table goes there, and every row is a direct link.
+      #
+      # Version-stamped file names are what the bundler produces and what
+      # `latest.json` points at, so they are written out here rather than using
+      # the `/releases/latest/download/<name>` permalink, which only works for
+      # names that carry no version.
+      - name: Compose the download table
+        id: download_table
+        run: |
+          VERSION='${{ steps.get_version.outputs.version }}'
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}"
+          {
+            echo 'body<<RELEASE_BODY'
+            echo '## Download'
+            echo
+            echo '| System | Chip | Download | |'
+            echo '|---|---|---|---|'
+            echo "| **Windows** | Intel / AMD | [\`Markpad_${VERSION}_x64-setup.exe\`](${BASE}/Markpad_${VERSION}_x64-setup.exe) | installer |"
+            echo "| | Intel / AMD | [\`Markpad_${VERSION}_x64.exe\`](${BASE}/Markpad_${VERSION}_x64.exe) | portable |"
+            echo "| | ARM64 | [\`Markpad_${VERSION}_arm64-setup.exe\`](${BASE}/Markpad_${VERSION}_arm64-setup.exe) | installer |"
+            echo "| | ARM64 | [\`Markpad_${VERSION}_arm64.exe\`](${BASE}/Markpad_${VERSION}_arm64.exe) | portable |"
+            echo "| **macOS** | Intel **and** Apple Silicon | [\`Markpad_${VERSION}_universal.dmg\`](${BASE}/Markpad_${VERSION}_universal.dmg) | one file for both |"
+            echo "| **Linux** | x86-64 | [\`Markpad_${VERSION}_amd64.AppImage\`](${BASE}/Markpad_${VERSION}_amd64.AppImage) | portable |"
+            echo "| | x86-64 | [\`Markpad_${VERSION}_amd64.deb\`](${BASE}/Markpad_${VERSION}_amd64.deb) | Debian, Ubuntu |"
+            echo "| | x86-64 | [\`Markpad-${VERSION}-1.x86_64.rpm\`](${BASE}/Markpad-${VERSION}-1.x86_64.rpm) | Fedora, RHEL, openSUSE |"
+            echo
+            echo 'The two Windows files differ only in that one installs and one does not.'
+            echo 'Package managers: `choco install markpad-app` (Windows), `sudo snap install markpad` (Linux).'
+            echo
+            echo '---'
+            echo 'RELEASE_BODY'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v3
@@ -79,6 +118,7 @@ jobs:
           draft: true
           prerelease: false
           generate_release_notes: true
+          body: ${{ steps.download_table.outputs.body }}
 
   build:
     needs: create-release
