@@ -387,7 +387,33 @@ fn markdown_options<'a>() -> Options<'a> {
     options.extension.table = true;
     options.extension.autolink = true;
     options.extension.tasklist = true;
-    options.extension.superscript = false;
+    // `++ins++` — Pandoc's and CriticMarkup's spelling for inserted text, and
+    // plain characters here until now. It is the only one of its group worth
+    // taking, and the rule that decided the others is worth stating, because
+    // it is not "is this syntax popular":
+    //
+    //     Accept a dialect only where it cannot misread ORDINARY TEXT.
+    //
+    // Measured against this renderer, three failed that:
+    //
+    //   `subscript` (`~sub~`). GFM defines strikethrough as "one or two
+    //   tildes", so `~x~` is struck-through on GitHub and here. Subscripts
+    //   take that spelling away, and a valid GFM document starts rendering
+    //   differently in this app. `<sub>2</sub>` works in both places.
+    //
+    //   `superscript` (`^sup^`). Worse than taking a spelling — it takes
+    //   PROSE. Two carets in a paragraph pair up, so `a^2 + b^2 = c^2`, which
+    //   renders as written today both here and on GitHub, would become
+    //   `a<sup>2 + b</sup>2 = c^2`.
+    //
+    //   `spoiler` (`||text||`). `||` is also an empty table cell: with
+    //   spoilers on, `| 1 || 3 |` collapses into one cell reading "1 || 3".
+    //
+    // `++` passed: nothing else claims it, and `i++ then j++`, `C++ and C++`
+    // and a `+` list all come through untouched. See `syntax_coexistence`,
+    // `the_syntaxes_that_would_misread_ordinary_text` and
+    // `an_empty_table_cell_is_not_a_spoiler`.
+    options.extension.insert = true;
     options.extension.footnotes = true;
     options.extension.description_lists = true;
     // `header_ids` in 0.18; the option only ever set the *prefix* prepended to
@@ -4338,6 +4364,71 @@ mod tests {
                  renderer wrote {rendered:?}",
             );
         }
+    }
+
+    /// The spellings people actually write, and the ones they collide with.
+    ///
+    /// Every extension added here takes a character some other feature already
+    /// uses, so the question is never "does it work" but "what did it take
+    /// from". Each row was measured before being enabled; the `||` row is the
+    /// one that failed, which is why spoilers are off.
+    /// The three that were measured and left off, and the ordinary text each
+    /// would have misread. A test rather than a comment, so that turning one
+    /// on shows what it costs before the pull request is opened.
+    #[test]
+    fn the_syntaxes_that_would_misread_ordinary_text() {
+        // `~x~` is GFM strikethrough — one or two tildes — so a subscript
+        // extension takes a spelling GitHub already renders.
+        assert!(convert_markdown("H~2~O\n").contains("<del"));
+        assert!(convert_markdown("~struck~\n").contains("<del"));
+
+        // Two carets in a paragraph pair up. This sentence renders as written
+        // today, here and on GitHub, and a superscript extension would eat it.
+        let prose = convert_markdown("a^2 + b^2 = c^2\n");
+        assert!(prose.contains("a^2 + b^2 = c^2"), "got: {prose}");
+        assert!(!prose.contains("<sup"), "got: {prose}");
+
+        // `||` is an empty table cell — see the dedicated test for the row it
+        // would break.
+        assert!(!convert_markdown("||spoiler||\n").contains("class=\"spoiler\""));
+    }
+
+    #[test]
+    fn syntax_coexistence() {
+        let cases: &[(&str, &str, &str)] = &[
+            // The characters this group did NOT take, still meaning what they
+            // meant. See `markdown_options` for why.
+            ("~~gone~~", "<del", "strikethrough, unchanged"),
+            ("H~2~O", "<del", "a lone tilde is still GFM strikethrough"),
+            ("text^[a note]", "footnote-ref", "the inline footnote still owns `^[`"),
+            ("A paragraph. ^abc123", "block-id-anchor", "and a block id its own shape"),
+            // Inserted text against the `+` that starts a list.
+            ("++added++", "<ins", "inserted text"),
+            ("+ item one\n+ item two", "<ul", "a `+` list is still a list"),
+            // The false positives that would make prose unreadable.
+            ("I know C++ and also C++ well", "C++ and also C++", "C++ in prose is not inserted text"),
+            ("see ~/notes and ~/tmp", "~/notes and ~/tmp", "home paths are not subscripts"),
+            ("`H~2~O ^2^ ++y++`", "<code", "and none of it applies inside code"),
+        ];
+
+        for (markdown, expected, why) in cases {
+            let html = convert_markdown(&format!("{markdown}\n"));
+            assert!(html.contains(expected), "{why}: {markdown:?} produced {html}");
+        }
+    }
+
+    /// Why `options.extension.spoiler` is off.
+    ///
+    /// `||text||` is the spoiler spelling, and `| 1 || 3 |` is how an empty
+    /// table cell is written. With spoilers on, the row collapses into one cell
+    /// reading "1 || 3" — measured, which is why this is a test and not a
+    /// comment. Tables are core; spoilers are a Discord convention.
+    #[test]
+    fn an_empty_table_cell_is_not_a_spoiler() {
+        let html = convert_markdown("| a | b |\n|---|---|\n| 1 || 3 |\n");
+        assert!(html.contains("<td data-sourcepos=\"3:2-3:4\">1</td>"), "{html}");
+        assert!(!html.contains("1 || 3"), "the `||` was swallowed: {html}");
+        assert!(!html.contains("class=\"spoiler\""), "{html}");
     }
 
     #[test]

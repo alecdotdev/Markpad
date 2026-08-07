@@ -37,6 +37,7 @@ import {
 } from './utils/richContent.js';
 import { observeFoldLayout } from './utils/foldLayout.js';
 import { routeDroppedFile, type DropPane } from './utils/fileDrop.js';
+import { headingReference, preferredReferenceStyle } from './utils/headingReference.js';
 import {
 	findAnchorElement,
 	getAnchorScrollTop,
@@ -165,6 +166,23 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 	let isDragging = $state(false);
 	let dragTarget = $state<'editor' | 'preview' | null>(null);
+
+	/**
+	 * The reference for a heading of THIS document, in the spelling this
+	 * document is written in. See `headingReference.ts` — the inference falls
+	 * back to what the menu has always produced.
+	 */
+	function copyHeadingReference(text: string, slug: string) {
+		const tab = tabManager.activeTab;
+		const fileName = tab?.path ? tab.path.split(/[/\\]/).pop() || null : null;
+		const reference = headingReference({
+			text,
+			slug,
+			fileName,
+			style: preferredReferenceStyle(tab?.rawContent ?? ''),
+		});
+		invoke('clipboard_write_text', { text: reference });
+	}
 
 	function reportUnsupportedDrop(path: string) {
 		const filename = path.split(/[/\\]/).pop() || 'File';
@@ -2118,11 +2136,12 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		let copyRefItem: any[] = [];
 		if (heading) {
 			const text = heading.textContent?.trim() || '';
-			const tab = tabManager.activeTab;
-			const filename = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : '';
-			const ref = filename ? `[[${filename}#${text}]]` : `#${text}`;
+			// The rendered id, straight off the element: comrak wrote it, and
+			// the outline reads it the same way — it can be on an anchor comrak
+			// nests inside the heading rather than on the heading itself.
+			const slug = heading.id || heading.querySelector('a.anchor')?.id || '';
 			copyRefItem = [
-				{ label: t('menu.copyReference', uiLanguage), onClick: () => invoke('clipboard_write_text', { text: ref }) },
+				{ label: t('menu.copyReference', uiLanguage), onClick: () => copyHeadingReference(text, slug) },
 				{ separator: true },
 			];
 		}
@@ -3464,7 +3483,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 										onBeforeJump={pushScrollHistory} 
 										{collapsedHeaders} 
 										ontoggleFold={toggleFold} 
-										oncopyref={(text: string) => { const tab = tabManager.activeTab; const fn = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : ''; invoke('clipboard_write_text', { text: fn ? `[[${fn}#${text}]]` : `#${text}` }); }}
+										oncopyref={(text: string, slug: string) => copyHeadingReference(text, slug)}
 										onjump={(id: string, text: string, sourceLine: number | null) => {
 											if (isEditing && editorPane) {
 												editorPane.revealHeader(sourceLine, text);
@@ -3479,9 +3498,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 													{ 
 														label: t('menu.copyReference', uiLanguage),
 														onClick: () => {
-															const tab = tabManager.activeTab;
-															const fn = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : '';
-															invoke('clipboard_write_text', { text: fn ? `[[${fn}#${item.text}]]` : `#${item.text}` });
+															copyHeadingReference(item.text, item.id);
 															docContextMenu.show = false;
 														} 
 													}
