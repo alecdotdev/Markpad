@@ -15,7 +15,7 @@
 		modifier?: 'Ctrl' | 'Cmd';
 		toolbarOrder?: string[];
 		toolbarHidden?: string[];
-		onaction: (actionId: string, payload?: unknown) => void;
+		onaction: (actionId: string, payload?: any) => void;
 		ontoggleHide?: () => void;
 		onshowTooltip?: (e: MouseEvent, text: string, shortcut?: string, align?: string) => void;
 		onhideTooltip?: () => void;

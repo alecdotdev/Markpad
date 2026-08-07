@@ -135,7 +135,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		handleDroppedFile: (path: string, x: number, y: number) => Promise<void>;
 		updateDragCaret: (x: number, y: number) => void;
 		hideDragCaret: () => void;
-		runEditorAction: (actionId: string, payload?: unknown) => void;
+		runEditorAction: (actionId: string, payload?: any) => void;
 		undo: () => void;
 		redo: () => void;
 		revealHeader: (sourceLine: number | null, text: string) => void;
@@ -314,7 +314,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			}
 		} else if (theme.startsWith('vscode:')) {
 			const name = theme.replace('vscode:', '');
-			invoke('read_vscode_theme', { name }).then((json: unknown) => {
+			invoke('read_vscode_theme', { name }).then((json: any) => {
 				parseAndApplyVscodeTheme(json, name);
 			}).catch(e => {
 				console.error("Failed to load vscode theme", e);
