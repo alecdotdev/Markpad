@@ -85,7 +85,7 @@ pub struct PinnedTag {
 }
 
 fn pinned_tags_path(app: &AppHandle) -> Result<std::path::PathBuf, crate::error::Error> {
-    let dir = app.path().app_config_dir()?;
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir)?;
     Ok(dir.join("pinned-tags.json"))
 }
@@ -348,7 +348,7 @@ pub async fn show_window(window: tauri::Window) {
 }
 
 fn window_state_path(app: &AppHandle) -> Result<std::path::PathBuf, crate::error::Error> {
-    let dir = app.path().app_config_dir()?;
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir)?;
     Ok(dir.join("window-state-v2.json"))
 }
@@ -382,7 +382,7 @@ pub fn clear_window_state(app: AppHandle) -> Result<(), String> {
 }
 
 fn restore_progress_path(app: &AppHandle) -> Result<std::path::PathBuf, crate::error::Error> {
-    let dir = app.path().app_config_dir()?;
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir)?;
     Ok(dir.join("restore-progress-v1.json"))
 }
