@@ -382,6 +382,20 @@ function processTaskItems(root: Element) {
 		input.removeAttribute("disabled");
 		(input as HTMLInputElement).style.cursor = "pointer";
 
+		// comrak writes `task-list-item` only on the branch where it opens the
+		// `<li>` itself, which a plain task item does not take — so the `<ul>`
+		// gets `contains-task-list` and the items get nothing. That asymmetry
+		// showed as half a fix: the bullet disappeared, because that rule can
+		// match the list, while the grid that puts the checkbox beside its text
+		// stayed dead, because every one of those rules names the item.
+		//
+		// Added here rather than by widening fifteen selectors to
+		// `ul.contains-task-list > li`: this loop already owns which items are
+		// really tasks — `data-task-checkbox` is the renderer's own verdict,
+		// checked above — so the class lands on exactly that set and nothing
+		// else, including in documents where a `<ul>` holds both kinds.
+		li.classList.add("task-list-item");
+
 		const inputParagraph = input.parentElement;
 		if (inputParagraph?.tagName === "P" && inputParagraph.parentElement === li) {
 			li.insertBefore(input, inputParagraph);

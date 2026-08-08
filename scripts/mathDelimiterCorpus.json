@@ -209,7 +209,7 @@
 		{
 			"name": "a formula in a task item",
 			"markdown": "- [ ] compute $x_1$\n",
-			"html": "<ul data-sourcepos=\"1:1-1:26\">\n<li data-sourcepos=\"1:1-1:26\"><input type=\"checkbox\" data-task-checkbox=\"\" disabled=\"\" /> compute $x_1$</li>\n</ul>\n",
+			"html": "<ul class=\"contains-task-list\" data-sourcepos=\"1:1-1:26\">\n<li data-sourcepos=\"1:1-1:26\"><input type=\"checkbox\" data-task-checkbox=\"\" class=\"task-list-item-checkbox\" disabled=\"\" /> compute $x_1$</li>\n</ul>\n",
 			"math": [
 				{
 					"kind": "inline",

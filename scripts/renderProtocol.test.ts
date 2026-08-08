@@ -172,6 +172,15 @@ test('task checkboxes are made clickable and checked ones mark their item', () =
 				checkbox.checked,
 				`${name}: task-done disagrees with the checkbox state`,
 			);
+			// Fifteen rules in styles.css name this class — the bullet
+			// suppression and the grid that puts the checkbox beside its text.
+			// comrak writes it only on the branch where it opens the `<li>`
+			// itself, which a plain task item does not take, so without this
+			// the list loses its bullet and keeps the checkbox on its own line.
+			assert.ok(
+				li.classList.contains('task-list-item'),
+				`${name}: the item class the stylesheet needs is missing`,
+			);
 		}
 	}
 });

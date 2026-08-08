@@ -58,6 +58,22 @@ type DocumentSessionOptions = {
 };
 
 /**
+ * Record that the rendered preview already matches `rawContent`.
+ *
+ * `_lastRenderedRawContent` is MarkdownViewer's bookkeeping: its render effect
+ * compares the field against the buffer and re-renders when they differ. A
+ * caller that has updated the preview DOM by hand has to say so, or the effect
+ * rebuilds the article to reach the state already on screen — and takes the
+ * reader's scroll position with it.
+ *
+ * Declared here rather than inlined so the cast lives in one place and the
+ * reason is written once.
+ */
+function markPreviewMatchesBuffer(tab: Tab, rawContent: string) {
+	(tab as unknown as Record<string, unknown>)._lastRenderedRawContent = rawContent;
+}
+
+/**
  * Which heading sections the tab being loaded has folded, read at render time
  * rather than captured up front. A large file is rendered twice — the 50KB
  * preview, then the whole document once the background read lands — and the
@@ -603,7 +619,16 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		if (!(await ensureFullContent(tab.id))) return false;
 		const raw = tab.rawContent;
 		const body = getMarkdownBodyWithoutFrontMatter(raw);
-		const updatedBody = body.replace(/^(\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+)\[( |x|X)\]/gm, (match, prefix, _state, offset) => {
+		// Horizontal whitespace only, and it has to stay that way. `\s` matches
+		// `\r` as well as `\n`, and JavaScript's `/m` `^` also matches at the
+		// position *between* a `\r` and its `\n`. With `\s*` greedy, every match
+		// in a CRLF buffer began one character early — on the previous line's
+		// `\n` — so `body.slice(0, offset)` held one `\n` too few and every task
+		// resolved to line N-1. On the last task that is a no-op the user reads
+		// as "the checkbox does not work" (#148); anywhere else the off-by-one
+		// lands on a *real* task line and silently toggles the wrong one. Every
+		// CRLF document was affected, which is to say every Windows author.
+		const updatedBody = body.replace(/^([ \t]*(?:>[ \t]*)*(?:[-+*]|\d+[.)])[ \t]+)\[( |x|X)\]/gm, (match, prefix, _state, offset) => {
 			const line = body.slice(0, offset).split('\n').length;
 			if (line === sourceLine) return `${prefix}[${nowChecked ? 'x' : ' '}]`;
 			return match;
@@ -611,6 +636,21 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		const updated = `${raw.slice(0, raw.length - body.length)}${updatedBody}`;
 		if (updated === raw) return false;
 		tabManager.updateTabRawContent(tab.id, updated);
+		// The preview is already showing this content: the browser has drawn
+		// the native checkbox, and the caller adds `task-done` to the item. A
+		// re-render would rebuild the whole article to arrive at the DOM that
+		// is on screen, and rebuilding it drops the reader's scroll position —
+		// ticking something in a long document threw the view somewhere else
+		// entirely, which is worse than the missing render would be.
+		//
+		// In the same synchronous block as the write, deliberately. The render
+		// effect reads `_lastRenderedRawContent` and, if it does not match,
+		// arms a 16ms timer BEFORE anything can be awaited — so marking this
+		// after an `await` would be too late to stop the render it schedules.
+		// The field is MarkdownViewer's, and this is the one place outside it
+		// that may claim the preview is current, because this is the one place
+		// that knows the DOM was updated by hand.
+		markPreviewMatchesBuffer(tab, updated);
 		await saveContent(tab.id);
 		return true;
 	}

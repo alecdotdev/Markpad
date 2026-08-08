@@ -46,6 +46,10 @@ This is a normal paragraph. It includes **bold text**, *italic text*, ***bold it
 
 You can also test combinations such as **bold with `inline code`**, *italic with [a link](https://example.com)*, and ~~strikethrough with **bold text**~~.
 
+Inserted text uses Pandoc's and CriticMarkup's spelling: ++this was added++, and it nests like the others — ++inserted with **bold**++.
+
+A lone `+` or a pair with a space between them is ordinary text: 1 + 1, and a++ b ++c stays as written.
+
 ## Heading Level 2
 
 ### Heading Level 3
@@ -166,6 +170,55 @@ A local-image reference is also included for syntax testing:
 ```markdown
 ![Local diagram](images/sample-diagram.png)
 ```
+
+An image with a title, which most readers show on hover:
+
+![Markpad in light mode](../pics/lightmode.png "Light mode")
+
+A reference-style image, where the destination lives elsewhere in the document:
+
+![Drag and drop][dnd-image]
+
+[dnd-image]: ../pics/drag-and-drop.png "Dropping a file onto the editor"
+
+## Wikilinks
+
+Obsidian's spelling, rewritten before rendering:
+
+- A heading in another document: [[markdown-syntax#3. Lists]]
+- With an alias: [[markdown-syntax#3. Lists|see the lists chapter]]
+- A heading in this document: [[#6. Tables]]
+- An embed of a local image: `![[lightmode.png]]`
+
+A wikilink with no heading is deliberately left as literal text, because `[[Notes]]` is also how citation numbering and reference links are written: [[Notes]].
+
+## Block Ids
+
+A paragraph can carry an id and be linked to from anywhere. ^stress-block
+
+That paragraph ends with `^stress-block`, and [[#^stress-block]] points at it.
+
+## Video and Audio
+
+An image reference whose file is a video or a sound becomes a player. The files below do not exist in this repository — the point is that the *syntax* resolves to a player element rather than to a broken image:
+
+![A screen recording](media/demo.mp4)
+
+![An interview](media/episode.mp3)
+
+Video extensions: `mp4`, `webm`, `ogg`, `mov`. Audio: `mp3`, `wav`, `aac`, `flac`, `m4a`.
+
+## YouTube
+
+A YouTube link alone in its paragraph becomes a thumbnail:
+
+https://www.youtube.com/watch?v=dQw4w9WgXcQ
+
+The image form does the same:
+
+![Any caption](https://youtu.be/dQw4w9WgXcQ)
+
+A YouTube link in the middle of a sentence — like https://youtu.be/dQw4w9WgXcQ here — stays an ordinary link, because replacing it would break the sentence around it.
 
 # 5. Blockquotes
 
@@ -351,6 +404,125 @@ Nested task list:
   - [ ] Editing
   - [ ] Export
   - [ ] Search
+
+## Task List Shapes
+
+Toggling a checkbox in the preview has to find the line to rewrite in the
+source. Each shape below is a separate case for that lookup, and every one of
+them is expected to toggle — and to toggle **only itself**.
+
+Ordered, with a dot:
+
+1. [ ] First ordered task
+2. [x] Second ordered task
+3. [ ] Third ordered task
+
+Ordered, with a parenthesis:
+
+1) [ ] Parenthesised marker
+2) [x] Also a task
+
+Other bullet characters:
+
+* [ ] Asterisk marker
++ [x] Plus marker
+
+Inside a quote:
+
+> - [ ] A task in a blockquote
+> - [x] A second one
+> - [ ] A third
+
+Deeply nested, mixing markers and depths:
+
+- [ ] Level one
+  - [x] Level two
+    * [ ] Level three with an asterisk
+      1. [ ] Level four, ordered
+    * [x] Back to level three
+  - [ ] Level two again
+
+## Task Lists With No Blank Line Above Them
+
+A list that begins immediately after prose is a different case for anything
+that counts lines, because there is no blank line for a pattern to run past.
+The next line is prose, and the list starts on the line after it with nothing
+between them:
+- [ ] Straight after the paragraph
+- [x] Second in the run
+- [ ] Third in the run
+
+The same again, this time with a blank line above the list, which is how most
+people write one:
+
+- [ ] After a blank line
+- [x] Second in the run
+- [ ] Third in the run
+
+## Adjacent Tasks
+
+Nothing between these, so an off-by-one lands on a real task rather than on
+nothing — which is the difference between a checkbox that looks dead and one
+that silently ticks its neighbour. Toggle any single line and check that the
+other five are untouched:
+
+- [ ] Adjacent one
+- [ ] Adjacent two
+- [ ] Adjacent three
+- [ ] Adjacent four
+- [ ] Adjacent five
+- [ ] Adjacent six
+
+## A Task Carrying Continuation Lines
+
+The shape from the file attached to #148. A task whose text is one line, followed
+by a dozen indented lines that all belong to the same list item — mixed 4- and
+8-space indents, every line an inline code span, and most ending in two trailing
+spaces, which makes each one a hard break rather than a new paragraph. The whole
+run is a single lazy-continuation paragraph inside the item.
+
+Note also that the list starts immediately after the heading, with no blank line
+between them.
+
+### Essential
+- [x] Repo management  
+    `sudo nano /etc/dnf/dnf.conf`  
+        `fastestmirror=True`  
+        `max_parallel_downloads=10`  
+        `defaultyes=True`  
+    `sudo dnf install https://mirrors.example.org/free/release-$(rpm -E %dist).noarch.rpm -y`  
+    `sudo dnf -y update`  
+        `sudo dnf repolist --all | grep -i example`  
+        `sudo dnf config-manager setopt example-free.enabled=1`  
+    `flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`  
+- [x] Custom refresh rate  
+    `kscreen-doctor output.1.addCustomMode.1920.1080.75000.reduced`
+
+Two things this exercises that nothing else here does: a checkbox whose item is
+many lines tall, so the control and its text can be laid out apart from one
+another; and continuation lines holding `$(…)`, `|` and `%`, which several of
+the preprocessing passes look for.
+
+The one dimension this file cannot carry is line endings — it is LF throughout,
+and the original was CRLF. That half is covered by
+`scripts/taskToggleLineEndings.test.ts`, which drives both endings through the
+real write-back.
+
+## Task-Like Text That Is Not A Task
+
+None of these should become a checkbox:
+
+Some prose containing - [ ] in the middle of a sentence.
+
+    - [ ] An indented code block, not a list
+
+`- [ ] inline code`
+
+```markdown
+- [ ] A fenced code block
+```
+
+- Not a task, just a bullet whose text starts with a bracket \[x\]
 
 # 9. Footnotes
 
