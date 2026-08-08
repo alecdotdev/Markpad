@@ -1391,6 +1391,14 @@
 	}
 
 	export async function pasteFromClipboard() {
+		// Focus first, as `runEditorAction` does, and for the same reason: this
+		// runs from the context menu as well as from ⌘V, and a menu item leaves
+		// the focus on itself. Paste then inserted the text and left no caret —
+		// no blink, and the next ⌘Z went nowhere, which reads as "undo is
+		// broken" rather than "the editor is not focused".
+		//
+		// A no-op on the ⌘V path, where the editor is focused by definition.
+		editor?.focus();
 			try {
 				// check for image in clipboard via Rust
 				const base64Image = await invoke("clipboard_read_image", { macosImageScaling: settings.macosImageScaling }).catch(() => null) as string | null;
@@ -1536,16 +1544,17 @@
 	}
 
 	export async function copyToClipboard() {
+		editor?.focus();
 		const { text } = clipboardTextForSelection();
 		if (text) await invoke('clipboard_write_text', { text }).catch(console.error);
 	}
 
 	export async function cutToClipboard() {
+		editor?.focus();
 		const { text, range } = clipboardTextForSelection();
 		if (!text || !range || !editor) return;
 		await invoke('clipboard_write_text', { text }).catch(console.error);
 		editor.executeEdits('cut', [{ range, text: '', forceMoveMarkers: true }]);
-		editor.focus();
 	}
 
 	export function syncScrollToPosition(position: ScrollSyncPosition) {

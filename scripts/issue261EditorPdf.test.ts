@@ -192,3 +192,32 @@ test('the menu bar copies the same clipboard the other two routes do', () => {
 	assert.match(readSource('src/lib/components/Editor.svelte'), /copyWithSyntaxHighlighting: false,/);
 	assert.match(readSource('src-tauri/src/lib.rs'), /PredefinedMenuItem::copy/, 'precondition: the menu bar route exists');
 });
+
+
+test('every clipboard entry point leaves the editor focused', () => {
+	// Reported from Windows as "⌘Z stopped working". It had not: paste from the
+	// context menu inserted the text and left focus on the menu item, so there
+	// was no caret and the next keystroke went nowhere. The visible symptom
+	// named a different feature than the broken one, which is why this is
+	// pinned rather than left to review.
+	//
+	// The ⌘X/⌘C/⌘V paths never needed it — a keybinding fires with the editor
+	// focused by definition — and that is exactly why it was missing once the
+	// same functions were given a second entry point.
+	//
+	// Focus first, not last, matching `runEditorAction`.
+	const editor = readSource('src/lib/components/Editor.svelte');
+
+	for (const fn of ['cutToClipboard', 'copyToClipboard', 'pasteFromClipboard']) {
+		const body = functionSource(editor, fn);
+		const focus = body.indexOf('editor?.focus()');
+		assert.notEqual(focus, -1, `${fn} does not restore focus`);
+
+		const work = Math.min(
+			...['clipboardTextForSelection', 'clipboard_read_image', 'try {']
+				.map((marker) => body.indexOf(marker))
+				.filter((at) => at !== -1),
+		);
+		assert.ok(focus < work, `${fn} focuses after doing its work`);
+	}
+});

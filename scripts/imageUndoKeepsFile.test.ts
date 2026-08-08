@@ -147,6 +147,10 @@ function createDocument(initial: string) {
 	};
 
 	const editor = {
+		// Every clipboard entry point focuses the editor first, because two of
+		// the three now run from a context menu that would otherwise keep the
+		// focus on itself (see issue261EditorPdf.test.ts).
+		focus: () => {},
 		getValue: () => buffer,
 		setValue: (text: string) => void (buffer = text),
 		getModel: () => ({
