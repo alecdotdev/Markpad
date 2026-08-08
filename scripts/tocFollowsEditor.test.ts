@@ -128,7 +128,39 @@ test('the outline no longer measures the preview to decide', () => {
 	assert.doesNotMatch(handler, /querySelector/);
 	// What it still does: a click leaves a highlight on its target, and the
 	// next scroll takes it off.
-	assert.match(handler, /activeTargetEl\.classList\.remove\('toc-target-active'\)/);
+	assert.match(handler, /clearTargetHighlight\(\)/);
+});
+
+test('the jump highlight ends on anything that means the reader moved on', () => {
+	// It is a temporary emphasis. Hanging it off scrolling alone made it
+	// permanent whenever that one event did not arrive: the jump's own smooth
+	// scroll is swallowed by `clickLock`, and nothing else scrolls the preview
+	// unless the reader does. A click or a keystroke has to end it too.
+	const clear = sliceBetween(tocSource, 'function clearTargetHighlight()', '\n\tfunction ');
+	assert.match(clear, /classList\.remove\('toc-target-active'\)/, 'one place removes the class');
+	assert.match(clear, /activeTargetEl = null/);
+
+	// And the reader's own actions must not go through the lock, which exists
+	// only to ignore scrolling the app itself caused.
+	const reader = sliceBetween(tocSource, 'function handleReaderAction()', '\n\t}');
+	assert.doesNotMatch(reader, /clickLock/, 'a deliberate action is never locked out');
+	assert.match(reader, /clearTargetHighlight\(\)/);
+
+	for (const [target, event] of [
+		['el', 'pointerdown'],
+		['window', 'keydown'],
+	] as const) {
+		assert.match(
+			tocSource,
+			new RegExp(`${target}\\.addEventListener\\('${event}', handleReaderAction`),
+			`${event} clears it`,
+		);
+		assert.match(
+			tocSource,
+			new RegExp(`${target}\\.removeEventListener\\('${event}', handleReaderAction\\)`),
+			`${event} is detached again`,
+		);
+	}
 });
 
 test('there is no preference for it, because the preview never had one', () => {

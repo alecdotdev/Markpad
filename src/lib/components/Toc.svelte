@@ -151,11 +151,36 @@
 	 * now send a source line instead (`activeLine`), and one rule picks the
 	 * entry from it.
 	 */
-	function handleScroll() {
-		if (clickLock || !activeTargetEl) return;
+	/**
+	 * Drop the "you jumped here" highlight.
+	 *
+	 * It is a temporary emphasis, so it has to end on anything that means the
+	 * reader has moved on. Hanging it off scrolling alone made it permanent
+	 * whenever that one event did not arrive — the jump's own smooth scroll is
+	 * swallowed by `clickLock`, and if nothing scrolls the preview afterwards
+	 * there is no second chance.
+	 */
+	function clearTargetHighlight() {
+		if (!activeTargetEl) return;
 
 		activeTargetEl.classList.remove('toc-target-active');
 		activeTargetEl = null;
+	}
+
+	function handleScroll() {
+		// The lock is here for the jump's OWN smooth scroll, which would
+		// otherwise clear the highlight before the reader has seen it.
+		if (clickLock) return;
+		clearTargetHighlight();
+	}
+
+	/**
+	 * A deliberate action by the reader, which the lock must not swallow: the
+	 * lock exists to ignore scrolling the app itself caused, and a click or a
+	 * keystroke is never that.
+	 */
+	function handleReaderAction() {
+		clearTargetHighlight();
 	}
 
 	/**
@@ -206,7 +231,18 @@
 		const el: HTMLElement | null = markdownBody;
 		if (el) {
 			el.addEventListener('scroll', handleScroll, { passive: true });
-			return () => el.removeEventListener('scroll', handleScroll);
+			// `pointerdown`, not `click`: clicking a link inside the preview
+			// navigates, and the click never completes on the element that
+			// carried the highlight.
+			el.addEventListener('pointerdown', handleReaderAction, { passive: true });
+			// On the window, because after a jump the focus can be in either
+			// pane or in neither — the reader typing anywhere has moved on.
+			window.addEventListener('keydown', handleReaderAction, { passive: true });
+			return () => {
+				el.removeEventListener('scroll', handleScroll);
+				el.removeEventListener('pointerdown', handleReaderAction);
+				window.removeEventListener('keydown', handleReaderAction);
+			};
 		}
 	});
 
@@ -226,7 +262,7 @@
 			if (item) onjump?.(id, item.text, sourceLineOf(el.dataset.sourcepos));
 
 			// highlight element persistently until scroll
-			if (activeTargetEl) activeTargetEl.classList.remove('toc-target-active');
+			clearTargetHighlight();
 			el.classList.add('toc-target-active');
 			activeTargetEl = el;
 

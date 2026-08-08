@@ -257,11 +257,7 @@ test('Edit with a target never leaves edit mode', () => {
 	// In split view the editor is already on screen, and "edit this fragment"
 	// is the one thing that cannot mean "close the editor".
 	const edit = functionSource(viewerSource, 'editSourceRange');
-	assert.match(edit, /if \(!isEditing\) await toggleEdit\(/, 'entered only when not already editing');
-	// And it does not ask the toggle to resolve a selection of its own: this
-	// path already has its target, captured before the menu click that would
-	// have cleared it.
-	assert.match(edit, /toggleEdit\(\{ revealSelection: false \}\)/);
+	assert.match(edit, /if \(!isEditing\) await toggleEdit\(\)/, 'entered only when not already editing');
 	// And a read that failed leaves the tab in reading mode — arming the jump
 	// anyway would fire it at whatever document is edited next.
 	assert.match(edit, /tabManager\.activeTab\?\.isEditing/);
@@ -327,11 +323,11 @@ test('the real stress document shifts by its front matter', () => {
 // with either call site still handing over a raw body line.
 
 test('every renderer line reaching the editor goes through the shift', () => {
+	// Two consumers hand a `data-sourcepos` number to the editor, and both have
+	// to shift it. `toggleEditView` is not a third: it resolves the range and
+	// passes it to `editSourceRange`, which is where the shift happens.
 	const edit = functionSource(viewerSource, 'editSourceRange');
-	assert.match(edit, /pendingEditReveal = toBufferRange\(range\)/, 'the context menu shifts');
-
-	const toggle = functionSource(viewerSource, 'toggleEdit');
-	assert.match(toggle, /pendingEditReveal = toBufferRange\(carried\)/, 'the carried selection shifts');
+	assert.match(edit, /pendingEditReveal = toBufferRange\(range\)/, 'the context menu and ⌘E shift');
 
 	// The outline is wired inline in the markup rather than in a function.
 	assert.match(
@@ -348,15 +344,38 @@ test('the shift reads the buffer, not the rendered body', () => {
 	assert.match(shift, /frontMatterLineOffset\(rawContent\)/);
 });
 
-test('a selection carried into edit mode is read before the flag flips', () => {
-	// `isEditing` is flipped inside `toggleEdit`, so reading the selection
-	// after it would ask "was the reader in the editor" instead of "was the
-	// reader in the preview" — and leaving the editor would arm a jump for the
-	// next time it is entered.
-	const toggle = functionSource(viewerSource, 'toggleEdit');
-	assert.match(toggle, /const carried = !isEditing && revealSelection \? getSelectionSourceRange\(\) : null;/);
+test('the selection is read before anything switches mode', () => {
+	// `toggleEdit` and `editSourceRange` both flip `isEditing`, and a selection
+	// read after that would answer for the editor rather than for the preview
+	// the reader was looking at.
+	const view = functionSource(viewerSource, 'toggleEditView');
+	assert.match(view, /const selected = getSelectionSourceRange\(\);/);
 	assert.ok(
-		toggle.indexOf('const carried') < toggle.indexOf('tab.isEditing = true'),
-		'read before the switch, not after',
+		view.indexOf('const selected') < view.indexOf('toggleEdit()'),
+		'resolved first, then the mode changes',
 	);
+});
+
+test('one function owns what ⌘E means, and every entry point uses it', () => {
+	// The hotkey, the toolbar, the title bar and Monaco's own command all route
+	// here, so the chord cannot mean one thing with the caret in the editor and
+	// another with it in the preview — which is what
+	// `formatShortcutKeymap.test.ts` pins from the other side.
+	assert.match(viewerSource, /if \(cmdOrCtrl && key === 'e'\) \{[\s\S]{0,600}?toggleEditView\(\)/);
+	assert.equal(
+		(viewerSource.match(/ontoggleEdit=\{\(\) => toggleEditView\(\)\}/g) ?? []).length,
+		3,
+		'all three component entry points',
+	);
+	assert.doesNotMatch(viewerSource, /ontoggleEdit=\{\(\) => toggleEdit\(\)\}/, 'none left on the raw toggle');
+});
+
+test('split view with nothing selected is deliberately inert', () => {
+	// The editor is already on screen, so the ability ⌘E asks for is already
+	// granted; with no selection there is nothing to travel to either. Closing
+	// the preview would be a layout change nobody asked for, and a mistyped ⌘E
+	// would cost the reader the pane.
+	const view = functionSource(viewerSource, 'toggleEditView');
+	assert.match(view, /if \(isSplit && !selected\) \{[\s\S]*?return;/);
+	assert.doesNotMatch(view, /setSplitEnabled/, 'the chord never changes the layout');
 });

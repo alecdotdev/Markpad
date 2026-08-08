@@ -1608,21 +1608,13 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	}
 
 	/**
-	 * @param revealSelection Carry whatever the reader has selected in the
-	 * preview into the editor, so ⌘E and the toolbar button land on the passage
-	 * being read rather than at the top of the file — the same behaviour the
-	 * context menu's "Edit" gives, from the entry points people actually use.
-	 * `editSourceRange` passes false because it has already resolved its target:
-	 * the reader clicked a menu item to get there, and a click is how a
-	 * selection goes away.
+	 * Move the active tab between reading and editing. Just the mode — where
+	 * the reader LANDS is `editSourceRange`'s business, and `toggleEditView`
+	 * is what decides which of the two a ⌘E means.
 	 */
-	async function toggleEdit({ revealSelection = true }: { revealSelection?: boolean } = {}) {
+	async function toggleEdit() {
 		const tab = tabManager.activeTab;
 		if (!tab || tab.path === undefined) return;
-
-		// Read before the switch: `isEditing` flips below, and leaving the
-		// editor must not arm a jump for the next time it is entered.
-		const carried = !isEditing && revealSelection ? getSelectionSourceRange() : null;
 
 		if (isEditing) {
 			// Switch back to view.
@@ -1676,11 +1668,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				tab.isEditing = true;
 			}
 		}
-
-		// Only once the switch actually took: the read above can fail and leave
-		// the tab in reading mode, and a jump armed then would fire at whatever
-		// document is edited next.
-		if (carried && tab.isEditing) pendingEditReveal = toBufferRange(carried);
 	}
 
 	/**
@@ -1744,8 +1731,47 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	 * the jump happens. With no range (right-click outside the document) the
 	 * entry is untouched.
 	 */
+	/**
+	 * What ⌘E means, from every entry point that offers it — the hotkey, the
+	 * toolbar, the title bar, and Monaco's own command.
+	 *
+	 * One function so the chord cannot mean two things depending on where the
+	 * caret happens to be (`formatShortcutKeymap.test.ts` holds the two layers
+	 * together), and so "take me to the editor" behaves the same whether the
+	 * reader asked for it with a key or with a menu item.
+	 */
+	async function toggleEditView() {
+		const selected = getSelectionSourceRange();
+
+		if (isEditing && !isSplit) {
+			// The editor is already the whole window: nowhere further to take
+			// the reader, so this is the toggle back out.
+			await toggleEdit();
+			return;
+		}
+
+		if (isSplit && !selected) {
+			// Deliberately nothing.
+			//
+			// What ⌘E is asked for is the ability to edit, and split view
+			// already grants it — the editor is on screen. With no selection
+			// there is no fragment to travel to either, so every remaining
+			// reading of the chord is a LAYOUT change nobody asked for: closing
+			// the preview on a mistyped ⌘E costs the reader the pane and a
+			// second keystroke to get it back, while doing nothing costs
+			// nothing. ⌘\ opens and closes the split, and stays the only way.
+			return;
+		}
+
+		// Reading, or split with something selected — identical to the context
+		// menu's "Edit". In split view the editor is already on screen, so
+		// `editSourceRange` skips the toggle and only jumps, which is what
+		// gives the highlight there too.
+		await editSourceRange(selected);
+	}
+
 	async function editSourceRange(range: LineRange | null) {
-		if (!isEditing) await toggleEdit({ revealSelection: false });
+		if (!isEditing) await toggleEdit();
 		// `toggleEdit` swallows a failed read and stays in reading mode. Arming
 		// the jump anyway would fire it at whatever document is edited next.
 		if (range && tabManager.activeTab?.isEditing) pendingEditReveal = toBufferRange(range);
@@ -2598,7 +2624,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			// other pane" is not a request to write the file: whether a dirty
 			// tab is flushed is now decided by the user's auto-save setting
 			// alone, identically for the hotkey and the toolbar button.
-			if (!isSplit) toggleEdit();
+			//
+			toggleEditView();
 		}
 		if (cmdOrCtrl && e.shiftKey && !e.altKey && key === 's') {
 			// Save As. The app menu advertised this chord for as long as the menu has
@@ -3260,7 +3287,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
-		ontoggleEdit={() => toggleEdit()}
+		ontoggleEdit={() => toggleEditView()}
 		ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 		{isEditing}
 		ondetach={handleDetach}
@@ -3300,7 +3327,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
-		ontoggleEdit={() => toggleEdit()}
+		ontoggleEdit={() => toggleEditView()}
 		ontoggleEditorToolbar={() => settings.toggleEditorToolbar()}
 		ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 		{isEditing}
@@ -3387,7 +3414,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 								onopen={selectFile}
 								onclose={closeFile}
 								onreveal={openFileLocation}
-								ontoggleEdit={() => toggleEdit()}
+								ontoggleEdit={() => toggleEditView()}
 								ontoggleLive={toggleLiveMode}
 								ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 								onhome={() => (showHome = true)}
