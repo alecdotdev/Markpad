@@ -1,0 +1,106 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { readSource } from './sourceTree.js';
+
+import { isTocOverPreview, isTocOverhanging } from '../src/lib/utils/tocOverlay.ts';
+
+const DEFAULTS = {
+	// TOC_WIDTH_RANGE.default and DEFAULT_PREVIEW_MAX_WIDTH.
+	tocWidth: 240,
+	previewContentWidth: 880 as number | null,
+	isFullWidth: false,
+};
+
+const reading = { isEditing: false, isSplit: false } as const;
+const editingOnly = { isEditing: true, isSplit: false } as const;
+const split = { isEditing: true, isSplit: true } as const;
+
+test('the pane under the outline follows from the panes that are rendered', () => {
+	// The editor is always the first child, so it owns the left edge whenever
+	// it is on screen.
+	assert.equal(isTocOverPreview({ ...reading, tocSide: 'left' }), true);
+	assert.equal(isTocOverPreview({ ...reading, tocSide: 'right' }), true);
+
+	assert.equal(isTocOverPreview({ ...split, tocSide: 'left' }), false);
+	assert.equal(isTocOverPreview({ ...split, tocSide: 'right' }), true);
+
+	// The viewer pane is `flex: 0` here — neither side lands on the preview.
+	assert.equal(isTocOverPreview({ ...editingOnly, tocSide: 'left' }), false);
+	assert.equal(isTocOverPreview({ ...editingOnly, tocSide: 'right' }), false);
+});
+
+test('in reading mode the gutter decides, and the default one is not wide enough', () => {
+	const at = (viewerWidth: number) =>
+		isTocOverhanging({ ...DEFAULTS, ...reading, tocSide: 'left', viewerWidth });
+
+	// 240 > (W - 880) / 2  ⟺  W < 1360. This is the finding in #176: the
+	// unpinned outline covers the text in any window narrower than that, which
+	// is most of them.
+	assert.equal(at(1359), true);
+	assert.equal(at(1360), false);
+	assert.equal(at(1600), false);
+	assert.equal(at(1200), true);
+});
+
+test('a full-width preview has no gutter at all', () => {
+	assert.equal(
+		isTocOverhanging({
+			...DEFAULTS,
+			...reading,
+			tocSide: 'left',
+			isFullWidth: true,
+			previewContentWidth: null,
+			viewerWidth: 3000,
+		}),
+		true,
+	);
+});
+
+test('covering the editor always counts, however wide the window is', () => {
+	// The regression #176 turns on: `viewerWidth` is 0 while the viewer pane is
+	// collapsed, so the old expression fell through to "no overlap" and the
+	// panel sat on the code with no shadow to say so.
+	assert.equal(
+		isTocOverhanging({ ...DEFAULTS, ...editingOnly, tocSide: 'left', viewerWidth: 0 }),
+		true,
+	);
+	assert.equal(
+		isTocOverhanging({ ...DEFAULTS, ...editingOnly, tocSide: 'right', viewerWidth: 0 }),
+		true,
+	);
+	// Split view is the same defect wearing a different hat: the outline is over
+	// the editor, but the measurement was taken from the preview.
+	assert.equal(
+		isTocOverhanging({ ...DEFAULTS, ...split, tocSide: 'left', viewerWidth: 2000 }),
+		true,
+	);
+	// The right-hand side in split view really is over the preview, so it goes
+	// back to arithmetic.
+	assert.equal(
+		isTocOverhanging({ ...DEFAULTS, ...split, tocSide: 'right', viewerWidth: 2000 }),
+		false,
+	);
+});
+
+test('a narrow preview keeps the floor at 50px rather than going negative', () => {
+	// (600 - 880) / 2 is negative; without the floor any outline would count as
+	// overhanging, including one narrower than the panel it is compared with.
+	assert.equal(
+		isTocOverhanging({ ...DEFAULTS, ...reading, tocSide: 'left', viewerWidth: 600, tocWidth: 40 }),
+		false,
+	);
+	assert.equal(
+		isTocOverhanging({ ...DEFAULTS, ...reading, tocSide: 'left', viewerWidth: 600, tocWidth: 60 }),
+		true,
+	);
+});
+
+test('the outline collapses itself only when it is in the way', () => {
+	const viewer = readSource('src/lib/MarkdownViewer.svelte');
+	// Both auto-collapse paths are gated on the same predicate, so a window wide
+	// enough to hold the outline beside the text keeps the old behaviour.
+	assert.match(viewer, /isOverhanging && !settings\.pinnedToc/);
+	// Click-outside must not fight the toggle button, which owns its own click.
+	assert.match(viewer, /tocToggleEl\?\.contains\(target\)/);
+});
