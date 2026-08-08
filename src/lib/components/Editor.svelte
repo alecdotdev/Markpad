@@ -426,6 +426,21 @@
 			// to splitting on whitespace. An unsupported tag is dropped by
 			// Monaco's own `validate()`, so this cannot fail closed.
 			wordSegmenterLocales: ['zh', 'ja'],
+			// Markpad draws the editor's context menu itself, in
+			// MarkdownViewer.svelte, beside the one the preview already had.
+			//
+			// Not a style choice. Monaco's menu offers Cut, Copy and Paste, and
+			// its Paste cannot work here: it reads the clipboard through the
+			// webview, which wry leaves switched off and which Tauri has no
+			// answer for (tauri-apps/tauri#12007). Everything else Monaco would
+			// contribute to that menu — Go to Definition, Go to References,
+			// inlay hints — needs a language provider this app does not
+			// register, so nothing is lost by drawing our own.
+			//
+			// #266 fixed the overlay that used to cover this menu, which was
+			// the right fix for that bug and left the reader pointed at a menu
+			// whose Paste silently did nothing (#207).
+			contextmenu: false,
 			// The same argument one option over. U+2028 (LINE SEPARATOR) and
 			// U+2029 (PARAGRAPH SEPARATOR) break a JavaScript string literal,
 			// which is what Monaco's guard is for; in Markdown they are just
@@ -669,153 +684,17 @@
 			},
 		);
 
+		// ⌘X. Monaco leaves all three of these keys unbound in a browser
+		// ("Do not bind cut keybindings in the browser, since browsers do that
+		// for us" — clipboard.js), so the slots are free and binding them is
+		// what makes the keyboard and the context menu run the same code.
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyX, cutToClipboard, "editorTextFocus");
+
 		// clipboard handling: Ctrl+C is a localized action (see
-		// `registerLocalizedActions`); Ctrl+V is a plain command with no label,
-		// so it has nothing to re-register on a language change.
-		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, async () => {
-			try {
-				// check for image in clipboard via Rust
-				const base64Image = await invoke("clipboard_read_image", { macosImageScaling: settings.macosImageScaling }).catch(() => null) as string | null;
-				if (base64Image && tabManager.activeTab?.path) {
-					const ext = "png"; // output of Rust command is always PNG
-					const filename = `paste_${Date.now()}.${ext}`;
-
-					const tabPath = tabManager.activeTab.path;
-					const dirMatch = tabPath.match(/^(.*)[/\\][^/\\]+$/);
-					if (dirMatch) {
-						const parentDir = dirMatch[1];
-						const imgDirName = settings.imageDirectory || "img";
-						const relPath = (await invoke("save_image", {
-							parentDir,
-							filename,
-							base64Data: base64Image,
-							imageDirectory: imgDirName,
-						})) as string;
-						// Remove leading slash if imageDirectory was empty, to ensure relative path
-						const escapedPath = relPath.replace(/ /g, "%20").replace(/^\//, "");
-						const embed = `![alt](${escapedPath})`;
-
-						const position = editor.getPosition();
-						if (position) {
-							const selection = editor.getSelection();
-							const range =
-								selection && !selection.isEmpty()
-									? selection
-									: new monaco.Range(
-											position.lineNumber,
-											position.column,
-											position.lineNumber,
-											position.column,
-										);
-
-							editor.executeEdits("paste-image", [
-								{
-									range,
-									text: embed,
-									forceMoveMarkers: true,
-								},
-							]);
-
-							return;
-						}
-					}
-				}
-
-				// fall through to text paste via Rust
-				const rawText = await invoke("clipboard_read_text").catch(() => "") as string;
-				if (!rawText) return;
-				
-				const text = rawText.trim();
-				const urlRegex = /^(?:(?:https?|file|tauri):\/\/|www\.)[^\s]{2,}$/i;
-				const isUrl = urlRegex.test(text);
-
-				const selections = editor.getSelections();
-				const model = editor.getModel();
-				if (!selections || selections.length === 0 || !model) {
-					insertTextAtCursor(rawText);
-					return;
-				}
-
-				// if it's not a URL or we have no multi-line selection/complex case, just insert
-				const hasSelection = selections.some((s) => !s.isEmpty());
-				const isMultiLine = selections.some((s) => s.startLineNumber !== s.endLineNumber);
-
-				if (!isUrl || isMultiLine || !isLinkifyPasteTarget(model, selections[0])) {
-					const edits = selections.map(s => ({
-						range: s,
-						text: rawText,
-						forceMoveMarkers: true
-					}));
-					editor.executeEdits("paste-text", edits);
-					return;
-				}
-
-				if (hasSelection) {
-					const edits = selections.map((selection) => {
-						const selectedText = model.getValueInRange(selection);
-						// Pasting a URL over a URL replaces it. Wrapping would
-						// nest the old URL as the link text — and inside
-						// existing link syntax like ![](url) it produces
-						// broken nesting: ![]([old](new)).
-						if (urlRegex.test(selectedText.trim())) {
-							return {
-								range: selection,
-								text,
-								forceMoveMarkers: true,
-							};
-						}
-						const linkUrl = text.toLowerCase().startsWith("www.")
-							? `http://${text}`
-							: text;
-						return {
-							range: selection,
-							text: `[${selectedText}](${linkUrl})`,
-							forceMoveMarkers: true,
-						};
-					});
-					editor.executeEdits("paste-link", edits);
-				} else {
-					const displayText = text.replace(
-						/^(?:https?|file|tauri):\/\/|www\./i,
-						"",
-					);
-					const linkUrl = text.toLowerCase().startsWith("www.")
-						? `http://${text}`
-						: text;
-					const template = `[${displayText}](${linkUrl})`;
-					const edits = selections.map((selection) => {
-						return {
-							range: selection,
-							text: template,
-							forceMoveMarkers: true,
-						};
-					});
-
-					editor.executeEdits("paste-link", edits);
-
-					let accumulatedShift = 0;
-					let lastLine = -1;
-					const newSelections = selections.map((s) => {
-						if (s.startLineNumber !== lastLine) {
-							accumulatedShift = 0;
-							lastLine = s.startLineNumber;
-						}
-						const startColumn = s.startColumn + accumulatedShift + 1;
-						const endColumn = startColumn + displayText.length;
-						accumulatedShift += template.length;
-						return new monaco.Selection(
-							s.startLineNumber,
-							startColumn,
-							s.startLineNumber,
-							endColumn,
-						);
-					});
-					editor.setSelections(newSelections);
-				}
-			} catch (err) {
-				console.error("Paste failed:", err);
-			}
-		}, "editorTextFocus");
+		// `registerLocalizedActions`) so its label can follow the UI language;
+		// Ctrl+V is a plain command with no label, so it has nothing to
+		// re-register on a language change.
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, pasteFromClipboard, "editorTextFocus");
 
 		editorReady = true;
 
@@ -1016,29 +895,14 @@
 			: monaco.KeyMod.CtrlCmd;
 
 		localizedActions = [
-			// Replaces Monaco's native copy so the text goes through the Rust
-			// clipboard command.
+			// ⌘C. Keeps its label so the command palette can show it
+			// translated; the work itself is the shared function.
 			editor.addAction({
 				id: "custom-copy",
 				label: t('menu.copy', lang),
 				keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC],
 				keybindingContext: "editorTextFocus",
-				run: async (ed) => {
-					const selection = ed.getSelection();
-					if (!selection) return;
-					const model = ed.getModel();
-					if (!model) return;
-					// This action replaces Monaco's native copy, so it has to carry
-					// Monaco's own `emptySelectionClipboard` default (also VS Code's and
-					// Sublime Text's): with nothing selected, copy the whole current
-					// line including its line ending.
-					const text = selection.isEmpty()
-						? model.getLineContent(selection.startLineNumber) + model.getEOL()
-						: model.getValueInRange(selection);
-					if (text) {
-						await invoke("clipboard_write_text", { text }).catch(console.error);
-					}
-				},
+				run: copyToClipboard,
 			}),
 
 			editor.addAction({
@@ -1466,6 +1330,210 @@
 		const line = getLineAtVerticalOffset(editor.getScrollTop(), model.getLineCount(), getEditorLineTop);
 
 		return Number.isFinite(line) ? { ...position, line } : position;
+	}
+
+	/**
+	 * Cut, copy and paste — one implementation each, reached from the keyboard
+	 * and from the context menu alike.
+	 *
+	 * All three go through Rust (`arboard`) rather than through the webview's
+	 * `navigator.clipboard`, which is the only thing that works everywhere:
+	 * wry leaves the webview's clipboard permission off by default, and turning
+	 * it on does not help — tauri-apps/tauri#12007 is open on exactly this, and
+	 * the official answer is the clipboard plugin, which is the same Rust route
+	 * Markpad already had for ⌘V. Verified by hand on Windows: with the wry
+	 * permission enabled, the webview's own paste still does nothing.
+	 *
+	 * Six entry points, three functions. Before this there were six
+	 * implementations: ⌘X was the browser's, ⌘C and ⌘V were ours, and the three
+	 * menu items were Monaco's — of which Paste could not work in a webview at
+	 * all (#207) and Cut and Copy are dead on Linux, where the same wry default
+	 * gates `set_javascript_can_access_clipboard`.
+	 */
+	function clipboardTextForSelection(): { text: string; range: Monaco.Range | null } {
+		const selection = editor?.getSelection();
+		const model = editor?.getModel();
+		if (!selection || !model) return { text: '', range: null };
+
+		if (!selection.isEmpty()) {
+			return { text: model.getValueInRange(selection), range: selection };
+		}
+
+		// Nothing selected copies the whole line, line ending included —
+		// Monaco's `emptySelectionClipboard` default, and VS Code's and Sublime
+		// Text's. Kept because it is what this editor has always done; whether
+		// an app that calls itself the Notepad equivalent should do it at all
+		// is a separate question (#393).
+		const line = selection.startLineNumber;
+		const lastLine = model.getLineCount();
+		return {
+			text: model.getLineContent(line) + model.getEOL(),
+			// Cutting that line has to take its line ending with it, so the
+			// range runs to the start of the next one. The last line has no
+			// next, and the range stops at its end.
+			range:
+				line < lastLine
+					? new monaco.Range(line, 1, line + 1, 1)
+					: new monaco.Range(line, 1, line, model.getLineMaxColumn(line)),
+		};
+	}
+
+	export async function pasteFromClipboard() {
+			try {
+				// check for image in clipboard via Rust
+				const base64Image = await invoke("clipboard_read_image", { macosImageScaling: settings.macosImageScaling }).catch(() => null) as string | null;
+				if (base64Image && tabManager.activeTab?.path) {
+					const ext = "png"; // output of Rust command is always PNG
+					const filename = `paste_${Date.now()}.${ext}`;
+
+					const tabPath = tabManager.activeTab.path;
+					const dirMatch = tabPath.match(/^(.*)[/\\][^/\\]+$/);
+					if (dirMatch) {
+						const parentDir = dirMatch[1];
+						const imgDirName = settings.imageDirectory || "img";
+						const relPath = (await invoke("save_image", {
+							parentDir,
+							filename,
+							base64Data: base64Image,
+							imageDirectory: imgDirName,
+						})) as string;
+						// Remove leading slash if imageDirectory was empty, to ensure relative path
+						const escapedPath = relPath.replace(/ /g, "%20").replace(/^\//, "");
+						const embed = `![alt](${escapedPath})`;
+
+						const position = editor.getPosition();
+						if (position) {
+							const selection = editor.getSelection();
+							const range =
+								selection && !selection.isEmpty()
+									? selection
+									: new monaco.Range(
+											position.lineNumber,
+											position.column,
+											position.lineNumber,
+											position.column,
+										);
+
+							editor.executeEdits("paste-image", [
+								{
+									range,
+									text: embed,
+									forceMoveMarkers: true,
+								},
+							]);
+
+							return;
+						}
+					}
+				}
+
+				// fall through to text paste via Rust
+				const rawText = await invoke("clipboard_read_text").catch(() => "") as string;
+				if (!rawText) return;
+				
+				const text = rawText.trim();
+				const urlRegex = /^(?:(?:https?|file|tauri):\/\/|www\.)[^\s]{2,}$/i;
+				const isUrl = urlRegex.test(text);
+
+				const selections = editor.getSelections();
+				const model = editor.getModel();
+				if (!selections || selections.length === 0 || !model) {
+					insertTextAtCursor(rawText);
+					return;
+				}
+
+				// if it's not a URL or we have no multi-line selection/complex case, just insert
+				const hasSelection = selections.some((s) => !s.isEmpty());
+				const isMultiLine = selections.some((s) => s.startLineNumber !== s.endLineNumber);
+
+				if (!isUrl || isMultiLine || !isLinkifyPasteTarget(model, selections[0])) {
+					const edits = selections.map(s => ({
+						range: s,
+						text: rawText,
+						forceMoveMarkers: true
+					}));
+					editor.executeEdits("paste-text", edits);
+					return;
+				}
+
+				if (hasSelection) {
+					const edits = selections.map((selection) => {
+						const selectedText = model.getValueInRange(selection);
+						// Pasting a URL over a URL replaces it. Wrapping would
+						// nest the old URL as the link text — and inside
+						// existing link syntax like ![](url) it produces
+						// broken nesting: ![]([old](new)).
+						if (urlRegex.test(selectedText.trim())) {
+							return {
+								range: selection,
+								text,
+								forceMoveMarkers: true,
+							};
+						}
+						const linkUrl = text.toLowerCase().startsWith("www.")
+							? `http://${text}`
+							: text;
+						return {
+							range: selection,
+							text: `[${selectedText}](${linkUrl})`,
+							forceMoveMarkers: true,
+						};
+					});
+					editor.executeEdits("paste-link", edits);
+				} else {
+					const displayText = text.replace(
+						/^(?:https?|file|tauri):\/\/|www\./i,
+						"",
+					);
+					const linkUrl = text.toLowerCase().startsWith("www.")
+						? `http://${text}`
+						: text;
+					const template = `[${displayText}](${linkUrl})`;
+					const edits = selections.map((selection) => {
+						return {
+							range: selection,
+							text: template,
+							forceMoveMarkers: true,
+						};
+					});
+
+					editor.executeEdits("paste-link", edits);
+
+					let accumulatedShift = 0;
+					let lastLine = -1;
+					const newSelections = selections.map((s) => {
+						if (s.startLineNumber !== lastLine) {
+							accumulatedShift = 0;
+							lastLine = s.startLineNumber;
+						}
+						const startColumn = s.startColumn + accumulatedShift + 1;
+						const endColumn = startColumn + displayText.length;
+						accumulatedShift += template.length;
+						return new monaco.Selection(
+							s.startLineNumber,
+							startColumn,
+							s.startLineNumber,
+							endColumn,
+						);
+					});
+					editor.setSelections(newSelections);
+				}
+			} catch (err) {
+				console.error("Paste failed:", err);
+			}
+	}
+
+	export async function copyToClipboard() {
+		const { text } = clipboardTextForSelection();
+		if (text) await invoke('clipboard_write_text', { text }).catch(console.error);
+	}
+
+	export async function cutToClipboard() {
+		const { text, range } = clipboardTextForSelection();
+		if (!text || !range || !editor) return;
+		await invoke('clipboard_write_text', { text }).catch(console.error);
+		editor.executeEdits('cut', [{ range, text: '', forceMoveMarkers: true }]);
+		editor.focus();
 	}
 
 	export function syncScrollToPosition(position: ScrollSyncPosition) {

@@ -150,6 +150,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		revealHeader: (sourceLine: number | null, text: string) => void;
 		revealSourceRange: (startLine: number, endLine: number) => void;
 		triggerFind: () => void;
+		// The three the editor's context menu runs, which are the three its
+		// keyboard shortcuts run (#207).
+		cutToClipboard: () => Promise<void>;
+		copyToClipboard: () => Promise<void>;
+		pasteFromClipboard: () => Promise<void>;
 	} | null>(null);
 	let liveMode = $state(false);
 
@@ -2304,11 +2309,45 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	}
 
+	/**
+	 * Cut, Copy and Paste for the editor pane.
+	 *
+	 * Markpad draws this rather than letting Monaco draw its own, because
+	 * Monaco's Paste reads the clipboard through the webview and cannot work
+	 * here (#207) — see `contextmenu: false` in Editor.svelte for the whole of
+	 * that reasoning. Each item runs the same function its keyboard shortcut
+	 * runs, so there is one implementation per operation rather than one per
+	 * entry point.
+	 *
+	 * Cut and Copy are always enabled: with nothing selected they take the
+	 * current line, which is what ⌘X and ⌘C already do here.
+	 */
+	function showEditorContextMenu(e: MouseEvent) {
+		if (!editorPane) return;
+		e.preventDefault();
+
+		docContextMenu = {
+			show: true,
+			x: e.clientX,
+			y: e.clientY,
+			items: [
+				{ label: t('menu.cut', uiLanguage), onClick: () => editorPane?.cutToClipboard() },
+				{ label: t('menu.copy', uiLanguage), onClick: () => editorPane?.copyToClipboard() },
+				{ label: t('menu.paste', uiLanguage), onClick: () => editorPane?.pasteFromClipboard() },
+			],
+		};
+	}
+
 	function handleContextMenu(e: MouseEvent) {
 		if (modalState.show) return;
 		if (mode !== 'app') return;
-		const isInsideEditor = (e.target as HTMLElement).closest('.editor-container');
-		if (isInsideEditor) return;
+		// The editor gets its own menu, and this branch has to come first:
+		// Monaco takes input through a hidden `<textarea>`, so the text-field
+		// carve-out below would otherwise claim every right-click in it.
+		if ((e.target as HTMLElement).closest('.editor-container')) {
+			showEditorContextMenu(e);
+			return;
+		}
 		// Text fields keep the webview's own editing menu (Cut/Copy/Paste);
 		// the document menu below is about the rendered preview and has no
 		// edit items, so swallowing the native one leaves no way to paste.

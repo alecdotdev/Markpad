@@ -83,13 +83,24 @@ const { lineEndingLabel } = await import('../src/lib/utils/tabModels.js');
 const EDITOR = 'src/lib/components/Editor.svelte';
 const source = readSource(EDITOR);
 
-/** The Ctrl+V callback — the one `editor.addCommand` that reads the clipboard image. */
+/**
+ * Everything a paste does — including the branch that reads a clipboard image.
+ *
+ * It was the body of the one `editor.addCommand` for ⌘V until the editor's
+ * context menu started running it too (#207), at which point it was named. The
+ * lookup is by name now, and the second assertion is what keeps that from
+ * being a downgrade: no inline paste may appear beside it, because two paste
+ * implementations would drift and only one of them would be tested here.
+ */
 const pasteCommandBody = (() => {
-	const bodies = callbackBodies(source, 'editor.addCommand').filter((body) =>
-		body.includes('clipboard_read_image'),
+	const body = functionSource(source, 'pasteFromClipboard');
+	assert.ok(body.includes('clipboard_read_image'), 'pasteFromClipboard no longer reads the clipboard image');
+	assert.equal(
+		callbackBodies(source, 'editor.addCommand').filter((b) => b.includes('clipboard_read_image')).length,
+		0,
+		'a second, inline paste implementation has appeared beside the named one',
 	);
-	assert.equal(bodies.length, 1, `expected exactly one editor.addCommand reading clipboard_read_image, found ${bodies.length}`);
-	return bodies[0];
+	return body;
 })();
 
 /**
@@ -250,9 +261,10 @@ const factorySource = ts.transpileModule(
 		const isLinkifyPasteTarget = () => false;
 
 		${functionSource(source, 'handleDroppedFile')}
+		${pasteCommandBody}
 
 		return {
-			paste: async () => ${pasteCommandBody},
+			paste: pasteFromClipboard,
 			drop: handleDroppedFile,
 			contentChange: [${contentChangeBodies.map((body) => `(e) => ${body}`).join(', ')}],
 		};
