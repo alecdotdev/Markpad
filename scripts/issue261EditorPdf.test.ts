@@ -42,6 +42,43 @@ test('the editor menu runs the same three functions the keyboard runs', () => {
 	}
 });
 
+test('the two Monaco entries this app can use survive drawing our own menu', () => {
+	// Drawing the menu ourselves means every item Monaco used to contribute is
+	// gone unless it is put back, and two of them work without a language
+	// provider — so they were there, and vanished, and were noticed only
+	// because someone went looking for them.
+	//
+	// The rest (Go to Symbol, Quick Fix, Refactor, Format, Rename) are gated on
+	// providers Markdown has none of and never appeared in this app.
+	const menu = functionSource(viewer, 'showEditorContextMenu');
+
+	assert.match(menu, /editor\.action\.quickCommand/, 'Command Palette');
+	assert.match(menu, /editor\.action\.changeAll/, 'Change All Occurrences');
+
+	// Through the app's own translations, which is a gain rather than parity:
+	// Monaco's menu is English whatever language the app is in.
+	assert.match(menu, /t\('menu\.commandPalette', uiLanguage\)/);
+	assert.match(menu, /t\('menu\.changeAllOccurrences', uiLanguage\)/);
+});
+
+test('every label the editor menu asks for exists in every language', () => {
+	// A missing key does not throw — `t()` falls back to English and then to
+	// the key itself, so a forgotten locale ships the string
+	// "menu.changeAllOccurrences" to the user.
+	const i18n = readSource('src/lib/utils/i18n.ts');
+	const locales = (i18n.match(/\n\s+menu: \{/g) ?? []).length;
+	assert.ok(locales >= 6, `expected at least six locales, found ${locales}`);
+
+	const menu = functionSource(viewer, 'showEditorContextMenu');
+	for (const key of [...menu.matchAll(/t\('menu\.(\w+)', uiLanguage\)/g)].map((m) => m[1])) {
+		assert.equal(
+			(i18n.match(new RegExp(`\\b${key}:`, 'g')) ?? []).length >= locales,
+			true,
+			`menu.${key} is missing from at least one language`,
+		);
+	}
+});
+
 test('print layout releases measured fold heights before text reflows', () => {
 	assert.match(
 		styles,

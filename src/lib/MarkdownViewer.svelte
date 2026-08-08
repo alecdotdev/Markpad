@@ -2334,6 +2334,23 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				{ label: t('menu.cut', uiLanguage), onClick: () => editorPane?.cutToClipboard() },
 				{ label: t('menu.copy', uiLanguage), onClick: () => editorPane?.copyToClipboard() },
 				{ label: t('menu.paste', uiLanguage), onClick: () => editorPane?.pasteFromClipboard() },
+				{ separator: true },
+				// The two Monaco put here that this app can actually use, and
+				// that drawing our own menu would otherwise have taken away.
+				// Everything else it contributes — Go to Symbol, Quick Fix,
+				// Format, Rename — needs a language provider Markdown has none
+				// of, and never appeared.
+				//
+				// Translated here, which they were not before: Monaco's menu is
+				// English whatever the app's language is.
+				{
+					label: t('menu.commandPalette', uiLanguage),
+					onClick: () => editorPane?.runEditorAction('editor.action.quickCommand'),
+				},
+				{
+					label: t('menu.changeAllOccurrences', uiLanguage),
+					onClick: () => editorPane?.runEditorAction('editor.action.changeAll'),
+				},
 			],
 		};
 	}
