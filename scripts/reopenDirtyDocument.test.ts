@@ -80,6 +80,7 @@ function makeSession() {
 		askClose: async () => 'discard' as const,
 		onCloseSaveNewerEdits: () => {},
 		onCloseAutoSaveFailed: () => {},
+		onPartialCopySaved: () => {},
 	});
 }
 

@@ -701,6 +701,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			}),
 		onCloseSaveNewerEdits: () => addToast(t('toast.savedNewerEdits', settings.language), 'info'),
 		onCloseAutoSaveFailed: () => addToast(t('toast.autoSaveFailed', settings.language), 'error'),
+		// Not an error: the copy is the way out of a partial buffer, and it was
+		// written. What the reader needs is to know where it stops.
+		onPartialCopySaved: () => addToast(t('toast.partialCopySaved', settings.language), 'info'),
 	});
 
 	async function discardPersistedWindowState() {

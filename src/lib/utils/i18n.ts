@@ -273,6 +273,8 @@ export const translations: Record<LanguageCode, Translation> = {
             openExportedFileFailed: 'Could not open exported file',
             partialDocument: 'Cannot edit yet — this file is not fully loaded',
             lossySaveBlocked: 'Not saved: parts of this file could not be read in any encoding and became "�" when it was opened. Saving would destroy the original — use "Save As" to write a copy',
+            partialSaveBlocked: 'Not saved: only part of this file has loaded, and saving would truncate it — use "Save As" to write a copy',
+            partialCopySaved: 'Copy saved, but it holds only the part of the document that had loaded',
             encodingUnmappable: 'Not saved: {{encoding}} cannot represent every character this document now contains (an emoji, most likely). Use "Save As" to write a copy as UTF-8',
             restoreInterrupted: 'Markpad did not finish restoring your session last time',
             restoreInterruptedDeferred: 'Markpad did not finish opening {path} last time, so it was skipped. Open it yourself to try again'
@@ -603,6 +605,8 @@ export const translations: Record<LanguageCode, Translation> = {
 			openExportedFileFailed: '无法打开导出的文件',
 			partialDocument: '暂时无法编辑 — 文件尚未完整加载',
 			lossySaveBlocked: '未保存：此文件的部分内容无法用任何编码读取，打开时已变成“�”。直接保存会破坏原文件 — 请用“另存为”写入新文件',
+			partialSaveBlocked: '未保存：此文件只加载了一部分，保存会将其截断 —— 请用“另存为”写一份副本',
+			partialCopySaved: '副本已保存，但其中只包含已加载的那部分文档',
 			encodingUnmappable: '未保存：{{encoding}} 无法表示文档中新增的部分字符（多半是表情符号）。请用“另存为”写入一份 UTF-8 副本'
         },
         externalChange: {
@@ -888,6 +892,8 @@ export const translations: Record<LanguageCode, Translation> = {
             autoSaveFailed: '自動保存に失敗しました — 未保存の変更はメモリ内に残っています',
             savedNewerEdits: '保存しました — 新しい編集があるため編集モードを継続します',
             lossySaveBlocked: '保存しませんでした：このファイルの一部はどの文字コードでも読めず、開いた時点で「�」に置き換わっています。上書き保存すると元のファイルが壊れます —「名前を付けて保存」で新しいファイルに書き出してください',
+            partialSaveBlocked: '保存しませんでした：このファイルは一部しか読み込まれておらず、上書き保存すると切り詰められます —「名前を付けて保存」で複製を書き出してください',
+            partialCopySaved: '複製を保存しましたが、読み込めていた範囲のみが含まれています',
             encodingUnmappable: '保存しませんでした：{{encoding}} ではこの文書に含まれる一部の文字（多くは絵文字）を表現できません。「名前を付けて保存」で UTF-8 の複製を作成してください'
         },
         modal: {
@@ -1181,6 +1187,8 @@ export const translations: Record<LanguageCode, Translation> = {
             openExportedFileFailed: '無法開啟匯出的檔案',
             partialDocument: '尚無法編輯 — 此檔案尚未完全讀取',
             lossySaveBlocked: '未儲存：此檔案的部分內容無法用任何編碼讀取，開啟時已變成「�」。直接儲存會破壞原檔案 — 請用「另存新檔」寫入新檔案',
+            partialSaveBlocked: '未儲存：此檔案只讀取了一部分，儲存會將其截斷 —— 請用「另存新檔」寫一份副本',
+            partialCopySaved: '副本已儲存，但其中只包含已讀取的那部分文件',
             encodingUnmappable: '未儲存：{{encoding}} 無法表示此文件新增的部分字元（多半是表情符號）。請用「另存新檔」寫入一份 UTF-8 複本'
         },
         externalChange: {
@@ -1496,6 +1504,8 @@ export const translations: Record<LanguageCode, Translation> = {
             savedNewerEdits: '저장됨 — 새로운 편집이 있어 편집 모드를 유지합니다',
             openExportedFileFailed: '내보낸 파일을 열 수 없습니다',
             lossySaveBlocked: '저장하지 않음: 이 파일의 일부는 어떤 인코딩으로도 읽을 수 없어 열 때 "�"로 바뀌었습니다. 덮어쓰면 원본이 손상됩니다 — "다른 이름으로 저장"으로 새 파일에 저장하세요',
+            partialSaveBlocked: '저장하지 않음: 이 파일은 일부만 불러왔으며, 저장하면 잘려나갑니다 — "다른 이름으로 저장"으로 사본을 만드세요',
+            partialCopySaved: '사본을 저장했지만, 불러온 부분만 담겨 있습니다',
             encodingUnmappable: '저장하지 않음: {{encoding}}(으)로는 이 문서에 포함된 일부 문자(대개 이모지)를 표현할 수 없습니다. "다른 이름으로 저장"으로 UTF-8 사본을 만드세요'
         },
         modal: {
@@ -1775,6 +1785,8 @@ export const translations: Record<LanguageCode, Translation> = {
             autoSaveFailed: 'Автосохранение не удалось — несохранённые правки остались только в памяти',
             savedNewerEdits: 'Сохранено — остаюсь в режиме редактирования, так как есть более новые правки',
             lossySaveBlocked: 'Не сохранено: часть содержимого файла не читается ни в одной кодировке и при открытии стала «�». Сохранение уничтожит оригинал — используйте «Сохранить как» для записи копии',
+            partialSaveBlocked: 'Не сохранено: загружена только часть файла, сохранение обрежет его — используйте «Сохранить как» для создания копии',
+            partialCopySaved: 'Копия сохранена, но содержит только загруженную часть документа',
             encodingUnmappable: 'Не сохранено: кодировка {{encoding}} не может представить некоторые символы этого документа (скорее всего, эмодзи). Используйте «Сохранить как», чтобы записать копию в UTF-8'
         },
         modal: {

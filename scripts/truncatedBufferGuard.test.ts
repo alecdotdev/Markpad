@@ -49,6 +49,8 @@ const { createDocumentSession } = await import('../src/lib/sessions/documentSess
 const viewer = readSource(new URL('../src/lib/MarkdownViewer.svelte', import.meta.url));
 
 const errors: string[] = [];
+/** Non-failure notices the session raised, in order. */
+const notices: string[] = [];
 /** What the close dialog answers next. Set per test. */
 let closeAnswer: 'save' | 'discard' | 'cancel' = 'discard';
 
@@ -71,6 +73,7 @@ function makeSession() {
 		askClose: async () => closeAnswer,
 		onCloseSaveNewerEdits: () => {},
 		onCloseAutoSaveFailed: () => {},
+		onPartialCopySaved: () => notices.push('partialCopySaved'),
 	});
 }
 
@@ -78,6 +81,7 @@ function reset() {
 	tabManager.closeAll();
 	invokeCalls = [];
 	errors.length = 0;
+	notices.length = 0;
 	closeAnswer = 'discard';
 }
 
@@ -362,23 +366,49 @@ test('a task checkbox is not toggled into a partial buffer that already carries 
 	assert.equal(tab.rawContent, edited, 'and the edits it carries must not be traded for the file’s tail');
 });
 
-test('Save As refuses to copy a partially loaded document', async () => {
-	// The copy would be silently short, and it is a NEW file — nothing about it
-	// says it is missing everything past 50KB. The guard sits before the dialog,
-	// so the user is not asked where to put a document that is not going to be
-	// written.
+test('Save As completes the buffer first, so the copy is whole when it can be', async () => {
+	// Reaching for Save As is not a reason to write less than the document. The
+	// tail is readable and the buffer is clean, so there is nothing stopping this
+	// copy from being the whole file — and nothing to warn about.
 	reset();
-	const { session } = await openPartial();
+	const { session, tab } = await openPartial();
+	handleInvoke = (cmd) => {
+		if (cmd === 'read_file_content_checked') return [FULL, false, 'UTF-8'];
+		if (cmd === 'save_file_content') return null;
+		if (cmd === 'canonicalize_path') return '/docs/copy.md';
+		if (cmd === 'plugin:dialog|save') return '/docs/copy.md';
+		throw new Error(`unexpected invoke: ${cmd}`);
+	};
+
+	assert.equal(await session.saveContentAs(), true);
+	assert.equal(invokeCalls.find((call) => call.cmd === 'save_file_content')?.args.content, FULL);
+	assert.deepEqual(notices, [], 'a whole copy is not worth a warning');
+	assert.notEqual(tab.isTruncated, true);
+});
+
+test('Save As is the way out of a partial buffer that carries edits', async () => {
+	// The one write a partial buffer may make. A copy is a NEW file at a path the
+	// user chose, so it destroys nothing they had — and refusing it too left the
+	// edits below with no exit at all, which is a worse answer than a short copy
+	// the user is told about. `refuseIfLossilyDecoded` has always reasoned this
+	// way, and this is the same trade.
+	reset();
+	const { session, tab } = await openPartial();
+	const edited = `${PARTIAL}edited`;
+	tabManager.updateTabRawContent(tab.id, edited);
+	// Completing the buffer is not on the table here: the tail is gone, and even
+	// if it were readable, reading it would discard the edits this is rescuing.
 	makeTailUnreadable();
 
-	assert.equal(await session.saveContentAs(), false, 'Save As must report failure rather than write a short copy');
-	assert.equal(wroteToDisk(), false, 'an incomplete copy must never be written');
-	assert.equal(
-		invokeCalls.some((call) => call.cmd.endsWith('dialog|save')),
-		false,
-		'and the Save As dialog is not opened for a write that cannot happen',
-	);
-	assert.deepEqual(errors, ['Refusing to save a partially loaded document']);
+	assert.equal(await session.saveContentAs(), true, 'the rescue must be allowed to happen');
+	assert.equal(invokeCalls.find((call) => call.cmd === 'save_file_content')?.args.content, edited);
+	assert.deepEqual(notices, ['partialCopySaved'], 'and the reader is told where the copy stops');
+	assert.deepEqual(errors, [], 'it is not a failure');
+	// The flag described the file the tab used to point at. It now points at the
+	// copy and holds all of it, so leaving the flag on would free the text and
+	// then trap it again — every later save refused, from a whole document.
+	assert.notEqual(tab.isTruncated, true);
+	assert.equal(await session.saveContent(tab.id), true, 'and the tab saves normally from here on');
 });
 
 test('answering “Save” to the close dialog cannot flush a partial buffer', async () => {

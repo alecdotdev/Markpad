@@ -55,6 +55,12 @@ type DocumentSessionOptions = {
 	askClose: (title: string) => Promise<'save' | 'discard' | 'cancel'>;
 	onCloseSaveNewerEdits: () => void;
 	onCloseAutoSaveFailed: () => void;
+	/**
+	 * A Save As wrote a copy that stops where the load did. Not a failure — the
+	 * copy is the way out of a partial buffer — but the reader has to be told
+	 * what is in the file they just made.
+	 */
+	onPartialCopySaved: () => void;
 };
 
 /**
@@ -577,7 +583,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		// a large file completes its buffer first. If one is ever missed, the
 		// write must fail loudly rather than silently truncate the document.
 		if (tab.isTruncated) {
-			options.onError('Refusing to save a partially loaded document', new Error(tab.path));
+			options.onError(t('toast.partialSaveBlocked', settings.language), tab.path);
 			return false;
 		}
 		let targetPath = tab.path;
@@ -645,11 +651,21 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	async function saveContentAs(): Promise<boolean> {
 		const tab = tabManager.activeTab;
 		if (!tab) return false;
-		// A partial buffer would produce a silently incomplete copy.
-		if (tab.isTruncated) {
-			options.onError('Refusing to save a partially loaded document', new Error(tab.path));
-			return false;
-		}
+		// A copy is a NEW file at a path the user chose, so unlike the ordinary
+		// save it cannot destroy anything they already have. That is what makes
+		// it the one write a partial buffer may make — and refusing it too, as
+		// this did, left a buffer that could go nowhere: not over the original,
+		// correctly, and not beside it either, so edits made in that state had
+		// no exit but the clipboard. The lossy-decode guard reasons the same way
+		// and has always pointed at Save As for the same reason.
+		//
+		// Completed first where that is possible, so the copy is whole whenever
+		// it can be. `ensureFullContent` declines on a dirty buffer — reading the
+		// file over unsaved edits would discard the very thing this rescue is
+		// for — and that is exactly the case where the copy really is short, so
+		// the user is told once it is written.
+		if (tab.isTruncated) await ensureFullContent(tab.id);
+		const copyIsPartial = tab.isTruncated === true;
 		const selected = await save({
 			filters: [
 				{ name: 'Markdown', extensions: ['md'] },
@@ -687,9 +703,22 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				tabManager.setTabDecodedLossy(tab.id, false);
 				tabManager.setTabEncoding(tab.id, 'UTF-8');
 				lossySaveWarnedTabs.delete(tab.id);
+				// And the same for the truncation flag, for the same reason: it
+				// described the file this tab used to point at. Whatever the buffer
+				// was a slice OF, it is the whole of what was just written, and the
+				// tab now points at that. Leaving it on would refuse every save from
+				// a tab holding a complete document — the rescue would free the text
+				// and then trap it again. Assigned rather than going through
+				// `setTabRawContent`, which would also reset the baseline the two
+				// lines below set on purpose.
+				tab.isTruncated = false;
 				options.saveRecentFile(selected);
 				tab.originalContent = snapshot;
 				tab.isDirty = tab.rawContent !== snapshot;
+				// Said after the write rather than before the dialog: nothing is lost
+				// by proceeding, and a reader who came here to rescue unsaved text
+				// still has to know that what landed on disk stops where the load did.
+				if (copyIsPartial) options.onPartialCopySaved();
 				return true;
 			} catch (error) {
 				clearSelfWrite(selected);
