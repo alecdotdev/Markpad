@@ -390,6 +390,7 @@ function makeSession(askClose: (title: string) => Promise<'save' | 'discard' | '
 		askClose,
 		onCloseSaveNewerEdits: () => {},
 		onCloseAutoSaveFailed: () => {},
+		onPartialCopySaved: () => {},
 	});
 }
 
