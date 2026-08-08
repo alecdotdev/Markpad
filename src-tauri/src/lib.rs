@@ -336,12 +336,29 @@ struct DecodedText {
 ///    a browser must not do (it can smuggle script through an escape
 ///    sequence) and a text editor has no reason not to.
 ///
+/// Known gap: UTF-16 without a BOM. Step 1 misses it and `chardetng` does not
+/// look for it by design, so such a file reaches step 3 and is guessed at as a
+/// single-byte encoding — readable as nonsense, with every other byte a NUL.
+/// It round-trips (the guess is a total mapping, so a save reproduces it), and
+/// no BOM-less UTF-16 has been reported; naming it is cheaper than a detector
+/// that would have to weigh NUL frequency against genuinely binary input.
+///
 /// Before this, every read decoded as UTF-8 and substituted U+FFFD, so a
 /// legacy-encoded (GBK/Big5/Shift-JIS/CP-1252) document opened as mojibake
 /// that could not be saved. The detection is a heuristic and can be wrong;
 /// what protects the file is not the guess but `lossy` plus writing back
-/// through the same encoding, so bytes the guess reproduces exactly are
-/// unchanged and bytes it cannot are never written at all.
+/// through the same encoding, so the document's TEXT survives a save even
+/// when the guess is wrong, and a character the encoding cannot hold is
+/// never written at all.
+///
+/// Text, not bytes. Several legacy encodings spell one character more than
+/// one way — Shift_JIS reaches U+2160 at both 0x8754 (NEC) and 0xFA4A (IBM)
+/// — and a decode followed by an encode normalises to whichever the encoder
+/// prefers. Saving an untouched document written by a tool that chose the
+/// other spelling therefore rewrites those bytes, silently and losslessly.
+/// This is what every editor with one encoder per encoding does, VS Code
+/// included; it is worth knowing before reading `lossy` as a byte-level
+/// guarantee, which it is not.
 fn decode_text(bytes: &[u8]) -> DecodedText {
     let decoded = |encoding: &'static encoding_rs::Encoding, label: &str, body: &[u8]| {
         let (content, had_errors) = encoding.decode_without_bom_handling(body);
@@ -374,6 +391,16 @@ fn decode_text(bytes: &[u8]) -> DecodedText {
     let encoding = detector.guess(None, chardetng::Utf8Detection::Deny);
     decoded(encoding, encoding.name(), bytes)
 }
+
+/// What `encode_text` refuses with when the buffer holds a character the
+/// document's encoding has no representation for — an emoji pasted into a GBK
+/// file, say. Matched by `documentSession.saveContent`, which turns it into a
+/// translated toast.
+///
+/// A marker, carrying nothing. The label was in here at first and it was
+/// redundant: the frontend passed the encoding INTO this call, so it already
+/// knows which one refused.
+const UNMAPPABLE_CODE: &str = "ENCODING_UNMAPPABLE";
 
 /// Turn a buffer back into bytes in `label`'s encoding, or refuse.
 ///
@@ -423,9 +450,13 @@ fn encode_text(content: &str, label: &str) -> Result<Vec<u8>, String> {
                 .ok_or_else(|| format!("Unknown text encoding: {label}"))?;
             let (bytes, _, unmappable) = encoding.encode(content);
             if unmappable {
-                return Err(format!(
-                    "This document is {label}, which cannot represent every character it now contains. Use \"Save As\" to write it as UTF-8."
-                ));
+                // A marker, not a sentence. The frontend has to say this in
+                // the user's own language — its sibling refusal
+                // (`toast.lossySaveBlocked`, for a buffer nothing could
+                // decode) is translated six ways, and the reason a save was
+                // refused is the half of the message that has to be
+                // understood.
+                return Err(UNMAPPABLE_CODE.to_owned());
             }
             Ok(bytes.into_owned())
         }
@@ -3534,7 +3565,13 @@ mod tests {
     /// is the test that fails if anything ever routes a save through UTF-8
     /// again.
     #[test]
-    fn saving_an_unedited_legacy_document_reproduces_its_bytes_exactly() {
+    fn saving_an_unedited_legacy_document_reproduces_its_canonical_bytes() {
+        // CANONICAL, not "the bytes any tool would have written": the samples
+        // below are encoded by `encoding_rs` itself, so this pins the round
+        // trip for the spelling its encoder emits. Where a legacy encoding
+        // offers a second spelling of the same character (Shift_JIS's IBM
+        // extension, for one) a save normalises to this one. See the note on
+        // `decode_text` — the guarantee is over the text, not the bytes.
         for (encoding, text) in LEGACY_SAMPLES {
             let original = legacy_bytes(encoding, text);
             let decoded = decode_text(&original);
@@ -3627,10 +3664,16 @@ mod tests {
         // the character the user typed. Refusing leaves the buffer dirty and
         // sends the reason to a toast, which is how a read-only file behaves.
         let error = encode_text("hello 😀", "GBK").unwrap_err();
-        assert!(error.contains("GBK"), "unhelpful message: {error}");
-        assert!(error.contains("Save As"), "no way out offered: {error}");
+
+        // A code the frontend can match, carrying the label it has to name.
+        // The wording itself lives in `i18n.ts`, translated: the reason a save
+        // was refused is the half of the message that must be understood, and
+        // an English sentence from Rust is the half that would not be.
+        assert_eq!(error, "ENCODING_UNMAPPABLE");
 
         assert!(encode_text("hello 😀", UTF8_LABEL).is_ok());
+        // UTF-16 holds every character too, and takes the other branch.
+        assert!(encode_text("hello 😀", UTF16LE_LABEL).is_ok());
     }
 
     #[test]

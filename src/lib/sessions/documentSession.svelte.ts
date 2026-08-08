@@ -260,6 +260,51 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	 * `targetPath !== tab.path` stays as the cheap first test so the common
 	 * Ctrl+S case never consults anything further.
 	 */
+	/**
+	 * The prefix `encode_text` refuses with when the document's encoding has no
+	 * representation for something the buffer now holds — an emoji pasted into
+	 * a GBK file being the way most people will meet it.
+	 */
+	const UNMAPPABLE_CODE = 'ENCODING_UNMAPPABLE';
+
+	/**
+	 * A save failure, said in a way the user can act on, and what to show
+	 * beside it.
+	 *
+	 * The translation that matters here is not English-to-Chinese. It is
+	 * `ENCODING_UNMAPPABLE` — a fact about the program — turned into "this
+	 * document is GBK, GBK cannot hold that character, write a UTF-8 copy
+	 * instead": a fact about what the user should do next. That the result then
+	 * exists in six languages is the cheap half, and it rides on machinery the
+	 * app already has.
+	 *
+	 * Which is also the rule for what belongs here. A failure the user can act
+	 * on gets a code and a sentence this side writes. A failure they cannot —
+	 * the 91 places that hand back an OS error — keeps the OS's own words,
+	 * because those words are the whole of the information and the only string
+	 * worth searching for. "Permission denied (os error 13)", translated, is a
+	 * sentence nobody can look up.
+	 *
+	 * `onError` renders `${message}: ${detail}`, so `detail` is in front of the
+	 * user too: the document's path for a refusal we explained, the raw error
+	 * for one we did not. Returning the marker here printed it to the user,
+	 * which is the failure this shape exists to prevent.
+	 */
+	function describeSaveFailure(error: unknown, tab: Tab): { message: string; detail: unknown } {
+		if (!String(error).includes(UNMAPPABLE_CODE)) {
+			return { message: 'Failed to save file', detail: error };
+		}
+
+		// `tab.encoding` is what was handed to the command that just refused,
+		// so it is the encoding that could not hold the character. Rust used to
+		// send the label back and this read it off the error; the round trip
+		// was telling us something we had said ourselves a moment earlier.
+		return {
+			message: t('toast.encodingUnmappable', settings.language).replace('{{encoding}}', tab.encoding),
+			detail: tab.path,
+		};
+	}
+
 	function refuseIfLossilyDecoded(tab: Tab, targetPath: string, targetKey?: string): boolean {
 		if (!tab.hasReplacementChars || targetPath === '') return false;
 		if (targetPath !== tab.path && !isSameFilePath({ path: targetPath, pathKey: targetKey }, tab)) return false;
@@ -570,7 +615,8 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				return true;
 			} catch (error) {
 				clearSelfWrite(targetPath);
-				options.onError('Failed to save file', error);
+				const { message, detail } = describeSaveFailure(error, tab);
+				options.onError(message, detail);
 				return false;
 			}
 		});
@@ -627,7 +673,8 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				return true;
 			} catch (error) {
 				clearSelfWrite(selected);
-				options.onError('Failed to save file as', error);
+				const { message, detail } = describeSaveFailure(error, tab);
+				options.onError(message === 'Failed to save file' ? 'Failed to save file as' : message, detail);
 				return false;
 			}
 		});

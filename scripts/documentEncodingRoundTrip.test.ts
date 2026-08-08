@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { functionSource, readSource, sliceBetween } from './sourceTree.js';
+
 /*
  * #372: a document in a legacy encoding (GBK, Big5, Shift-JIS, CP-1252 …) is
  * detected and decoded on open, and a save writes it back as the SAME
@@ -189,4 +191,91 @@ test('a payload without an encoding is rejected rather than defaulted', async ()
 	void encoding;
 
 	assert.equal(validateTransferPayload(JSON.stringify(withoutEncoding)), null);
+});
+
+// ---------------------------------------------------------- the status bar
+//
+// Detection without an indicator is worse than no detection: a GBK document
+// now opens, reads correctly and saves back as GBK, and the slot that is
+// supposed to name the encoding was still rendering the literal `UTF-8` it
+// had rendered since before Markpad could open the file at all. The one place
+// the user could have caught a misdetection was asserting the opposite.
+//
+// This is the same defect #540 fixed one slot to the left, where the line
+// ending was hardcoded `CRLF`.
+
+test('the status bar names the encoding the document was decoded from', () => {
+	const editor = readSource('src/lib/components/Editor.svelte');
+	const statusBar = sliceBetween(editor, '<div class="status-bar">', '</div>\n{/if}');
+
+	assert.match(statusBar, /<div class="status-item">\{encoding\}<\/div>/, 'the slot shows the state');
+	assert.doesNotMatch(editor, /editor\.status\.utf8/, 'the hardcoded UTF-8 string is gone');
+
+	// Off the tab, not off Monaco: the encoding belongs to the file the buffer
+	// was decoded from, and the store is what carries it through a save.
+	assert.match(
+		editor,
+		/let encoding = \$derived\(tabManager\.activeTab\?\.encoding \?\? 'UTF-8'\)/,
+		'and it is read from the tab rather than kept as a synced copy',
+	);
+});
+
+test('no locale still translates a hardcoded UTF-8 label', () => {
+	// A dead key reads like a supported feature to whoever finds it next.
+	assert.doesNotMatch(readSource('src/lib/utils/i18n.ts'), /utf8:/);
+});
+
+// ------------------------------------------- saying why a save was refused
+//
+// Refusing is only half of it. The user pasted an emoji into a GBK document
+// and got "auto-save failed, unsaved changes still in memory" — true, and no
+// help at all: it names neither the character nor the encoding, and the way
+// out (Save As, which writes UTF-8) is not in it.
+//
+// Rust sends a code and this side owns the wording, so the reason a save was
+// refused reaches the user in the language the rest of the app is in. The
+// generic English `Failed to save file: <OS message>` stays for genuine I/O
+// failures, which the user cannot act on beyond reading the OS.
+
+test('the unmappable-character refusal crosses as a code, not as English prose', () => {
+	const rust = readSource('src-tauri/src/lib.rs');
+	assert.match(rust, /const UNMAPPABLE_CODE: &str = "ENCODING_UNMAPPABLE";/);
+	assert.match(rust, /return Err\(UNMAPPABLE_CODE\.to_owned\(\)\)/, 'a marker, carrying nothing');
+
+	// The sentence it replaced must not come back: a translated toast and an
+	// English one saying the same thing is worse than either alone.
+	assert.doesNotMatch(rust, /cannot represent every character it now contains/);
+});
+
+test('every locale can say which encoding refused the save', () => {
+	const i18n = readSource('src/lib/utils/i18n.ts');
+	const locales = i18n.match(/lossySaveBlocked:/g) ?? [];
+	const translated = i18n.match(/encodingUnmappable:/g) ?? [];
+
+	assert.ok(locales.length >= 5, 'precondition: the sibling refusal is translated');
+	assert.equal(translated.length, locales.length, 'both refusals reach the same languages');
+
+	// The encoding is named, not implied — "some characters cannot be saved"
+	// leaves the user with nothing to search for.
+	for (const line of i18n.split('\n').filter((l) => l.includes('encodingUnmappable:'))) {
+		assert.match(line, /\{\{encoding\}\}/, `no encoding placeholder: ${line.trim().slice(0, 60)}`);
+	}
+});
+
+test('the code is turned into the translation, and only that code is', () => {
+	const session = readSource('src/lib/sessions/documentSession.svelte.ts');
+	const describe = functionSource(session, 'describeSaveFailure');
+
+	assert.match(describe, /toast\.encodingUnmappable/);
+	assert.match(describe, /replace\('\{\{encoding\}\}', tab\.encoding\)/,
+		'the encoding comes off the tab, not back out of the error');
+	assert.match(describe, /return \{ message: 'Failed to save file', detail: error \}/,
+		'an I/O failure still reads as one, OS message and all');
+
+	// `onError` renders `${message}: ${detail}`, so returning the raw error as
+	// the detail printed the code the user was never meant to see:
+	//   …请用"另存为"写入一份 UTF-8 副本: ENCODING_UNMAPPABLE:GBK
+	// The translated branch sends the document's path instead, which is what
+	// `toast.lossySaveBlocked` has always done.
+	assert.match(describe, /detail: tab\.path,/, 'the marker never reaches the toast');
 });
