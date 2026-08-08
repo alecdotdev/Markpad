@@ -979,6 +979,7 @@ export const translations: Record<LanguageCode, Translation> = {
             appearance: '外觀',
             toolbars: '工具列',
             files: '檔案',
+            shortcuts: '快捷鍵',
             editorSettings: '編輯器設定',
             previewSettings: '預覽設定',
             appearanceSettings: '外觀設定',
@@ -1180,6 +1181,8 @@ export const translations: Record<LanguageCode, Translation> = {
             openExportedFileFailed: '無法開啟匯出的檔案',
             partialDocument: '尚無法編輯 — 此檔案尚未完全讀取',
             lossySaveBlocked: '未儲存：此檔案不是 UTF-8 編碼，開啟時部分內容已變成「�」。直接儲存會破壞原檔案 — 請用「另存新檔」寫入新檔案'
+            restoreInterrupted: 'Markpad 上次未成功還原您的工作階段',
+            restoreInterruptedDeferred: 'Markpad 上次未成功開啟 {path}，因此已將其跳過。請自行開啟以再試一次'
         },
         externalChange: {
             message: '當您有未儲存的變更時，此檔案在磁碟上已被修改。',
