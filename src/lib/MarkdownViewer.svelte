@@ -2371,6 +2371,40 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		};
 	}
 
+	/**
+	 * Every copy in this app puts plain text on the clipboard, and #548 gave the
+	 * editor one implementation for all six of its entry points. Two entry points
+	 * were left outside it, both reading a DOM selection rather than the editor's:
+	 * ⌘C in the preview, and Edit ▸ Copy in the menu bar (a
+	 * `PredefinedMenuItem::copy`, which asks the WEBVIEW to copy). Those two ended
+	 * up plain text as well, but by accident rather than by decision — WebKit's
+	 * own copy writes a WebArchive beside the text, and the only reason ours has
+	 * none is that `LegacyWebArchive` skips its subresource sweep when the page's
+	 * origin is not in the http family, which `tauri://localhost` is not. Under
+	 * `tauri dev` the same selection carries 19MB (#549): the sweep embeds every
+	 * cached script for the origin, so ten words of prose arrive with the whole
+	 * unbundled module graph attached.
+	 *
+	 * Cancelling the copy event is what WebKit checks first (`Editor::copy` →
+	 * `tryDHTMLCopy`), before it builds any of that, and it is checked whatever
+	 * the origin — so this makes the plain-text result ours on both, instead of
+	 * a property of the scheme that an upstream change could take back.
+	 *
+	 * The carve-out mirrors WebKit's own (`Editor::performCutOrCopy`): a selection
+	 * inside an input or textarea already gets plain text and no archive, and
+	 * `window.getSelection()` cannot read it, so cancelling there would copy an
+	 * empty string. Monaco takes input through a hidden textarea and is covered by
+	 * the same test — as it should be, since the editor has its own path.
+	 */
+	function handleCopyPlainText(e: ClipboardEvent) {
+		const active = document.activeElement;
+		if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+		const selection = window.getSelection();
+		if (!selection || selection.isCollapsed || !e.clipboardData) return;
+		e.clipboardData.setData('text/plain', selection.toString());
+		e.preventDefault();
+	}
+
 	function handleContextMenu(e: MouseEvent) {
 		if (modalState.show) return;
 		if (mode !== 'app') return;
@@ -3387,6 +3421,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 <svelte:document
 	onclick={handleDocumentClick}
+	oncopy={handleCopyPlainText}
 	oncontextmenu={handleContextMenu}
 	onmouseover={handleMouseOver}
 	onmouseout={handleMouseOut}
