@@ -1180,7 +1180,7 @@ export const translations: Record<LanguageCode, Translation> = {
             savedNewerEdits: '已儲存——因有更新的編輯內容，繼續保持編輯模式',
             openExportedFileFailed: '無法開啟匯出的檔案',
             partialDocument: '尚無法編輯 — 此檔案尚未完全讀取',
-            lossySaveBlocked: '未儲存：此檔案不是 UTF-8 編碼，開啟時部分內容已變成「�」。直接儲存會破壞原檔案 — 請用「另存新檔」寫入新檔案'
+            lossySaveBlocked: '未儲存：此檔案不是 UTF-8 編碼，開啟時部分內容已變成「�」。直接儲存會破壞原檔案 — 請用「另存新檔」寫入新檔案',
             restoreInterrupted: 'Markpad 上次未成功還原您的工作階段',
             restoreInterruptedDeferred: 'Markpad 上次未成功開啟 {path}，因此已將其跳過。請自行開啟以再試一次'
         },
