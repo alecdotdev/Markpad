@@ -40,13 +40,16 @@ import { routeDroppedFile, type DropPane } from './utils/fileDrop.js';
 import { headingReference, preferredReferenceStyle } from './utils/headingReference.js';
 import {
 	findAnchorElement,
+	findSourceLineRange,
 	getAnchorScrollTop,
 	getPreviewOffsetForSourceLine,
 	getSourceLineAtPreviewOffset,
 	measureAnchorBox,
+	mergeSourceLineRanges,
 	PREVIEW_ANCHOR_OFFSET,
 	type AnchorBox,
 	type AnchorNode,
+	type LineRange,
 	type OffsetLayoutNode,
 } from './utils/previewAnchor.js';
 import {
@@ -143,6 +146,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		undo: () => void;
 		redo: () => void;
 		revealHeader: (sourceLine: number | null, text: string) => void;
+		revealSourceRange: (startLine: number, endLine: number) => void;
 		triggerFind: () => void;
 	} | null>(null);
 	let liveMode = $state(false);
@@ -1660,6 +1664,64 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	}
 
+	/**
+	 * A jump the editor has not been asked for yet, because it does not exist
+	 * yet: `toggleEdit` only flips a flag, and the `Editor` it mounts — and the
+	 * `editorPane` binding that reaches it — arrive on the next render. The
+	 * effect below spends it the moment they do, and immediately when the
+	 * editor is already on screen (split view).
+	 */
+	let pendingEditReveal = $state<LineRange | null>(null);
+
+	$effect(() => {
+		const range = pendingEditReveal;
+		if (!range || !editorPane) return;
+
+		pendingEditReveal = null;
+		editorPane.revealSourceRange(range.startLine, range.endLine);
+	});
+
+	/**
+	 * Which source lines the reader means by right-clicking here (#90).
+	 *
+	 * The selection when there is one, so a range spanning several blocks opens
+	 * the editor on all of them; a caret or a click with nothing selected falls
+	 * through to whatever is under the pointer, which is how a click on an
+	 * image lands on the image.
+	 *
+	 * `null` when nothing under the pointer came from the document: the front
+	 * matter panel, the outline, the window chrome. The caller then leaves the
+	 * "Edit" entry doing exactly what it did before.
+	 */
+	function getContextMenuSourceRange(e: MouseEvent): LineRange | null {
+		const selection = window.getSelection();
+		const selected =
+			selection && selection.rangeCount > 0 && !selection.isCollapsed
+				? mergeSourceLineRanges(
+						findSourceLineRange(selection.getRangeAt(0).startContainer),
+						findSourceLineRange(selection.getRangeAt(selection.rangeCount - 1).endContainer),
+					)
+				: null;
+
+		return selected ?? findSourceLineRange(e.target as Node | null);
+	}
+
+	/**
+	 * The preview's "Edit": open the editor on what the reader pointed at.
+	 *
+	 * With a range in hand this stops being a toggle. In split view the editor
+	 * is already on screen and the old behaviour — leave edit mode — is the one
+	 * thing "edit this fragment" cannot mean, so the toggle is skipped and only
+	 * the jump happens. With no range (right-click outside the document) the
+	 * entry is untouched.
+	 */
+	async function editSourceRange(range: LineRange | null) {
+		if (!isEditing) await toggleEdit();
+		// `toggleEdit` swallows a failed read and stays in reading mode. Arming
+		// the jump anyway would fire it at whatever document is edited next.
+		if (range && tabManager.activeTab?.isEditing) pendingEditReveal = range;
+	}
+
 	async function saveContent(tabId?: string): Promise<boolean> {
 		const saved = await documentSession.saveContent(tabId);
 		// Every route into here is an explicit decision — Cmd+S, the close
@@ -2163,6 +2225,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			];
 		}
 
+		// Resolved now rather than inside the "Edit" handler: by the time that
+		// runs the reader has clicked a menu item, and a click is how a
+		// selection goes away.
+		const editSourceTarget = getContextMenuSourceRange(e);
+
 		const mermaidDiag = (e.target as HTMLElement).closest('.mermaid-diagram');
 		if (mermaidDiag) {
 			mediaItems = [
@@ -2193,7 +2260,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				} },
 				{ separator: true },
 				{ label: t('menu.openLocation', uiLanguage), onClick: openFileLocation, disabled: !currentFile },
-				{ label: t('menu.edit', uiLanguage), onClick: () => toggleEdit() },
+				{ label: t('menu.edit', uiLanguage), onClick: () => editSourceRange(editSourceTarget) },
 				{ separator: true },
 				{ label: t('menu.closeFile', uiLanguage), onClick: closeFile },
 			],

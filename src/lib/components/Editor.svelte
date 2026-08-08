@@ -764,6 +764,14 @@
 
 		editorReady = true;
 
+		// After the view-state / anchor-line restore above, deliberately: an
+		// explicit "edit this fragment" beats the position the tab was left at.
+		if (pendingReveal) {
+			const { startLine, endLine } = pendingReveal;
+			pendingReveal = null;
+			revealSourceRange(startLine, endLine);
+		}
+
 		return () => {
 			editorReady = false;
 			window.open = originalOpen;
@@ -1671,20 +1679,64 @@
 		dragCaretDecoration = editor.deltaDecorations(dragCaretDecoration, []);
 	}
 
+	/**
+	 * A jump asked for before the editor existed. `monaco-editor` is imported
+	 * dynamically, so `bind:this` on this component resolves — and the preview
+	 * can call in — several frames before `editor` does; without somewhere to
+	 * put it, a jump issued in the same turn as the switch into edit mode is
+	 * simply dropped. `onMount` spends it once the editor is up.
+	 */
+	let pendingReveal: { startLine: number; endLine: number } | null = null;
+
+	/**
+	 * Put the reader on `startLine`..`endLine` of the buffer.
+	 *
+	 * The one line-to-editor jump in this component. The outline reaches it
+	 * through `revealHeader`, and the preview's context-menu "Edit" calls it
+	 * with the source range of whatever the reader had selected (#90).
+	 *
+	 * The selection IS the highlight #90 asks for: Monaco draws it in the
+	 * theme's own selection colour, so it needs no decoration, no CSS and no
+	 * timer — and it clears itself on the reader's next click or keystroke,
+	 * which is precisely when it has stopped being useful. A decoration that
+	 * fades on a timer would be a second highlighting mechanism doing what this
+	 * one already does, and would leave the caret at the top of the file.
+	 */
+	export function revealSourceRange(startLine: number, endLine: number) {
+		if (!editorReady || !editor) {
+			pendingReveal = { startLine, endLine };
+			return;
+		}
+
+		const model = editor.getModel();
+		if (!model) return;
+
+		// Clamp before `getLineMaxColumn`, which throws on a line past the end
+		// of the buffer. Both callers can hand one over: the preview's HTML is
+		// the render of a buffer that may since have been replaced by a shorter
+		// one (an external change, a session restored around a file edited
+		// elsewhere), and the outline carries the same lines.
+		const lastLine = model.getLineCount();
+		const start = Math.min(Math.max(1, Math.trunc(startLine)), lastLine);
+		const end = Math.min(Math.max(start, Math.trunc(endLine)), lastLine);
+
+		editor.revealLineInCenterIfOutsideViewport(start, monaco.editor.ScrollType.Smooth);
+		editor.setSelection({
+			startLineNumber: start,
+			startColumn: 1,
+			endLineNumber: end,
+			endColumn: model.getLineMaxColumn(end),
+		});
+		editor.focus();
+	}
+
 	export function revealHeader(sourceLine: number | null, text: string) {
 		if (!editor) return;
 		const model = editor.getModel();
 		if (!model) return;
 		const lineNumber = sourceLine ?? 0;
 		if (Number.isInteger(lineNumber) && lineNumber > 0) {
-			editor.revealLineInCenterIfOutsideViewport(lineNumber, monaco.editor.ScrollType.Smooth);
-			editor.setSelection({
-				startLineNumber: lineNumber,
-				startColumn: 1,
-				endLineNumber: lineNumber,
-				endColumn: model.getLineMaxColumn(lineNumber),
-			});
-			editor.focus();
+			revealSourceRange(lineNumber, lineNumber);
 			return;
 		}
 
