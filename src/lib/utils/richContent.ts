@@ -170,8 +170,13 @@ function defaultIdFactory(index: number): string {
  * replaced by Mermaid's SVG. Both halves of scroll sync then treat several
  * hundred pixels of preview as belonging to whatever block is nearest, and the
  * panes disagree by the height of the diagram for as long as it is on screen.
+ *
+ * Exported because `processMarkdownHtml` replaces elements the same way — an
+ * `<img>` whose src is a video or audio file becomes a fresh `<video>` /
+ * `<audio>`, a YouTube `<img>`/`<a>` becomes a thumbnail link — and the same
+ * gap costs the same thing there.
  */
-function carrySourcepos(from: Element, to: Element) {
+export function carrySourcepos(from: Element, to: Element) {
 	const sourcepos = from.getAttribute('data-sourcepos');
 	if (sourcepos) to.setAttribute('data-sourcepos', sourcepos);
 }

@@ -149,4 +149,26 @@ export const renderFixtures = {
 		markdown: "A paragraph with <input type=\"checkbox\" /> inline.\n",
 		html: "<p data-sourcepos=\"1:1-1:50\">A paragraph with <input type=\"checkbox\" /> inline.</p>\n",
 	},
+
+	// --- protocol 5 — media substitutions keep their source range ---
+	videoImage: {
+		markdown: "![clip](clip.mp4)\n",
+		html: "<p data-sourcepos=\"1:1-1:17\"><img data-sourcepos=\"1:1-1:17\" src=\"clip.mp4\" alt=\"clip\" /></p>\n",
+	},
+	videoImageSurrounded: {
+		markdown: "Intro paragraph.\n\n![clip](clip.mp4)\n\nTrailing prose.\n",
+		html: "<p data-sourcepos=\"1:1-1:16\">Intro paragraph.</p>\n<p data-sourcepos=\"3:1-3:17\"><img data-sourcepos=\"3:1-3:17\" src=\"clip.mp4\" alt=\"clip\" /></p>\n<p data-sourcepos=\"5:1-5:15\">Trailing prose.</p>\n",
+	},
+	audioImage: {
+		markdown: "![take](take.mp3)\n",
+		html: "<p data-sourcepos=\"1:1-1:17\"><img data-sourcepos=\"1:1-1:17\" src=\"take.mp3\" alt=\"take\" /></p>\n",
+	},
+	youtubeImage: {
+		markdown: "![demo](https://youtu.be/dQw4w9WgXcQ)\n",
+		html: "<p data-sourcepos=\"1:1-1:37\"><img data-sourcepos=\"1:1-1:37\" src=\"https://youtu.be/dQw4w9WgXcQ\" alt=\"demo\" /></p>\n",
+	},
+	youtubeLink: {
+		markdown: "[demo](https://youtu.be/dQw4w9WgXcQ)\n",
+		html: "<p data-sourcepos=\"1:1-1:36\"><a data-sourcepos=\"1:1-1:36\" href=\"https://youtu.be/dQw4w9WgXcQ\">demo</a></p>\n",
+	},
 } as const satisfies Record<string, RenderFixture>;
