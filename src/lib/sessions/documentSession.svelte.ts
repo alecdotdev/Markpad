@@ -58,6 +58,22 @@ type DocumentSessionOptions = {
 };
 
 /**
+ * Record that the rendered preview already matches `rawContent`.
+ *
+ * `_lastRenderedRawContent` is MarkdownViewer's bookkeeping: its render effect
+ * compares the field against the buffer and re-renders when they differ. A
+ * caller that has updated the preview DOM by hand has to say so, or the effect
+ * rebuilds the article to reach the state already on screen — and takes the
+ * reader's scroll position with it.
+ *
+ * Declared here rather than inlined so the cast lives in one place and the
+ * reason is written once.
+ */
+function markPreviewMatchesBuffer(tab: Tab, rawContent: string) {
+	(tab as unknown as Record<string, unknown>)._lastRenderedRawContent = rawContent;
+}
+
+/**
  * Which heading sections the tab being loaded has folded, read at render time
  * rather than captured up front. A large file is rendered twice — the 50KB
  * preview, then the whole document once the background read lands — and the
@@ -620,6 +636,21 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		const updated = `${raw.slice(0, raw.length - body.length)}${updatedBody}`;
 		if (updated === raw) return false;
 		tabManager.updateTabRawContent(tab.id, updated);
+		// The preview is already showing this content: the browser has drawn
+		// the native checkbox, and the caller adds `task-done` to the item. A
+		// re-render would rebuild the whole article to arrive at the DOM that
+		// is on screen, and rebuilding it drops the reader's scroll position —
+		// ticking something in a long document threw the view somewhere else
+		// entirely, which is worse than the missing render would be.
+		//
+		// In the same synchronous block as the write, deliberately. The render
+		// effect reads `_lastRenderedRawContent` and, if it does not match,
+		// arms a 16ms timer BEFORE anything can be awaited — so marking this
+		// after an `await` would be too late to stop the render it schedules.
+		// The field is MarkdownViewer's, and this is the one place outside it
+		// that may claim the preview is current, because this is the one place
+		// that knows the DOM was updated by hand.
+		markPreviewMatchesBuffer(tab, updated);
 		await saveContent(tab.id);
 		return true;
 	}

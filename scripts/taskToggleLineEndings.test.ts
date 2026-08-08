@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { readSource, sliceBetween } from './sourceTree.js';
+
 // Toggling a task checkbox in the preview finds the line to rewrite by counting
 // `\n` up to the regex match. Three rounds of fixes for #148 were verified on
 // macOS, i.e. on LF, and all three missed that the count is wrong on CRLF:
@@ -205,4 +207,49 @@ test('LF: two blank lines above the list', async () => {
 	const doc = ['intro', '', '', '- [ ] one'].join('\n') + '\n';
 	const written = await toggledContent(doc, 4, true);
 	assert.equal(written, ['intro', '', '', '- [x] one'].join('\n') + '\n');
+});
+
+// ---------------------------------------------- the toggle does not re-render
+//
+// Ticking a checkbox writes the buffer, and MarkdownViewer's render effect
+// re-renders whenever the buffer stops matching `_lastRenderedRawContent`. It
+// would rebuild the whole article to arrive at the DOM already on screen — the
+// browser has drawn the native checkbox and the caller has added `task-done` —
+// and rebuilding drops the reader's scroll position, which in a long document
+// throws the view somewhere else entirely.
+
+const sessionSource = readSource(new URL('../src/lib/sessions/documentSession.svelte.ts', import.meta.url));
+
+test('a toggle tells the preview it is already up to date', async () => {
+	const doc = ['intro', '', '- [ ] one', '- [ ] two'].join('\n') + '\n';
+	tabManager.closeAll();
+	invokeCalls = [];
+	handleInvoke = (cmd) => {
+		if (cmd === 'open_markdown_preview') return ['<p>preview</p>', doc, false, false];
+		if (cmd === 'read_file_content_checked') return [doc, false];
+		if (cmd === 'save_file_content') return null;
+		return null;
+	};
+	const session = makeSession();
+	await session.loadMarkdown('/docs/tasks.md');
+	const tab = tabManager.activeTab!;
+
+	await session.toggleTaskCheckbox(3, true);
+
+	assert.equal(
+		(tab as unknown as Record<string, unknown>)._lastRenderedRawContent,
+		tab.rawContent,
+		'the render effect has nothing to do',
+	);
+});
+
+test('it is marked before anything can be awaited', () => {
+	// The render effect arms its 16ms timer the moment the buffer changes and
+	// checks the field BEFORE that — so marking after an `await` would be too
+	// late to prevent the render it has already scheduled.
+	const fn = sliceBetween(sessionSource, 'async function toggleTaskCheckbox(', '\n\tasync function ');
+	const marked = fn.indexOf('markPreviewMatchesBuffer');
+	const awaited = fn.indexOf('await saveContent');
+	assert.ok(marked > 0, 'the toggle marks the preview');
+	assert.ok(marked < awaited, 'marked before the first await after the write');
 });

@@ -49,7 +49,13 @@ static BLOCK_ID_RE: LazyLock<Regex> =
 /// so the pattern no longer depends on it either.
 static TASK_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"<li data-sourcepos="(?<sourcepos>(?<line>\d+):\d+-\d+:\d+)">(?<input><input type="checkbox"(?: (?:checked|disabled)="")* />)"#,
+        // The two `class` groups are optional so this holds whether or not
+        // `tasklist_classes` is on. It is on (see `markdown_options`), which
+        // is what makes the CSS work — but writing the classes in as required
+        // would mean flipping that option back would silently stop annotating
+        // the checkboxes rather than fail a test, and an unannotated checkbox
+        // is one the preview cannot toggle at all.
+        r#"<li(?: class="task-list-item")? data-sourcepos="(?<sourcepos>(?<line>\d+):\d+-\d+:\d+)">(?<input><input type="checkbox"(?: class="task-list-item-checkbox")?(?: (?:checked|disabled)="")* />)"#,
     )
     .expect("valid regex literal")
 });
@@ -381,6 +387,19 @@ fn markdown_options<'a>() -> Options<'a> {
     options.extension.table = true;
     options.extension.autolink = true;
     options.extension.tasklist = true;
+    // Fifteen rules in styles.css hang off `li.task-list-item` and
+    // `ul.contains-task-list` — the bullet suppression and the grid that puts
+    // the checkbox beside its text — and comrak emits neither class unless
+    // this is on. It defaulted to off, so all fifteen were dead: task lists
+    // rendered with the list bullet still showing AND the checkbox on its own
+    // line above the text. The classes are GitHub's, which is where those
+    // selectors came from.
+    //
+    // They went missing in the 0.18 → 0.54 upgrade (#426) together with the
+    // `disabled` change #320/#345 fixed, and unlike that one nobody reported
+    // it as its own defect — it arrived looking like part of the same
+    // breakage. #148 is where it finally surfaced, in a reader's screenshot.
+    options.render.tasklist_classes = true;
     // `++ins++` — Pandoc's and CriticMarkup's spelling for inserted text, and
     // plain characters here until now. It is the only one of its group worth
     // taking, and the rule that decided the others is worth stating, because
@@ -3482,18 +3501,28 @@ mod tests {
     fn task_list_checkbox_is_emitted_at_the_start_of_its_list_item() {
         // The attribute order here is comrak's, captured, not a requirement:
         // 0.18 wrote `disabled="" checked=""` and 0.54 writes them the other
-        // way round. What this pins is that `data-task-checkbox` is present on
+        // way round, and `tasklist_classes` adds a `class` between the tag and
+        // them. What this pins is that `data-task-checkbox` is present on
         // *both* items and that the marker sits at the start of the `<li>`.
-        // `TASK_ITEM_RE` deliberately no longer depends on the order, so a
-        // future reordering fails here — loudly — instead of quietly
-        // un-marking one of the two.
+        // `TASK_ITEM_RE` deliberately depends on neither the order nor the
+        // presence of the class, so a future reordering fails here — loudly —
+        // instead of quietly un-marking one of the two.
+        //
+        // Note the `<ul>` carries `contains-task-list` while these `<li>`s do
+        // not carry `task-list-item`: comrak only writes the item class on the
+        // branch that opens the `<li>` itself. styles.css asks for either, so
+        // the bullet suppression still lands.
         let html = convert_markdown("- [ ] open task\n- [x] completed task\n");
         assert!(
-            html.contains("<li data-sourcepos=\"1:1-1:15\"><input type=\"checkbox\" data-task-checkbox=\"\" disabled=\"\" /> open task</li>"),
+            html.contains("<ul class=\"contains-task-list\""),
+            "the list class the stylesheet needs is missing: {html}",
+        );
+        assert!(
+            html.contains("<li data-sourcepos=\"1:1-1:15\"><input type=\"checkbox\" data-task-checkbox=\"\" class=\"task-list-item-checkbox\" disabled=\"\" /> open task</li>"),
             "unexpected task-list HTML: {html}",
         );
         assert!(
-            html.contains("<li data-sourcepos=\"2:1-2:20\"><input type=\"checkbox\" data-task-checkbox=\"\" checked=\"\" disabled=\"\" /> completed task</li>"),
+            html.contains("<li data-sourcepos=\"2:1-2:20\"><input type=\"checkbox\" data-task-checkbox=\"\" class=\"task-list-item-checkbox\" checked=\"\" disabled=\"\" /> completed task</li>"),
             "unexpected task-list HTML: {html}",
         );
     }
