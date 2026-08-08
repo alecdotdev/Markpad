@@ -1041,6 +1041,14 @@
 							</div>
 
 						<div class="setting-item">
+							<label for="editor-sticky-scroll">{t('settings.stickyScroll', settings.language)}</label>
+							<label class="toggle">
+								<input id="editor-sticky-scroll" type="checkbox" checked={settings.stickyScroll} onchange={() => settings.toggleStickyScroll()} />
+								<span class="toggle-slider"></span>
+							</label>
+						</div>
+
+						<div class="setting-item">
 							<label for="editor-line-highlight">{t('settings.lineHighlight', settings.language)}</label>
 							<label class="toggle">
 								<input id="editor-line-highlight" type="checkbox" checked={settings.renderLineHighlight === 'line'} onchange={() => settings.toggleLineHighlight()} />
