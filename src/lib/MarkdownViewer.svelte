@@ -1168,7 +1168,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 		const line = getSourceLineAtPreviewOffset(target, target.scrollTop, measurePreviewBox);
 
-		return line === null ? position : { ...position, line };
+		return line === null ? position : { ...position, line: toBufferLine(line) };
 	}
 
 	function scrollPreviewToSyncPosition(position: ScrollSyncPosition) {
@@ -1178,7 +1178,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		let targetScroll: number | null = null;
 
 		if (position.section === 'body' && position.line !== undefined) {
-			const offset = getPreviewOffsetForSourceLine(markdownBody, position.line, measurePreviewBox);
+			const offset = getPreviewOffsetForSourceLine(
+				markdownBody,
+				toRendererLine(position.line),
+				measurePreviewBox,
+			);
 			if (offset !== null) targetScroll = offset;
 		}
 
@@ -1217,7 +1221,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	let tocActiveLine = $state<number | null>(null);
 
 	function handleEditorScrollSync(position: ScrollSyncPosition) {
-		if (position.line !== undefined) tocActiveLine = position.line;
+		// The outline is built from `data-sourcepos`, so it counts from the body.
+		if (position.line !== undefined) tocActiveLine = toRendererLine(position.line);
 
 		if (tabManager.activeTab?.isScrollSynced) {
 			scrollPreviewToSyncPosition(position);
@@ -1791,6 +1796,22 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		const offset = frontMatterLineOffset(rawContent);
 		if (!offset) return range;
 		return { startLine: range.startLine + offset, endLine: range.endLine + offset };
+	}
+
+	/**
+	 * The same conversion for a single line, in both directions.
+	 *
+	 * `ScrollSyncPosition.line` is a BUFFER line, because the editor is the only
+	 * pane that can produce one and the buffer is all it knows. Everything on the
+	 * preview side — `data-sourcepos`, the outline built from it — counts from
+	 * the first line of the body. Every crossing between the two has to say so.
+	 */
+	function toBufferLine(line: number): number {
+		return line + frontMatterLineOffset(rawContent);
+	}
+
+	function toRendererLine(line: number): number {
+		return line - frontMatterLineOffset(rawContent);
 	}
 
 	async function saveContent(tabId?: string): Promise<boolean> {
