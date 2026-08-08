@@ -54,6 +54,7 @@ import {
 } from './utils/previewAnchor.js';
 import {
 	addFrontMatterListItems,
+	frontMatterLineOffset,
 	getMarkdownBodyWithoutFrontMatter,
 	getFrontMatterListItems,
 	parseFrontMatter,
@@ -1606,9 +1607,22 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	}
 
-	async function toggleEdit() {
+	/**
+	 * @param revealSelection Carry whatever the reader has selected in the
+	 * preview into the editor, so ⌘E and the toolbar button land on the passage
+	 * being read rather than at the top of the file — the same behaviour the
+	 * context menu's "Edit" gives, from the entry points people actually use.
+	 * `editSourceRange` passes false because it has already resolved its target:
+	 * the reader clicked a menu item to get there, and a click is how a
+	 * selection goes away.
+	 */
+	async function toggleEdit({ revealSelection = true }: { revealSelection?: boolean } = {}) {
 		const tab = tabManager.activeTab;
 		if (!tab || tab.path === undefined) return;
+
+		// Read before the switch: `isEditing` flips below, and leaving the
+		// editor must not arm a jump for the next time it is entered.
+		const carried = !isEditing && revealSelection ? getSelectionSourceRange() : null;
 
 		if (isEditing) {
 			// Switch back to view.
@@ -1662,6 +1676,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				tab.isEditing = true;
 			}
 		}
+
+		// Only once the switch actually took: the read above can fail and leave
+		// the tab in reading mode, and a jump armed then would fire at whatever
+		// document is edited next.
+		if (carried && tab.isEditing) pendingEditReveal = toBufferRange(carried);
 	}
 
 	/**
@@ -1694,16 +1713,26 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	 * "Edit" entry doing exactly what it did before.
 	 */
 	function getContextMenuSourceRange(e: MouseEvent): LineRange | null {
-		const selection = window.getSelection();
-		const selected =
-			selection && selection.rangeCount > 0 && !selection.isCollapsed
-				? mergeSourceLineRanges(
-						findSourceLineRange(selection.getRangeAt(0).startContainer),
-						findSourceLineRange(selection.getRangeAt(selection.rangeCount - 1).endContainer),
-					)
-				: null;
+		return getSelectionSourceRange() ?? findSourceLineRange(e.target as Node | null);
+	}
 
-		return selected ?? findSourceLineRange(e.target as Node | null);
+	/**
+	 * The source lines the reader has selected in the preview, or null when
+	 * nothing is selected or the selection came from outside the document.
+	 *
+	 * Both ends resolve independently and are merged, so a selection spanning
+	 * several blocks answers with all of them, and one end landing somewhere
+	 * with no range (the front matter panel, the outline) leaves the other end
+	 * in charge. Direction-independent: `startContainer` is the range's start,
+	 * not the point the drag began at.
+	 */
+	function getSelectionSourceRange(): LineRange | null {
+		const selection = window.getSelection();
+		if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+		return mergeSourceLineRanges(
+			findSourceLineRange(selection.getRangeAt(0).startContainer),
+			findSourceLineRange(selection.getRangeAt(selection.rangeCount - 1).endContainer),
+		);
 	}
 
 	/**
@@ -1716,10 +1745,26 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	 * entry is untouched.
 	 */
 	async function editSourceRange(range: LineRange | null) {
-		if (!isEditing) await toggleEdit();
+		if (!isEditing) await toggleEdit({ revealSelection: false });
 		// `toggleEdit` swallows a failed read and stays in reading mode. Arming
 		// the jump anyway would fire it at whatever document is edited next.
-		if (range && tabManager.activeTab?.isEditing) pendingEditReveal = range;
+		if (range && tabManager.activeTab?.isEditing) pendingEditReveal = toBufferRange(range);
+	}
+
+	/**
+	 * A renderer line range moved onto the buffer's numbering.
+	 *
+	 * `data-sourcepos` counts from the first line of the BODY, because that is
+	 * what `renderMarkdownPreview` hands comrak — front matter is stripped
+	 * first. The editor holds the whole file. Without this every jump into a
+	 * document with front matter lands that many lines early, and the outline
+	 * has been doing exactly that: `Toc.svelte` reads the same attribute and
+	 * passes it to `revealHeader` untouched.
+	 */
+	function toBufferRange(range: LineRange): LineRange {
+		const offset = frontMatterLineOffset(rawContent);
+		if (!offset) return range;
+		return { startLine: range.startLine + offset, endLine: range.endLine + offset };
 	}
 
 	async function saveContent(tabId?: string): Promise<boolean> {
@@ -3561,7 +3606,14 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 										oncopyref={(text: string, slug: string) => copyHeadingReference(text, slug)}
 										onjump={(id: string, text: string, sourceLine: number | null) => {
 											if (isEditing && editorPane) {
-												editorPane.revealHeader(sourceLine, text);
+												// Same renderer-to-buffer shift as the context menu: the
+												// outline reads `data-sourcepos` too, and has been landing
+												// short by the front matter's height for as long as both
+												// have existed.
+												editorPane.revealHeader(
+													sourceLine === null ? null : toBufferRange({ startLine: sourceLine, endLine: sourceLine }).startLine,
+													text,
+												);
 											}
 										}}
 										oncontext={(e, item) => {

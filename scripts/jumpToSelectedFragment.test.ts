@@ -257,7 +257,11 @@ test('Edit with a target never leaves edit mode', () => {
 	// In split view the editor is already on screen, and "edit this fragment"
 	// is the one thing that cannot mean "close the editor".
 	const edit = functionSource(viewerSource, 'editSourceRange');
-	assert.match(edit, /if \(!isEditing\) await toggleEdit\(\);/);
+	assert.match(edit, /if \(!isEditing\) await toggleEdit\(/, 'entered only when not already editing');
+	// And it does not ask the toggle to resolve a selection of its own: this
+	// path already has its target, captured before the menu click that would
+	// have cleared it.
+	assert.match(edit, /toggleEdit\(\{ revealSelection: false \}\)/);
 	// And a read that failed leaves the tab in reading mode — arming the jump
 	// anyway would fire it at whatever document is edited next.
 	assert.match(edit, /tabManager\.activeTab\?\.isEditing/);
@@ -270,4 +274,89 @@ test('the target is a source range and never a column', () => {
 	const resolve = functionSource(viewerSource, 'getContextMenuSourceRange');
 	assert.match(resolve, /findSourceLineRange\(/);
 	assert.doesNotMatch(resolve, /startColumn|endColumn/);
+});
+
+// ---------------------------------------------------- the front-matter shift
+//
+// `renderMarkdownPreview` hands comrak `getMarkdownBodyWithoutFrontMatter(raw)`,
+// so every `data-sourcepos` counts from the first line of the BODY while the
+// editor holds the whole file. Nothing in the attribute says which of the two
+// it means, and in a document without front matter the two are equal — which
+// is every other fixture in this file, and why the shift went unseen in the
+// outline for as long as both have existed.
+
+const { frontMatterLineOffset } = await import('../src/lib/utils/frontMatter.js');
+
+test('a document without front matter needs no shift', () => {
+	assert.equal(frontMatterLineOffset('# Title\n\nbody\n'), 0);
+});
+
+test('the shift is the number of buffer lines above the body', () => {
+	const raw = ['---', 'title: "T"', 'tags:', '  - a', '---', '', '# Title'].join('\n') + '\n';
+	// The heading is line 7 of the buffer and line 1 of the body.
+	assert.equal(frontMatterLineOffset(raw), 6);
+	assert.equal(raw.split('\n')[1 + frontMatterLineOffset(raw) - 1], '# Title');
+});
+
+test('the shift counts CRLF lines the same', () => {
+	const raw = ['---', 'title: "T"', '---', '', '# Title'].join('\r\n') + '\r\n';
+	assert.equal(frontMatterLineOffset(raw), 4);
+	assert.equal(raw.split('\r\n')[1 + frontMatterLineOffset(raw) - 1], '# Title');
+});
+
+test('a --- that is not front matter shifts nothing', () => {
+	// A horizontal rule as the first line is not front matter, and treating it
+	// as such would push every jump down by the width of whatever followed.
+	const raw = ['---', '', 'Just a rule above some prose.'].join('\n') + '\n';
+	assert.equal(frontMatterLineOffset(raw), 0);
+});
+
+test('the real stress document shifts by its front matter', () => {
+	// The fixture the reporter of the offset was reading: 10 lines of front
+	// matter plus the blank line after it, heading on buffer line 12.
+	const raw = readSource(new URL('../samples/stress-test.md', import.meta.url));
+	assert.equal(frontMatterLineOffset(raw), 11);
+	assert.equal(raw.split('\n')[11], '# Markdown Reader Stress Test');
+});
+
+// ---------------------------------------- the shift, and where it is applied
+//
+// Two consumers read `data-sourcepos` and hand the number to the editor: the
+// context menu (#90) and the outline. Both need the same shift, so both go
+// through `toBufferRange`. A test that only pinned the arithmetic would pass
+// with either call site still handing over a raw body line.
+
+test('every renderer line reaching the editor goes through the shift', () => {
+	const edit = functionSource(viewerSource, 'editSourceRange');
+	assert.match(edit, /pendingEditReveal = toBufferRange\(range\)/, 'the context menu shifts');
+
+	const toggle = functionSource(viewerSource, 'toggleEdit');
+	assert.match(toggle, /pendingEditReveal = toBufferRange\(carried\)/, 'the carried selection shifts');
+
+	// The outline is wired inline in the markup rather than in a function.
+	assert.match(
+		viewerSource,
+		/editorPane\.revealHeader\(\s*sourceLine === null \? null : toBufferRange\(/,
+		'the outline shifts',
+	);
+});
+
+test('the shift reads the buffer, not the rendered body', () => {
+	// `frontMatterLineOffset(rawContent)` — measuring the render would answer 0
+	// forever, since the render is what the front matter was stripped out of.
+	const shift = functionSource(viewerSource, 'toBufferRange');
+	assert.match(shift, /frontMatterLineOffset\(rawContent\)/);
+});
+
+test('a selection carried into edit mode is read before the flag flips', () => {
+	// `isEditing` is flipped inside `toggleEdit`, so reading the selection
+	// after it would ask "was the reader in the editor" instead of "was the
+	// reader in the preview" — and leaving the editor would arm a jump for the
+	// next time it is entered.
+	const toggle = functionSource(viewerSource, 'toggleEdit');
+	assert.match(toggle, /const carried = !isEditing && revealSelection \? getSelectionSourceRange\(\) : null;/);
+	assert.ok(
+		toggle.indexOf('const carried') < toggle.indexOf('tab.isEditing = true'),
+		'read before the switch, not after',
+	);
 });

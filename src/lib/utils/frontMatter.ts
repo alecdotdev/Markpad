@@ -154,6 +154,26 @@ export function getMarkdownBodyWithoutFrontMatter(content: string): string {
 	return parseFrontMatter(content).body;
 }
 
+/**
+ * How many buffer lines sit above the body — the number to add to any line
+ * number that came out of the renderer to get back to the buffer.
+ *
+ * The preview renders `getMarkdownBodyWithoutFrontMatter(raw)`, so every
+ * `data-sourcepos` comrak emits counts from the first line of the BODY. The
+ * editor holds the whole file. Nothing in the attribute says which of the two
+ * it means, and the difference is invisible in any document without front
+ * matter — which is most documents, and was every test fixture.
+ *
+ * `parseFrontMatter` returns the body as a suffix of the content, so the
+ * offset is the newline count of everything before it. Counting `\n` alone is
+ * correct for CRLF too, since `\r\n` contains one.
+ */
+export function frontMatterLineOffset(content: string): number {
+	const { body } = parseFrontMatter(content);
+	if (body.length === content.length) return 0;
+	return content.slice(0, content.length - body.length).split('\n').length - 1;
+}
+
 export function parseFrontMatterEditableValue(field: FrontMatterField, value: string): unknown {
 	const trimmed = value.trim();
 	switch (field.kind) {
