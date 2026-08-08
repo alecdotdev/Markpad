@@ -29,7 +29,7 @@
  */
 
 /** Inclusive source line range, as written in `data-sourcepos`. */
-type LineRange = {
+export type LineRange = {
 	startLine: number;
 	endLine: number;
 };
@@ -146,6 +146,66 @@ export function parseSourceposLineRange(sourcepos: string | null | undefined): L
 
 	if (Number.isNaN(startLine) || Number.isNaN(endLine)) return null;
 	return { startLine, endLine };
+}
+
+/**
+ * The subset of `Element` the lookup below reads, declared structurally for the
+ * same reason `AnchorNode` is: so it can be exercised against the
+ * render-protocol DOM shim over real `processMarkdownHtml` output.
+ */
+export type SourceposElement = {
+	getAttribute(name: string): string | null;
+	closest(selector: string): SourceposElement | null;
+};
+
+/** Any DOM node a selection or a pointer event can land on. */
+export type SourceposNode = {
+	readonly nodeType: number;
+	readonly parentElement?: SourceposElement | null;
+	closest?(selector: string): SourceposElement | null;
+};
+
+/**
+ * The source lines behind whatever `node` is part of: the narrowest annotated
+ * element at or above it.
+ *
+ * Narrowest matters. comrak stamps a range on inline nodes as well as blocks —
+ * `<img>`, `<strong>`, `<code>`, `<a>`, `<em>` all carry one — so an image
+ * inside a paragraph answers with the image's own line instead of the whole
+ * paragraph's. Everything the app renders around the document (the front
+ * matter panel, the outline, the window chrome) has no annotated ancestor and
+ * answers `null`.
+ */
+export function findSourceLineRange(node: SourceposNode | null | undefined): LineRange | null {
+	const element = node?.nodeType === ELEMENT_NODE ? node : node?.parentElement;
+	const annotated = element?.closest?.('[data-sourcepos]');
+	return parseSourceposLineRange(annotated?.getAttribute('data-sourcepos'));
+}
+
+/**
+ * The lines two ends of a preview selection cover together.
+ *
+ * A selection in the preview can start in one rendered block and end in
+ * another, and the two ends resolve independently — so "which source lines did
+ * the reader select" is the union of what each end resolved to, and one end on
+ * its own when the other landed somewhere with no source range (the front
+ * matter panel, the outline, a rendered diagram that lost its range).
+ *
+ * Lines, never columns, here and everywhere else this attribute is read.
+ * `data-sourcepos` describes the text `convert_markdown` handed comrak, not the
+ * buffer the user edits: only the LINE numbers of the two are contractually
+ * equal (`line_preserving_transforms` in src-tauri/src/lib.rs). The columns are
+ * not — masking `$a+b$` for the math pass substitutes a token of a different
+ * length, so every column after it on that line is off by the difference.
+ */
+export function mergeSourceLineRanges(a: LineRange | null, b: LineRange | null): LineRange | null {
+	if (!a) return b;
+	if (!b) return a;
+
+	return {
+		startLine: Math.min(a.startLine, b.startLine),
+		endLine: Math.max(a.endLine, b.endLine),
+	};
 }
 
 function elementChildren(node: AnchorNode): AnchorNode[] {

@@ -214,7 +214,7 @@ test('a chord that both layers answer means the same thing in both', () => {
 		'file-open': 'selectFile',
 		'file-save': 'saveContent',
 		'file-close': 'closeFile',
-		'view-toggle-edit': 'toggleEdit',
+		'view-toggle-edit': 'toggleEditView',
 		'view-toggle-split': 'toggleSplitView',
 		'tab-undo-close': 'handleUndoCloseTab',
 	};

@@ -40,17 +40,21 @@ import { routeDroppedFile, type DropPane } from './utils/fileDrop.js';
 import { headingReference, preferredReferenceStyle } from './utils/headingReference.js';
 import {
 	findAnchorElement,
+	findSourceLineRange,
 	getAnchorScrollTop,
 	getPreviewOffsetForSourceLine,
 	getSourceLineAtPreviewOffset,
 	measureAnchorBox,
+	mergeSourceLineRanges,
 	PREVIEW_ANCHOR_OFFSET,
 	type AnchorBox,
 	type AnchorNode,
+	type LineRange,
 	type OffsetLayoutNode,
 } from './utils/previewAnchor.js';
 import {
 	addFrontMatterListItems,
+	frontMatterLineOffset,
 	getMarkdownBodyWithoutFrontMatter,
 	getFrontMatterListItems,
 	parseFrontMatter,
@@ -143,6 +147,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		undo: () => void;
 		redo: () => void;
 		revealHeader: (sourceLine: number | null, text: string) => void;
+		revealSourceRange: (startLine: number, endLine: number) => void;
 		triggerFind: () => void;
 	} | null>(null);
 	let liveMode = $state(false);
@@ -1602,6 +1607,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		}
 	}
 
+	/**
+	 * Move the active tab between reading and editing. Just the mode — where
+	 * the reader LANDS is `editSourceRange`'s business, and `toggleEditView`
+	 * is what decides which of the two a ⌘E means.
+	 */
 	async function toggleEdit() {
 		const tab = tabManager.activeTab;
 		if (!tab || tab.path === undefined) return;
@@ -1658,6 +1668,129 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				tab.isEditing = true;
 			}
 		}
+	}
+
+	/**
+	 * A jump the editor has not been asked for yet, because it does not exist
+	 * yet: `toggleEdit` only flips a flag, and the `Editor` it mounts — and the
+	 * `editorPane` binding that reaches it — arrive on the next render. The
+	 * effect below spends it the moment they do, and immediately when the
+	 * editor is already on screen (split view).
+	 */
+	let pendingEditReveal = $state<LineRange | null>(null);
+
+	$effect(() => {
+		const range = pendingEditReveal;
+		if (!range || !editorPane) return;
+
+		pendingEditReveal = null;
+		editorPane.revealSourceRange(range.startLine, range.endLine);
+	});
+
+	/**
+	 * Which source lines the reader means by right-clicking here (#90).
+	 *
+	 * The selection when there is one, so a range spanning several blocks opens
+	 * the editor on all of them; a caret or a click with nothing selected falls
+	 * through to whatever is under the pointer, which is how a click on an
+	 * image lands on the image.
+	 *
+	 * `null` when nothing under the pointer came from the document: the front
+	 * matter panel, the outline, the window chrome. The caller then leaves the
+	 * "Edit" entry doing exactly what it did before.
+	 */
+	function getContextMenuSourceRange(e: MouseEvent): LineRange | null {
+		return getSelectionSourceRange() ?? findSourceLineRange(e.target as Node | null);
+	}
+
+	/**
+	 * The source lines the reader has selected in the preview, or null when
+	 * nothing is selected or the selection came from outside the document.
+	 *
+	 * Both ends resolve independently and are merged, so a selection spanning
+	 * several blocks answers with all of them, and one end landing somewhere
+	 * with no range (the front matter panel, the outline) leaves the other end
+	 * in charge. Direction-independent: `startContainer` is the range's start,
+	 * not the point the drag began at.
+	 */
+	function getSelectionSourceRange(): LineRange | null {
+		const selection = window.getSelection();
+		if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+		return mergeSourceLineRanges(
+			findSourceLineRange(selection.getRangeAt(0).startContainer),
+			findSourceLineRange(selection.getRangeAt(selection.rangeCount - 1).endContainer),
+		);
+	}
+
+	/**
+	 * The preview's "Edit": open the editor on what the reader pointed at.
+	 *
+	 * With a range in hand this stops being a toggle. In split view the editor
+	 * is already on screen and the old behaviour — leave edit mode — is the one
+	 * thing "edit this fragment" cannot mean, so the toggle is skipped and only
+	 * the jump happens. With no range (right-click outside the document) the
+	 * entry is untouched.
+	 */
+	/**
+	 * What ⌘E means, from every entry point that offers it — the hotkey, the
+	 * toolbar, the title bar, and Monaco's own command.
+	 *
+	 * One function so the chord cannot mean two things depending on where the
+	 * caret happens to be (`formatShortcutKeymap.test.ts` holds the two layers
+	 * together), and so "take me to the editor" behaves the same whether the
+	 * reader asked for it with a key or with a menu item.
+	 */
+	async function toggleEditView() {
+		const selected = getSelectionSourceRange();
+
+		if (isEditing && !isSplit) {
+			// The editor is already the whole window: nowhere further to take
+			// the reader, so this is the toggle back out.
+			await toggleEdit();
+			return;
+		}
+
+		if (isSplit && !selected) {
+			// Deliberately nothing.
+			//
+			// What ⌘E is asked for is the ability to edit, and split view
+			// already grants it — the editor is on screen. With no selection
+			// there is no fragment to travel to either, so every remaining
+			// reading of the chord is a LAYOUT change nobody asked for: closing
+			// the preview on a mistyped ⌘E costs the reader the pane and a
+			// second keystroke to get it back, while doing nothing costs
+			// nothing. ⌘\ opens and closes the split, and stays the only way.
+			return;
+		}
+
+		// Reading, or split with something selected — identical to the context
+		// menu's "Edit". In split view the editor is already on screen, so
+		// `editSourceRange` skips the toggle and only jumps, which is what
+		// gives the highlight there too.
+		await editSourceRange(selected);
+	}
+
+	async function editSourceRange(range: LineRange | null) {
+		if (!isEditing) await toggleEdit();
+		// `toggleEdit` swallows a failed read and stays in reading mode. Arming
+		// the jump anyway would fire it at whatever document is edited next.
+		if (range && tabManager.activeTab?.isEditing) pendingEditReveal = toBufferRange(range);
+	}
+
+	/**
+	 * A renderer line range moved onto the buffer's numbering.
+	 *
+	 * `data-sourcepos` counts from the first line of the BODY, because that is
+	 * what `renderMarkdownPreview` hands comrak — front matter is stripped
+	 * first. The editor holds the whole file. Without this every jump into a
+	 * document with front matter lands that many lines early, and the outline
+	 * has been doing exactly that: `Toc.svelte` reads the same attribute and
+	 * passes it to `revealHeader` untouched.
+	 */
+	function toBufferRange(range: LineRange): LineRange {
+		const offset = frontMatterLineOffset(rawContent);
+		if (!offset) return range;
+		return { startLine: range.startLine + offset, endLine: range.endLine + offset };
 	}
 
 	async function saveContent(tabId?: string): Promise<boolean> {
@@ -2163,6 +2296,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			];
 		}
 
+		// Resolved now rather than inside the "Edit" handler: by the time that
+		// runs the reader has clicked a menu item, and a click is how a
+		// selection goes away.
+		const editSourceTarget = getContextMenuSourceRange(e);
+
 		const mermaidDiag = (e.target as HTMLElement).closest('.mermaid-diagram');
 		if (mermaidDiag) {
 			mediaItems = [
@@ -2193,7 +2331,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				} },
 				{ separator: true },
 				{ label: t('menu.openLocation', uiLanguage), onClick: openFileLocation, disabled: !currentFile },
-				{ label: t('menu.edit', uiLanguage), onClick: () => toggleEdit() },
+				{ label: t('menu.edit', uiLanguage), onClick: () => editSourceRange(editSourceTarget) },
 				{ separator: true },
 				{ label: t('menu.closeFile', uiLanguage), onClick: closeFile },
 			],
@@ -2486,7 +2624,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			// other pane" is not a request to write the file: whether a dirty
 			// tab is flushed is now decided by the user's auto-save setting
 			// alone, identically for the hotkey and the toolbar button.
-			if (!isSplit) toggleEdit();
+			//
+			toggleEditView();
 		}
 		if (cmdOrCtrl && e.shiftKey && !e.altKey && key === 's') {
 			// Save As. The app menu advertised this chord for as long as the menu has
@@ -3148,7 +3287,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
-		ontoggleEdit={() => toggleEdit()}
+		ontoggleEdit={() => toggleEditView()}
 		ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 		{isEditing}
 		ondetach={handleDetach}
@@ -3188,7 +3327,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
-		ontoggleEdit={() => toggleEdit()}
+		ontoggleEdit={() => toggleEditView()}
 		ontoggleEditorToolbar={() => settings.toggleEditorToolbar()}
 		ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 		{isEditing}
@@ -3275,7 +3414,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 								onopen={selectFile}
 								onclose={closeFile}
 								onreveal={openFileLocation}
-								ontoggleEdit={() => toggleEdit()}
+								ontoggleEdit={() => toggleEditView()}
 								ontoggleLive={toggleLiveMode}
 								ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 								onhome={() => (showHome = true)}
@@ -3494,7 +3633,14 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 										oncopyref={(text: string, slug: string) => copyHeadingReference(text, slug)}
 										onjump={(id: string, text: string, sourceLine: number | null) => {
 											if (isEditing && editorPane) {
-												editorPane.revealHeader(sourceLine, text);
+												// Same renderer-to-buffer shift as the context menu: the
+												// outline reads `data-sourcepos` too, and has been landing
+												// short by the front matter's height for as long as both
+												// have existed.
+												editorPane.revealHeader(
+													sourceLine === null ? null : toBufferRange({ startLine: sourceLine, endLine: sourceLine }).startLine,
+													text,
+												);
 											}
 										}}
 										oncontext={(e, item) => {
