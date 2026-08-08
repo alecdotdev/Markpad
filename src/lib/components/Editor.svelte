@@ -441,6 +441,18 @@
 			// the right fix for that bug and left the reader pointed at a menu
 			// whose Paste silently did nothing (#207).
 			contextmenu: false,
+			// Monaco writes a styled `text/html` flavour beside the plain text on a
+			// copy. Everything Markpad produces IS plain text, so pasting into Word
+			// or Outlook gave coloured monospace instead of the Markdown that was
+			// copied — the styled flavour has no audience here (#393).
+			//
+			// Still needed after cut/copy/paste were collapsed onto three functions
+			// of our own, which is easy to get wrong: those cover ⌘C and the context
+			// menu, and macOS has a third way in. Edit > Copy in the menu bar is a
+			// `PredefinedMenuItem::copy` (#527), which asks the webview to perform
+			// its own copy — Monaco's, not ours. Without this the menu bar would put
+			// a different clipboard on the pasteboard than the other two routes.
+			copyWithSyntaxHighlighting: false,
 			// The same argument one option over. U+2028 (LINE SEPARATOR) and
 			// U+2029 (PARAGRAPH SEPARATOR) break a JavaScript string literal,
 			// which is what Monaco's guard is for; in Markdown they are just

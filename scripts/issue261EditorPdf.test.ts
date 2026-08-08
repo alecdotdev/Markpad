@@ -176,3 +176,19 @@ test('print layout keeps wide metadata tables readable', () => {
 	assert.match(printStyles, /\.markdown-body \.frontmatter-summary\s*\{[\s\S]*?box-sizing:\s*border-box\s*!important;/);
 	assert.match(printStyles, /\.markdown-body \.frontmatter-title\s*\{[\s\S]*?min-width:\s*0\s*!important;/);
 });
+
+
+test('the menu bar copies the same clipboard the other two routes do', () => {
+	// Cut, copy and paste run three functions of ours, reached from the
+	// keyboard and from the editor's context menu. macOS has a third way in
+	// that reaches none of them: Edit > Copy in the menu bar is a
+	// `PredefinedMenuItem::copy` (#527), which asks the WEBVIEW to copy —
+	// Monaco's implementation, not ours.
+	//
+	// Monaco's writes a styled `text/html` flavour beside the plain text, so
+	// without this option that route puts coloured monospace on the pasteboard
+	// while ⌘C and the context menu put Markdown. Removed once on the reasoning
+	// that Monaco's copy had become unreachable; it had not.
+	assert.match(readSource('src/lib/components/Editor.svelte'), /copyWithSyntaxHighlighting: false,/);
+	assert.match(readSource('src-tauri/src/lib.rs'), /PredefinedMenuItem::copy/, 'precondition: the menu bar route exists');
+});
