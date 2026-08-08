@@ -603,7 +603,16 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		if (!(await ensureFullContent(tab.id))) return false;
 		const raw = tab.rawContent;
 		const body = getMarkdownBodyWithoutFrontMatter(raw);
-		const updatedBody = body.replace(/^(\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+)\[( |x|X)\]/gm, (match, prefix, _state, offset) => {
+		// Horizontal whitespace only, and it has to stay that way. `\s` matches
+		// `\r` as well as `\n`, and JavaScript's `/m` `^` also matches at the
+		// position *between* a `\r` and its `\n`. With `\s*` greedy, every match
+		// in a CRLF buffer began one character early — on the previous line's
+		// `\n` — so `body.slice(0, offset)` held one `\n` too few and every task
+		// resolved to line N-1. On the last task that is a no-op the user reads
+		// as "the checkbox does not work" (#148); anywhere else the off-by-one
+		// lands on a *real* task line and silently toggles the wrong one. Every
+		// CRLF document was affected, which is to say every Windows author.
+		const updatedBody = body.replace(/^([ \t]*(?:>[ \t]*)*(?:[-+*]|\d+[.)])[ \t]+)\[( |x|X)\]/gm, (match, prefix, _state, offset) => {
 			const line = body.slice(0, offset).split('\n').length;
 			if (line === sourceLine) return `${prefix}[${nowChecked ? 'x' : ' '}]`;
 			return match;
