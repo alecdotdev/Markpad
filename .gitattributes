@@ -31,3 +31,16 @@
 *.svg   text eol=lf
 *.ico   binary
 *.icns  binary
+
+# Test fixtures that are deliberately not UTF-8 (#372).
+#
+# `-text` opts them out of the `* text=auto eol=lf` above, which would have git
+# decide they are text and normalise their line endings. That would not in fact
+# corrupt them — no GBK or Shift_JIS trail byte can be 0x0A or 0x0D — but it is
+# not worth resting on.
+#
+# `-diff` is the separate half, and the one that shows: without it git diffs
+# them as text and prints their bytes through a UTF-8 lens, so every review
+# that touches one reads a screen of mojibake. With it, "Binary files differ",
+# which is both shorter and true.
+samples/encoding-*.md  -text -diff
