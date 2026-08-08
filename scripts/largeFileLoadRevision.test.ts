@@ -45,9 +45,10 @@ g.$derived.by = (fn: () => unknown) => fn();
 g.$effect = runeEffect;
 g.window = g.window ?? {};
 
-const PREVIEW_BYTES = 50000;
-const FULL = `# big\n\n${'x'.repeat(PREVIEW_BYTES)}\n\ntail that must never be lost\n`;
-const PARTIAL = FULL.slice(0, PREVIEW_BYTES);
+// The preview always returns isFull=false to exercise the two-stage path
+// regardless of the actual threshold — no need for a multi-MB test string.
+const FULL = '# big\n\n' + 'x'.repeat(200) + '\n\ntail that must never be lost\n';
+const PARTIAL = FULL.slice(0, 40) + '…';
 
 /** Per-call delays, so the two concurrent loads can be ordered deliberately. */
 let previewDelays: number[] = [];
@@ -102,6 +103,7 @@ function reset() {
 		if (cmd === 'canonicalize_path') return '/docs/big.md';
 		if (cmd === 'open_markdown_preview') {
 			const delay = previewDelays[previewCall++] ?? 0;
+			// Always return isFull=false to exercise the two-stage load path
 			return wait(delay).then(() => ['<p>preview</p>', PARTIAL, false, false, 'UTF-8']);
 		}
 		if (cmd === 'read_file_content_checked') return [FULL, false, 'UTF-8'];
@@ -124,7 +126,7 @@ async function loadTwice() {
 	return { session, tab: tabManager.activeTab! };
 }
 
-test('an overtaken load cannot leave the tab holding its 50KB slice', async () => {
+test('an overtaken load cannot leave the tab holding its preview slice', async () => {
 	reset();
 	// The first load's preview read is slow, so it lands after the second load
 	// has already completed the tab. This is the ordering that stranded it.

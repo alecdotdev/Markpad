@@ -134,7 +134,7 @@ export interface Tab {
 	collapsedHeaders: Set<string>;
 	/**
 	 * True while `rawContent` holds only the leading slice of a large file
-	 * (the >50KB preview read) instead of the whole document. Such a buffer
+	 * (the >5MB preview read) instead of the whole document. Such a buffer
 	 * looks clean and authoritative but writing it back truncates the file,
 	 * so every path that can reach disk must complete it first — see
 	 * `ensureFullContent` in documentSession. Optional because tabs built

@@ -81,7 +81,7 @@ function markPreviewMatchesBuffer(tab: Tab, rawContent: string) {
 
 /**
  * Which heading sections the tab being loaded has folded, read at render time
- * rather than captured up front. A large file is rendered twice — the 50KB
+ * rather than captured up front. A large file is rendered twice — the 5MB
  * preview, then the whole document once the background read lands — and the
  * user can fold something in between; the second render has to honour that.
  * An unknown tab folds nothing, which is what a load of a tab that has since
@@ -197,7 +197,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	}
 
 	/**
-	 * Replace a partial buffer (the >50KB preview read) with the whole file.
+	 * Replace a partial buffer (the >5MB preview read) with the whole file.
 	 * Must be awaited by every path that can lead to a write — entering the
 	 * editor or split view, editing front matter, toggling a task checkbox,
 	 * moving the tab to another window — because writing the partial buffer
@@ -225,7 +225,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			// CLEARS the flag for a file converted to UTF-8 since the load.
 			const [full, lossy, encoding] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean, string];
 			tabManager.setTabDecodedLossy(tabId, lossy);
-			// The preview's answer came from the first 50KB; this one is the
+			// The preview's answer came from the first 5MB; this one is the
 			// whole file's, and it is the one every save from here on uses.
 			tabManager.setTabEncoding(tabId, encoding);
 			tabManager.setTabRawContent(tabId, full);
@@ -442,7 +442,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			// both as well), so two loads can run on one tab. The full-load stage
 			// already refuses to apply a stale result; the first stage did not, and
 			// an older preview landing last overwrote the winner's complete buffer
-			// with its 50KB slice, re-raising `isTruncated` — after which every save
+			// with its 5MB slice, re-raising `isTruncated` — after which every save
 			// is refused and nothing retries. Same revision test, applied to every
 			// write a load makes.
 			const isCurrentLoad = () => loadRevisionByTab.get(activeId) === fullLoadRevision;
@@ -463,14 +463,14 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 					// And both are applied BEFORE `initialIsSplit` is read, so a
 					// document opening into either editable mode takes the
 					// full-read branch below: those panes can write, and an editor
-					// bound to the 50KB preview slice is one keystroke away from
+					// bound to the 5MB preview slice is one keystroke away from
 					// auto-saving it back over the whole file.
 					tab.isEditing = settings.openFileMode === 'editor';
 					if (settings.openFileMode === 'split') tabManager.setSplitEnabled(tab.id, true);
 				}
 				const initialIsEditing = tab?.isEditing ?? false;
 				const initialIsSplit = tab?.isSplit ?? false;
-				// `open_markdown_preview` returns only the first 50KB of a large
+				// `open_markdown_preview` returns only the first 5MB of a large
 				// file, which is fine behind a read-only preview because the
 				// background read below completes it. An editor bound to that
 				// partial buffer is one keystroke away from auto-saving it back
@@ -485,7 +485,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 					[content, lossy, encoding] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean, string];
 					isFull = true;
 				} else {
-					[, content, isFull, lossy, encoding] = (await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 })) as [string, string, boolean, boolean, string];
+					[, content, isFull, lossy, encoding] = (await invoke('open_markdown_preview', { path: filePath, maxBytes: 5_000_000 })) as [string, string, boolean, boolean, string];
 				}
 				// Ahead of the encoding verdict, not just the buffer: a prefix's
 				// detected encoding can differ from the whole file's, and
@@ -527,7 +527,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 											tabManager.setTabRawContent(activeId, fullContent);
 											// This buffer REPLACES the preview's, so it
 											// carries its own verdict — the preview only
-											// saw the first 50KB, and both the fidelity
+											// saw the first 5MB, and both the fidelity
 											// and the detected encoding of a prefix can
 											// differ from the whole file's.
 											tabManager.setTabDecodedLossy(activeId, fullLossy);
