@@ -29,6 +29,19 @@ type RestoreProgress = {
 	interruptions: number;
 };
 
+/**
+ * What an interrupted launch has to tell the user.
+ *
+ * Not a sentence: this module has no language, and Markpad ships 26 locales.
+ * It reports what happened and the UI decides how to say it — the same event
+ * also goes to `onWarning`, which stays detailed and English because its
+ * destination is a developer console.
+ */
+export type RestoreInterruption = {
+	/** The document the dead launch was reading, if it got far enough to name one. */
+	deferredPath: string | null;
+};
+
 /** Enough to keep the suspects, few enough to stay a breadcrumb. */
 const MAX_DEFERRED = 8;
 
@@ -61,6 +74,13 @@ type WindowSessionOptions = {
 	acceptTransferredTab: (tab: TransferableTab) => Promise<boolean>;
 	onError: (message: string, error: unknown) => void;
 	onWarning: (message: string, error?: unknown) => void;
+	/**
+	 * Called once, at startup, when the previous launch did not finish. This is
+	 * the mechanism's own diagnosis of "why did Markpad come back without my
+	 * documents"; routing it anywhere the user cannot see leaves the answer
+	 * written where nobody can read it.
+	 */
+	onInterrupted: (interruption: RestoreInterruption) => void;
 };
 
 export function createWindowSession(options: WindowSessionOptions) {
@@ -77,8 +97,23 @@ export function createWindowSession(options: WindowSessionOptions) {
 		}
 	}
 
-	function readProgress(): RestoreProgress | null {
-		const raw = localStorage.getItem(options.restoreInProgressKey);
+	/**
+	 * The breadcrumb is written through Rust, for the reason the snapshot is
+	 * (see `persistWindowState` in MarkdownViewer): `setItem` is an async
+	 * message to the WebKit storage process, and the abnormal termination this
+	 * record exists to survive is exactly the event that loses messages in
+	 * flight. It was the one piece of state whose whole job is to outlive a
+	 * kill, kept in the store this codebase had already proved does not.
+	 *
+	 * `restoreInProgressKey` stays as a read-once migration path: a breadcrumb
+	 * an older build left behind is still honoured, and dropped as soon as a
+	 * Rust write succeeds. The Rust file wins when both exist, so a downgrade
+	 * and re-upgrade cannot resurrect a stale localStorage record.
+	 */
+	async function readProgress(): Promise<RestoreProgress | null> {
+		const raw =
+			((await invoke('load_restore_progress').catch(() => null)) as string | null) ??
+			localStorage.getItem(options.restoreInProgressKey);
 		if (!raw) return null;
 		try {
 			const data = JSON.parse(raw) as Partial<RestoreProgress> | null;
@@ -100,14 +135,24 @@ export function createWindowSession(options: WindowSessionOptions) {
 		}
 	}
 
-	function writeProgress(progress: RestoreProgress) {
+	async function writeProgress(progress: RestoreProgress) {
 		// A finished pass with nothing deferred leaves no breadcrumb at all,
-		// which is what keeps the key absent in the ordinary case.
-		if (!progress.running && progress.deferred.length === 0) {
-			localStorage.removeItem(options.restoreInProgressKey);
+		// which is what keeps the record absent in the ordinary case.
+		const clearing = !progress.running && progress.deferred.length === 0;
+		try {
+			if (clearing) await invoke('clear_restore_progress');
+			else await invoke('save_restore_progress', { json: JSON.stringify(progress) });
+		} catch (error) {
+			// No localStorage fallback on purpose: two copies that can disagree
+			// is how a stale record gets preferred over a fresh one. A backend
+			// that cannot write this cannot write the snapshot either, and that
+			// failure is already reported at close.
+			options.onWarning('Failed to record session restore progress', error);
 			return;
 		}
-		localStorage.setItem(options.restoreInProgressKey, JSON.stringify(progress));
+		// Only once the durable copy is in place, so a build that cannot reach
+		// the backend keeps whatever the previous one left behind.
+		localStorage.removeItem(options.restoreInProgressKey);
 	}
 
 	/**
@@ -117,20 +162,20 @@ export function createWindowSession(options: WindowSessionOptions) {
 	 * one bad startup would cost the user automatic restore of that document
 	 * forever.
 	 */
-	function releaseReadableDeferrals() {
-		const progress = readProgress();
+	async function releaseReadableDeferrals() {
+		const progress = await readProgress();
 		if (!progress || progress.deferred.length === 0) return;
 		const readable = new Set(
 			tabManager.tabs.filter((tab) => tab.isTruncated !== true && tab.rawContent !== '').map((tab) => tab.path),
 		);
 		const deferred = progress.deferred.filter((path) => !readable.has(path));
 		if (deferred.length === progress.deferred.length) return;
-		writeProgress({ ...progress, deferred });
+		await writeProgress({ ...progress, deferred });
 	}
 
 	async function persistState() {
 		if (!options.isMainWindow) return;
-		releaseReadableDeferrals();
+		await releaseReadableDeferrals();
 		try {
 			await invoke('save_window_state', { json: options.serializeState() });
 			localStorage.removeItem(options.windowStateKey);
@@ -147,14 +192,10 @@ export function createWindowSession(options: WindowSessionOptions) {
 			localStorage.removeItem(options.legacyStateKey);
 			// Nothing will be restored, so there is nothing for a breadcrumb to
 			// say about the next launch.
-			localStorage.removeItem(options.restoreInProgressKey);
+			await writeProgress({ running: false, pending: null, deferred: [], interruptions: 0 });
 			return;
 		}
-		const savedData =
-			localStorage.getItem(options.windowStateKey) ??
-			localStorage.getItem(options.legacyStateKey) ??
-			((await invoke('load_window_state').catch(() => null)) as string | null);
-		const previous = readProgress();
+		const previous = await readProgress();
 		const deferred = previous ? [...previous.deferred] : [];
 		let interruptions = previous?.interruptions ?? 0;
 		if (previous?.running) {
@@ -170,14 +211,35 @@ export function createWindowSession(options: WindowSessionOptions) {
 					? `Markpad session restore was interrupted; deferring ${previous.pending}`
 					: 'Markpad session restore was interrupted with no document to blame',
 			);
+			options.onInterrupted({ deferredPath: previous.pending });
 		}
 		// Nothing here is allowed to delete the snapshot: a restore that goes
 		// wrong must cost the user at most the automatic reopening of a
 		// document, never the record of which documents were open.
 		const deferAll = interruptions >= MAX_INTERRUPTIONS;
+
+		// Claim the launch before the snapshot is loaded, not after.
+		//
+		// The snapshot lives on the Rust side — `persistState` moves it there
+		// and drops the localStorage copies — so reading it is an IPC round
+		// trip. Claiming afterwards left that round trip, and everything before
+		// it, outside the window this mechanism can see: a launch killed in
+		// there leaves no trace, so the next one starts from zero and walks
+		// into the same startup again, and the give-up counter that is supposed
+		// to end the loop never advances.
+		//
+		// Claiming early can leave a breadcrumb for a launch that turns out to
+		// have no snapshot at all. That costs one phantom interruption, and the
+		// `else` branch below clears it on the next launch; being wrong in that
+		// direction costs nothing, being wrong in the other costs a relaunch.
+		const progress: RestoreProgress = { running: true, pending: null, deferred, interruptions };
+		await writeProgress(progress);
+
+		const savedData =
+			localStorage.getItem(options.windowStateKey) ??
+			localStorage.getItem(options.legacyStateKey) ??
+			((await invoke('load_window_state').catch(() => null)) as string | null);
 		if (savedData) {
-			const progress: RestoreProgress = { running: true, pending: null, deferred, interruptions };
-			writeProgress(progress);
 			try {
 				options.restoreState(savedData);
 				for (const tab of options.restoredTabs()) {
@@ -194,7 +256,10 @@ export function createWindowSession(options: WindowSessionOptions) {
 						continue;
 					}
 					progress.pending = tab.path;
-					writeProgress(progress);
+					// Awaited: the record has to be on disk before the read it
+					// describes starts, or the launch this read kills is the one
+					// that leaves nothing behind.
+					await writeProgress(progress);
 					try {
 						// `_checked`, because restore fills an editable buffer: reads
 						// decode leniently, so a file in a legacy encoding comes back
@@ -216,7 +281,7 @@ export function createWindowSession(options: WindowSessionOptions) {
 						tabManager.markTabContentUnavailable(tab.id);
 					}
 					progress.pending = null;
-					writeProgress(progress);
+					await writeProgress(progress);
 				}
 				// The pass got to the end, so whatever interrupted the previous
 				// launches is behind us; only the deferrals stay.
@@ -224,13 +289,15 @@ export function createWindowSession(options: WindowSessionOptions) {
 			} catch (error) {
 				options.onError('Failed to restore Markpad session', error);
 			} finally {
-				writeProgress({ running: false, pending: null, deferred, interruptions });
+				await writeProgress({ running: false, pending: null, deferred, interruptions });
 			}
 		} else {
 			// No snapshot to read: a breadcrumb left by an earlier launch has
 			// nothing left to describe, and leaving it would count as another
-			// interruption next time.
-			writeProgress({ running: false, pending: null, deferred, interruptions: 0 });
+			// interruption next time. This is also what retires the claim the
+			// launch above staked before it knew whether there was anything to
+			// restore, so claiming early cannot accumulate phantom strikes.
+			await writeProgress({ running: false, pending: null, deferred, interruptions: 0 });
 		}
 		if (options.isDisposed()) return;
 		if (options.restoredTabs().length > 0) await persistState();

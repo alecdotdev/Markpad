@@ -226,15 +226,21 @@ function dirtyTab(mode: 'edit' | 'split', path = '/notes/note.md') {
 	return { tab, fakes, harness: buildHarness(fakes, mode === 'edit') };
 }
 
-function setSettings(autoSave: boolean, confirmBeforeSave: boolean) {
+/**
+ * `autoSave` used to be half of a pair — the other, `confirmBeforeSave`, could
+ * veto it, and every decision in the app read `autoSave && !confirmBeforeSave`.
+ * The pair is now the one switch that expression always described, so the two
+ * old combinations that meant "do not write silently" are the single `false`
+ * here.
+ */
+function setSettings(autoSave: boolean) {
 	settings.autoSave = autoSave;
-	settings.confirmBeforeSave = confirmBeforeSave;
 }
 
 // ------------------------------------------------------- leaving edit mode
 
 test('a dirty file switches to reading mode without a modal and without writing', async () => {
-	setSettings(false, false);
+	setSettings(false);
 	const { tab, fakes, harness } = dirtyTab('edit');
 
 	await harness.toggleEdit();
@@ -248,7 +254,7 @@ test('a dirty file switches to reading mode without a modal and without writing'
 });
 
 test('reading mode shows the buffer, not the file', async () => {
-	setSettings(false, false);
+	setSettings(false);
 	const { tab, harness, fakes } = dirtyTab('edit');
 
 	await harness.toggleEdit();
@@ -263,22 +269,8 @@ test('reading mode shows the buffer, not the file', async () => {
 	assert.deepEqual(fakes.loadCalls, [], 'the file is not re-read to leave the editor');
 });
 
-test('confirm-before-save no longer turns a view toggle into a question', async () => {
-	// This setting promises confirmation before each WRITE. With no write left
-	// to do, it has nothing to confirm.
-	setSettings(true, true);
-	const { tab, fakes, harness } = dirtyTab('edit');
-
-	await harness.toggleEdit();
-
-	assert.deepEqual(fakes.askCustomCalls, []);
-	assert.deepEqual(fakes.saveCalls, []);
-	assert.equal(tab.isEditing, false);
-	assert.equal(tab.content, rendered(IN_BUFFER, tab.path));
-});
-
 test('an untitled buffer never reaches the Save dialog on a view toggle', async () => {
-	setSettings(true, false);
+	setSettings(true);
 	tabManager.closeAll();
 	const fakes = freshFakes();
 	tabManager.addTab('');
@@ -297,7 +289,7 @@ test('an untitled buffer never reaches the Save dialog on a view toggle', async 
 test('auto-save still flushes on the way out, because the debounce is about to be dropped', async () => {
 	// The auto-save effect requires `isEditing || isSplit`, so this is the last
 	// chance to honour "save automatically" for these edits.
-	setSettings(true, false);
+	setSettings(true);
 	const { tab, fakes, harness } = dirtyTab('edit');
 
 	await harness.toggleEdit();
@@ -314,7 +306,7 @@ test('a file that cannot be written no longer traps the user in the editor', asy
 	// Read-only path, or a buffer the lossy-decode guard refuses: saveContent
 	// returns false forever, and the old code returned early on that, so
 	// reading mode was unreachable for the life of the tab.
-	setSettings(true, false);
+	setSettings(true);
 	const { tab, fakes, harness } = dirtyTab('edit');
 	fakes.saveFails = true;
 
@@ -328,7 +320,7 @@ test('a file that cannot be written no longer traps the user in the editor', asy
 });
 
 test('edits typed during the flush are shown, and reported as not yet on disk', async () => {
-	setSettings(true, false);
+	setSettings(true);
 	const { tab, fakes, harness } = dirtyTab('edit');
 	fakes.typeDuringSave = 'typed while saving\n';
 
@@ -347,7 +339,7 @@ test('edits typed during the flush are shown, and reported as not yet on disk', 
 // --------------------------------------------------- closing the split view
 
 test('closing split view on a dirty file neither asks nor writes', async () => {
-	setSettings(false, false);
+	setSettings(false);
 	const { tab, fakes, harness } = dirtyTab('split');
 
 	await harness.toggleSplitView(tab.id);
@@ -362,7 +354,7 @@ test('closing split view on a dirty file neither asks nor writes', async () => {
 });
 
 test('closing split view honours auto-save the same way leaving edit mode does', async () => {
-	setSettings(true, false);
+	setSettings(true);
 	const { tab, fakes, harness } = dirtyTab('split');
 
 	await harness.toggleSplitView(tab.id);
@@ -402,7 +394,7 @@ function makeSession(askClose: (title: string) => Promise<'save' | 'discard' | '
 }
 
 test('closing a tab with unsaved edits still asks, and Cancel still keeps it open', async () => {
-	setSettings(false, false);
+	setSettings(false);
 	tabManager.closeAll();
 	tabManager.addTab('/notes/note.md');
 	const tab = tabManager.activeTab!;

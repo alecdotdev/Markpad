@@ -1,4 +1,5 @@
-use comrak::{markdown_to_html, Anchorizer, Options};
+use comrak::nodes::NodeValue;
+use comrak::{markdown_to_html, parse_document, Anchorizer, Arena, Options};
 use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::fs;
@@ -19,7 +20,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// between into an `<img src>`, destroying the prose *and* renumbering every
 /// task checkbox below it. Not matching (rather than matching and bailing out)
 /// also leaves the later, well-formed embed free to render.
-static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[(.*?)\]\]").unwrap());
+static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[(.*?)\]\]").expect("valid regex literal"));
 /// `[[target]]` / `[[target|alias]]` where the target names a heading — either
 /// in this document (`#Setup`) or in another file (`Notes#Setup`). The `#` is
 /// required: a wikilink without one is a bare note link, which Markpad has
@@ -29,20 +30,14 @@ static INTERNAL_EMBED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[(
 /// `process_wikilinks` re-checks that the target half really has one.
 /// The inner text stops at the first `]`, as the narrower `[[#…]]` pattern
 /// this replaced also did.
-static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]]*#[^\]]*)\]\]").unwrap());
+static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]]*#[^\]]*)\]\]").expect("valid regex literal"));
 /// ` ^block-id` at the end of a line. The leading whitespace is captured
 /// because Obsidian also accepts a block id alone on the line after the block
 /// it names, and `\s+` then spans the newline: the replacement has to put that
 /// newline back, or the anchor is folded onto the previous line and every line
 /// below it moves up one (see the line contract in `mod tests`).
 static BLOCK_ID_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?m)(\s+)\^([a-zA-Z0-9_-]+)$").unwrap());
-static HIGHLIGHT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"==([^=\n]+)==").unwrap());
-/// Obsidian's inline footnote `^[text]`, which is a single-line form — the
-/// multi-line spelling is the separate `[^ref]` + `[^ref]: …` pair. Excluding
-/// the newline also keeps the line contract: collapsing a wrapped `^[…]` into
-/// one `[^ifn-N]` reference renumbered every line below it.
-static INLINE_FOOTNOTE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\^\[([^\]\n]+)\]").unwrap());
+    LazyLock::new(|| Regex::new(r"(?m)(\s+)\^([a-zA-Z0-9_-]+)$").expect("valid regex literal"));
 /// The rendered task-list `<input>` this pass is allowed to mark.
 ///
 /// The boolean attributes are matched as an unordered set rather than in a
@@ -56,10 +51,10 @@ static TASK_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"<li data-sourcepos="(?<sourcepos>(?<line>\d+):\d+-\d+:\d+)">(?<input><input type="checkbox"(?: (?:checked|disabled)="")* />)"#,
     )
-    .unwrap()
+    .expect("valid regex literal")
 });
 static TASK_SOURCE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX]\](?:\s|$)").unwrap()
+    Regex::new(r"^\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+\[[ xX]\](?:\s|$)").expect("valid regex literal")
 });
 
 /// Distinguishes the temp files of `atomic_write` calls that share a process.
@@ -374,6 +369,63 @@ fn escape_html_attribute(value: &str) -> String {
     escaped
 }
 
+/// The comrak configuration the preview is rendered with.
+///
+/// Extracted because a second reader of the document — `heading_anchors`, for
+/// the editor's link completion — has to parse it the same way the renderer
+/// does, or it reports ids for headings the renderer never made and misses the
+/// ones it did.
+fn markdown_options<'a>() -> Options<'a> {
+    let mut options = Options::default();
+    options.extension.strikethrough = true;
+    options.extension.table = true;
+    options.extension.autolink = true;
+    options.extension.tasklist = true;
+    // `++ins++` — Pandoc's and CriticMarkup's spelling for inserted text, and
+    // plain characters here until now. It is the only one of its group worth
+    // taking, and the rule that decided the others is worth stating, because
+    // it is not "is this syntax popular":
+    //
+    //     Accept a dialect only where it cannot misread ORDINARY TEXT.
+    //
+    // Measured against this renderer, three failed that:
+    //
+    //   `subscript` (`~sub~`). GFM defines strikethrough as "one or two
+    //   tildes", so `~x~` is struck-through on GitHub and here. Subscripts
+    //   take that spelling away, and a valid GFM document starts rendering
+    //   differently in this app. `<sub>2</sub>` works in both places.
+    //
+    //   `superscript` (`^sup^`). Worse than taking a spelling — it takes
+    //   PROSE. Two carets in a paragraph pair up, so `a^2 + b^2 = c^2`, which
+    //   renders as written today both here and on GitHub, would become
+    //   `a<sup>2 + b</sup>2 = c^2`.
+    //
+    //   `spoiler` (`||text||`). `||` is also an empty table cell: with
+    //   spoilers on, `| 1 || 3 |` collapses into one cell reading "1 || 3".
+    //
+    // `++` passed: nothing else claims it, and `i++ then j++`, `C++ and C++`
+    // and a `+` list all come through untouched. See `syntax_coexistence`,
+    // `the_syntaxes_that_would_misread_ordinary_text` and
+    // `an_empty_table_cell_is_not_a_spoiler`.
+    //
+    // `==highlight==` and `^[a note]` are parsed rather than pre-rewritten.
+    // The regexes these replace could not see across a line break or past a
+    // nested `]`, and each needed its own scan to avoid firing inside code.
+    options.extension.highlight = true;
+    options.extension.inline_footnotes = true;
+    options.extension.insert = true;
+    options.extension.footnotes = true;
+    options.extension.description_lists = true;
+    // `header_ids` in 0.18; the option only ever set the *prefix* prepended to
+    // the anchorized heading text, and 0.52 renamed it to say so. `Some("")`
+    // means "ids on, no prefix" in both spellings.
+    options.extension.header_id_prefix = Some(String::new());
+    options.render.r#unsafe = true;
+    options.render.hardbreaks = true;
+    options.render.sourcepos = true;
+    options
+}
+
 /// The anchor id comrak assigns to a heading with this text. We call comrak's
 /// own `Anchorizer` rather than re-implementing its rules (lowercase, strip
 /// everything outside letters/marks/numbers/underscore/space/hyphen, spaces
@@ -543,82 +595,11 @@ fn validate_vsix_archive_limits<R: std::io::Read + std::io::Seek>(
     Ok(())
 }
 
-mod setup;
+mod asset_protocol;
+mod error;
 mod tab_transfer;
 mod window_runtime;
 use window_runtime::{AppState, WatcherState};
-
-#[tauri::command]
-async fn show_window(window: tauri::Window) {
-    window_runtime::show_window(window).await;
-}
-
-#[tauri::command]
-fn save_window_state(app: AppHandle, json: String) -> Result<(), String> {
-    window_runtime::save_window_state(app, json)
-}
-
-#[tauri::command]
-fn load_window_state(app: AppHandle) -> Option<String> {
-    window_runtime::load_window_state(app)
-}
-
-#[tauri::command]
-fn clear_window_state(app: AppHandle) -> Result<(), String> {
-    window_runtime::clear_window_state(app)
-}
-
-#[tauri::command]
-fn set_window_meta(
-    window: tauri::Window,
-    state: State<'_, AppState>,
-    tag_name: Option<String>,
-    tag_color: Option<String>,
-    active_tab_title: String,
-    tab_count: usize,
-) {
-    window_runtime::set_window_meta(window, state, tag_name, tag_color, active_tab_title, tab_count)
-}
-
-#[tauri::command]
-fn list_viewer_windows(state: State<'_, AppState>) -> Vec<window_runtime::WindowListEntry> {
-    window_runtime::list_viewer_windows(state)
-}
-
-#[tauri::command]
-fn is_window_tag_taken(window: tauri::Window, state: State<'_, AppState>, name: String) -> bool {
-    window_runtime::is_window_tag_taken(window, state, name)
-}
-
-#[tauri::command]
-fn offer_tab_to_window(
-    app: AppHandle,
-    state: State<'_, tab_transfer::TabTransferBroker>,
-    target_label: String,
-    token: String,
-) -> Result<(), String> {
-    window_runtime::offer_tab_to_window(app, state, target_label, token)
-}
-
-#[tauri::command]
-fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
-    window_runtime::focus_window(app, label)
-}
-
-#[tauri::command]
-fn list_pinned_tags(app: AppHandle) -> Vec<window_runtime::PinnedTag> {
-    window_runtime::list_pinned_tags(app)
-}
-
-#[tauri::command]
-fn save_pinned_tag(app: AppHandle, name: String, color: String, files: Vec<String>) -> Result<(), String> {
-    window_runtime::save_pinned_tag(app, name, color, files)
-}
-
-#[tauri::command]
-fn remove_pinned_tag(app: AppHandle, name: String) -> Result<(), String> {
-    window_runtime::remove_pinned_tag(app, name)
-}
 
 /// Byte ranges of code regions — fenced code blocks and inline code spans —
 /// paired with CommonMark's rules. The regex alternation previously used for
@@ -685,7 +666,7 @@ fn code_region_ranges(content: &str) -> Vec<(usize, usize)> {
                     if seg_start < line_start {
                         push_inline_code_spans(content, seg_start, line_start, &mut regions);
                     }
-                    fence = Some((marker.unwrap(), run_len, line_start));
+                    fence = Some((marker.expect("fence marker"), run_len, line_start));
                 }
             }
         }
@@ -965,42 +946,12 @@ fn process_wikilinks<'a>(content: &'a str) -> Cow<'a, str> {
         processed = Cow::Owned(replaced.into_owned());
     }
 
-    // 3. Convert ==highlight== to <mark>highlight</mark>
-    if HIGHLIGHT_RE.is_match(&processed) {
-        let regions = code_region_ranges(&processed);
-        let replaced = HIGHLIGHT_RE.replace_all(&processed, |caps: &Captures| {
-            let full = caps.get(0).unwrap();
-            if in_code_region(&regions, full.start()) {
-                return full.as_str().to_string();
-            }
-            format!("<mark>{}</mark>", caps.get(1).unwrap().as_str())
-        });
-        processed = Cow::Owned(replaced.into_owned());
-    }
-
-    // 4. Convert ^[inline footnote] to a footnote reference
-    if INLINE_FOOTNOTE_RE.is_match(&processed) {
-        let regions = code_region_ranges(&processed);
-        let mut footnote_defs = String::new();
-        let mut fn_count = 0usize;
-        let replaced = INLINE_FOOTNOTE_RE.replace_all(&processed, |caps: &Captures| {
-            let full = caps.get(0).unwrap();
-            if in_code_region(&regions, full.start()) {
-                return full.as_str().to_string();
-            }
-            fn_count += 1;
-            let label = format!("ifn-{}", fn_count);
-            footnote_defs.push_str(&format!(
-                "\n[^{}]: {}\n",
-                label,
-                caps.get(1).unwrap().as_str()
-            ));
-            format!("[^{}]", label)
-        });
-        let mut out = replaced.into_owned();
-        out.push_str(&footnote_defs);
-        processed = Cow::Owned(out);
-    }
+    // `==highlight==` and `^[inline footnote]` were rewritten here too, by two
+    // more regexes with two more code-region scans each. comrak parses both
+    // itself now (`extension.highlight`, `extension.inline_footnotes`), and the
+    // parser is better at it than the patterns were: a highlight may span a
+    // line break, and an inline footnote may contain brackets. Both stopped at
+    // those. See `markdown_options`.
 
     processed
 }
@@ -1655,21 +1606,7 @@ fn convert_markdown(content: &str) -> String {
     let processed_links = process_wikilinks(&processed_embeds);
     let masked_math = mask_math_spans(&processed_links);
 
-    let mut options = Options::default();
-    options.extension.strikethrough = true;
-    options.extension.table = true;
-    options.extension.autolink = true;
-    options.extension.tasklist = true;
-    options.extension.superscript = false;
-    options.extension.footnotes = true;
-    options.extension.description_lists = true;
-    // `header_ids` in 0.18; the option only ever set the *prefix* prepended to
-    // the anchorized heading text, and 0.52 renamed it to say so. `Some("")`
-    // means "ids on, no prefix" in both spellings.
-    options.extension.header_id_prefix = Some(String::new());
-    options.render.r#unsafe = true;
-    options.render.hardbreaks = true;
-    options.render.sourcepos = true;
+    let options = markdown_options();
 
     let html = markdown_to_html(&masked_math.text, &options);
     annotate_task_checkboxes(restore_math_spans(&html, &masked_math), raw_buffer)
@@ -1824,6 +1761,144 @@ async fn open_markdown_preview(
     })
     .await
     .unwrap_or_else(|e| Err(e.to_string()))
+}
+
+/// A heading, and the id a link has to name to reach it.
+#[derive(serde::Serialize)]
+struct HeadingAnchor {
+    /// 1-based line in the buffer the caller passed, for ordering the list.
+    line: u32,
+    level: u8,
+    /// What the heading reads as — the completion's label, and what a
+    /// `[[#…]]` wikilink is written with.
+    text: String,
+    /// What `[…](#…)` has to say. This is the id comrak renders, duplicates
+    /// included: a second "Objectives" is `objectives-1`, and offering the
+    /// bare slug for it would link to the first one.
+    slug: String,
+}
+
+/// Every heading in `markdown`, with the anchor comrak gives it.
+///
+/// Parsed rather than scanned for `#`, because a `# comment` inside a fenced
+/// code block is not a heading and this document is full of shell examples.
+/// The parse uses `markdown_options()` — the renderer's own configuration —
+/// so what comes back is what is actually on screen.
+///
+/// ONE anchorizer for the whole document, not one per heading. comrak numbers
+/// repeated headings (`objectives`, `objectives-1`, …) and this list has to
+/// carry the same numbering or completion hands the reader a link to the wrong
+/// section. That is the opposite of `heading_anchor_id`, which is deliberately
+/// fresh per lookup: a wikilink names a heading by TEXT, and text can only
+/// ever address the first heading that reads that way.
+///
+/// The SAME preprocessing the renderer runs, for the same reason: comrak never
+/// sees the buffer. `[[note#Setup]]` is a link by the time it is parsed, so the
+/// heading reads "note > Setup" and is anchorized as such; parsing the raw
+/// buffer instead reports an id for a heading that was never rendered. The
+/// steps are line-preserving (`line_preserving_transforms`), so the sourcepos
+/// numbers still address the caller's buffer.
+///
+/// Math is masked before the parse and comes back after it. Its token is put
+/// back as the source it stands for, which is what the renderer's own
+/// `restore_math_spans` writes into an anchor — and the two agree because
+/// anchorizing is a per-character map with no collapsing, so doing it to the
+/// pieces and doing it to the whole give the same string.
+fn heading_anchors(markdown: &str) -> Vec<HeadingAnchor> {
+    let autolinks = process_parenthesized_autolinks(markdown);
+    let embeds = process_internal_embeds(&autolinks);
+    let preprocessed = process_wikilinks(&embeds);
+    let masked = mask_math_spans(&preprocessed);
+
+    let arena = Arena::new();
+    let options = markdown_options();
+    let root = parse_document(&arena, &masked.text, &options);
+    let mut anchorizer = Anchorizer::new();
+    let mut anchors = Vec::new();
+
+    for node in root.descendants() {
+        let (level, line) = {
+            let data = node.data.borrow();
+            match data.value {
+                NodeValue::Heading(heading) => (heading.level, data.sourcepos.start.line),
+                _ => continue,
+            }
+        };
+
+        let text = unmask_math_text(&collect_inline_text(node), &masked);
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        anchors.push(HeadingAnchor {
+            line: line as u32,
+            level,
+            slug: anchorizer.anchorize(text.trim()),
+            text: text.trim().to_owned(),
+        });
+    }
+
+    anchors
+}
+
+/// The text a heading reads as, which is what comrak anchorizes: the literals
+/// of its inline children, with the emphasis and link markup dropped.
+fn collect_inline_text<'a>(node: &'a comrak::nodes::AstNode<'a>) -> String {
+    let mut text = String::new();
+    for descendant in node.descendants() {
+        match &descendant.data.borrow().value {
+            NodeValue::Text(literal) => text.push_str(literal),
+            NodeValue::Code(code) => text.push_str(&code.literal),
+            _ => {}
+        }
+    }
+    text
+}
+
+/// Puts masked math back into a piece of *text*, which is the spelling a text
+/// node gets. The rendered anchor is built from the same source
+/// (`restore_math_spans`, its `anchored` branch), so anchorizing this gives
+/// the id that is on the heading.
+fn unmask_math_text(text: &str, masked: &MaskedMath) -> String {
+    if masked.spans.is_empty() {
+        return text.to_owned();
+    }
+
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(masked.prefix.as_str()) {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + masked.prefix.len()..];
+        let digits = after
+            .as_bytes()
+            .iter()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count();
+        let index = if digits > 0 && after[digits..].starts_with(MATH_MASK_SUFFIX) {
+            after[..digits].parse::<usize>().ok()
+        } else {
+            None
+        };
+        match index.and_then(|index| masked.spans.get(index)) {
+            Some(span) => {
+                out.push_str(&span.text);
+                rest = &after[digits + MATH_MASK_SUFFIX.len_utf8()..];
+            }
+            None => {
+                out.push_str(&rest[at..at + masked.prefix.len()]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+#[tauri::command]
+async fn list_heading_anchors(markdown: String) -> Result<Vec<HeadingAnchor>, String> {
+    tauri::async_runtime::spawn_blocking(move || Ok(heading_anchors(&markdown)))
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -2032,34 +2107,48 @@ async fn save_file_binary(path: String, data: Vec<u8>) -> Result<(), String> {
     .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Async because `reveal` blocks its caller until the file manager answers:
+/// on Windows it spawns a COM worker for `SHOpenFolderAndSelectItems` and
+/// joins it, on macOS it waits for `open -R`. Selecting a file on a network
+/// volume makes that wait the share's, and on the main thread it would stall
+/// every window until it returns.
 #[tauri::command]
-fn open_file_folder(path: String) -> Result<(), String> {
-    opener::reveal(path).map_err(|e| e.to_string())
+async fn open_file_folder(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || opener::reveal(path).map_err(|e| e.to_string()))
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Async because a rename is a round trip to whatever holds the path — on a
+/// network or removable volume, seconds of blocking I/O for a metadata
+/// operation that looks instant on a local disk.
 #[tauri::command]
-fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
-    fs::rename(old_path, new_path).map_err(|e| e.to_string())
+async fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::rename(old_path, new_path).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Async because arming a watcher opens the watched path, and an unreachable
+/// one costs the full share timeout before it fails — `\\wsl$\…` with the
+/// distro stopped is the case that prompted this. Inserting the new watcher
+/// also drops the window's previous one, and that drop joins its thread.
+///
+/// `State` is resolved inside the closure rather than taken as a parameter:
+/// `State<'_, _>` borrows from the app and cannot cross into a `'static`
+/// blocking task. It is injected by Tauri either way, so the command's
+/// frontend-facing arguments are unchanged.
 #[tauri::command]
-fn watch_file(
-    window: tauri::Window,
-    handle: AppHandle,
-    state: State<'_, WatcherState>,
-    path: String,
-) -> Result<(), String> {
-    window_runtime::watch_file(window, handle, state, path)
-}
-
-#[tauri::command]
-fn unwatch_file(window: tauri::Window, state: State<'_, WatcherState>) -> Result<(), String> {
-    window_runtime::unwatch_file(window, state)
-}
-
-#[tauri::command]
-fn send_markdown_path(state: State<'_, AppState>) -> Vec<String> {
-    window_runtime::send_markdown_path(state)
+async fn watch_file(window: tauri::Window, handle: AppHandle, path: String) -> Result<(), String> {
+    let state_handle = handle.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = state_handle.state::<WatcherState>();
+        window_runtime::watch_file(window, handle, state, path)
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -2068,34 +2157,6 @@ fn save_theme(app: AppHandle, theme: String) -> Result<(), String> {
     fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
     let theme_path = config_dir.join("theme.txt");
     atomic_write(&theme_path, theme.as_bytes()).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn get_app_mode() -> String {
-    let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|arg| arg == "--uninstall") {
-        return "uninstall".to_string();
-    }
-
-    let current_exe = std::env::current_exe().unwrap_or_default();
-    let exe_name = current_exe
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_lowercase();
-
-    let is_installer_mode =
-        args.iter().any(|arg| arg == "--install") || exe_name.contains("installer");
-
-    if setup::is_installed() {
-        "app".to_string()
-    } else {
-        if is_installer_mode {
-            "installer".to_string()
-        } else {
-            "app".to_string()
-        }
-    }
 }
 
 fn theme_slug(value: &str) -> String {
@@ -2593,9 +2654,17 @@ fn copy_file_to_img_blocking(
     Ok(rel_path)
 }
 
+/// Async because `fs::copy` streams the whole file. On a network or removable
+/// volume that is seconds of blocking I/O, and on the main thread it would
+/// stall every window until the copy completes — the same reason its sibling
+/// `copy_file_to_img` already runs on the blocking pool.
 #[tauri::command]
-fn copy_file(src: String, dest: String) -> Result<(), String> {
-    fs::copy(src, dest).map(|_| ()).map_err(|e| e.to_string())
+async fn copy_file(src: String, dest: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::copy(src, dest).map(|_| ()).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()))
 }
 
 #[tauri::command]
@@ -2643,6 +2712,18 @@ pub fn run() {
         .manage(AppState::new())
         .manage(WatcherState::new())
         .manage(tab_transfer::TabTransferBroker::new())
+        // Replaces Tauri's own `asset:` handler, which reads the file on the
+        // thread the webview calls it on — see `asset_protocol` for why that
+        // freezes every window on an unreachable path. Registering the scheme
+        // here is what suppresses the built-in one.
+        .register_asynchronous_uri_scheme_protocol("asset", |ctx, request, responder| {
+            let scope = ctx.app_handle().asset_protocol_scope();
+            tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(asset_protocol::respond(&request, &|path| {
+                    scope.is_allowed(path)
+                }));
+            });
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
@@ -2673,22 +2754,8 @@ pub fn run() {
         )
         .setup(|app| {
             let args: Vec<String> = std::env::args().collect();
-            println!("Setup Args: {:?}", args);
 
-            let current_exe = std::env::current_exe().unwrap_or_default();
-            let exe_name = current_exe
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_lowercase();
-            let is_installer_mode =
-                args.iter().any(|arg| arg == "--install") || exe_name.contains("installer");
-
-            let label = if is_installer_mode {
-                "installer"
-            } else {
-                "main"
-            };
+            let label = "main";
 
             let mut window_builder = tauri::WebviewWindowBuilder::new(
                 app,
@@ -2754,8 +2821,35 @@ pub fn run() {
                     )
                     .build()?;
 
+                // WKWebView declines ⌘X/⌘C/⌘V/⌘A/⌘Z in plain inputs and hands
+                // them to the main menu, so without an Edit submenu those keys
+                // are dead in every native field (settings, modals). Monaco is
+                // unaffected either way: it preventDefault()s the key first, so
+                // the menu never sees it and its own paste handler still runs.
+                let edit_submenu = SubmenuBuilder::new(app, "Edit")
+                    .item(&PredefinedMenuItem::undo(app, None)?)
+                    .item(&PredefinedMenuItem::redo(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::cut(app, None)?)
+                    .item(&PredefinedMenuItem::copy(app, None)?)
+                    .item(&PredefinedMenuItem::paste(app, None)?)
+                    .item(&PredefinedMenuItem::select_all(app, None)?)
+                    .build()?;
+
+                // ⌘M and ⌃⌘F are window-server actions, not document actions:
+                // there is no web API the in-window controls could bind them
+                // to, so they only exist as long as a menu item carries them.
+                // Full Screen belongs in a View menu by convention, but View
+                // would hold that one item and nothing else — Markpad's view
+                // actions are all in-window (#281) — so it rides here instead.
+                let window_submenu = SubmenuBuilder::new(app, "Window")
+                    .item(&PredefinedMenuItem::minimize(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::fullscreen(app, None)?)
+                    .build()?;
+
                 let menu = MenuBuilder::new(app)
-                    .items(&[&app_submenu])
+                    .items(&[&app_submenu, &edit_submenu, &window_submenu])
                     .build()?;
 
                 app.set_menu(menu)?;
@@ -2792,15 +2886,6 @@ pub fn run() {
                 window_runtime::bring_to_front(&window);
             }
 
-            // If installer, force size (this will be saved to installer-state, not main-state)
-            if is_installer_mode {
-                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                    width: 450.0,
-                    height: 650.0,
-                }));
-                let _ = window.center();
-            }
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2810,7 +2895,8 @@ pub fn run() {
             open_markdown,
             open_markdown_preview,
             render_markdown,
-            send_markdown_path,
+            list_heading_anchors,
+            window_runtime::send_markdown_path,
             read_file_content_checked,
             canonicalize_path,
             read_file_as_data_url,
@@ -2818,16 +2904,12 @@ pub fn run() {
             export_pdf_windows,
             print_pdf,
             save_file_binary,
-            get_app_mode,
-            setup::install_app,
-            setup::uninstall_app,
-            setup::check_install_status,
             is_win11,
             open_file_folder,
             rename_file,
             watch_file,
-            unwatch_file,
-            show_window,
+            window_runtime::unwatch_file,
+            window_runtime::show_window,
             save_theme,
             get_system_fonts,
             get_os_type,
@@ -2844,17 +2926,20 @@ pub fn run() {
             tab_transfer::complete_detached_tab,
             tab_transfer::cancel_detached_tab,
             create_transfer_window,
-            set_window_meta,
-            list_viewer_windows,
-            is_window_tag_taken,
-            offer_tab_to_window,
-            focus_window,
-            list_pinned_tags,
-            save_pinned_tag,
-            remove_pinned_tag,
-            save_window_state,
-            load_window_state,
-            clear_window_state
+            window_runtime::set_window_meta,
+            window_runtime::list_viewer_windows,
+            window_runtime::is_window_tag_taken,
+            window_runtime::offer_tab_to_window,
+            window_runtime::focus_window,
+            window_runtime::list_pinned_tags,
+            window_runtime::save_pinned_tag,
+            window_runtime::remove_pinned_tag,
+            window_runtime::save_window_state,
+            window_runtime::load_window_state,
+            window_runtime::clear_window_state,
+            window_runtime::save_restore_progress,
+            window_runtime::load_restore_progress,
+            window_runtime::clear_restore_progress
         ])
         .on_window_event(window_runtime::handle_window_event)
         .on_menu_event(|app, event| {
@@ -3509,19 +3594,33 @@ mod tests {
 
     #[test]
     fn highlight_protection_survives_quadruple_backtick_inline_code() {
+        // Asserted through the renderer rather than through `process_wikilinks`:
+        // highlighting is comrak's now, so the protection is the parser's own
+        // rather than a code-region scan this crate performs. The property is
+        // the same one — a `==…==` inside a code span is text.
         let input = "```` ``` ```` intro\n\n`==not highlighted==` but ==this is==\n";
-        let out = process_wikilinks(input);
-        assert!(out.contains("`==not highlighted==`"), "got: {out}");
-        assert!(out.contains("<mark>this is</mark>"), "got: {out}");
+        let out = convert_markdown(input);
+        assert!(out.contains("==not highlighted=="), "got: {out}");
+        assert!(!out.contains(">not highlighted</mark>"), "got: {out}");
+        // comrak's `<mark>` carries a `data-sourcepos`, which the regex's did
+        // not — matched loosely so this asserts the highlight, not the markup.
+        assert!(out.contains(">this is</mark>"), "got: {out}");
     }
 
     #[test]
     fn wikilinks_and_inline_footnotes_in_code_spans_stay_literal() {
         let input = "`[[#heading]]` and `^[not a footnote]` but [[#real|jump]]\n";
+
         let out = process_wikilinks(input);
         assert!(out.contains("`[[#heading]]`"), "got: {out}");
-        assert!(out.contains("`^[not a footnote]`"), "got: {out}");
         assert!(out.contains("[jump](#real)"), "got: {out}");
+
+        // The footnote half moved to comrak with `inline_footnotes`, so the
+        // rewriter passing it through is no longer evidence of anything. What
+        // matters is that the RENDERED document still has it as code.
+        let html = convert_markdown(input);
+        assert!(html.contains("^[not a footnote]"), "got: {html}");
+        assert!(!html.contains("not a footnote</p>"), "it became a footnote: {html}");
     }
 
     /// A document that has BOTH kinds of code region, with the inline span at
@@ -4099,9 +4198,13 @@ mod tests {
     fn a_stray_backtick_does_not_swallow_later_highlights_or_wikilinks() {
         let input = "Use the ` character.\n\n==important== and [[#Some Heading|jump]]\n\nThen `run()` finishes.\n";
 
-        let out = process_wikilinks(input);
-        assert!(out.contains("<mark>important</mark>"), "got: {out}");
-        assert!(out.contains("(#some-heading)"), "got: {out}");
+        // The wikilink half is still this crate's, and is still asserted on the
+        // rewriter. The highlight half is comrak's, so it is asserted on the
+        // rendered document.
+        assert!(process_wikilinks(input).contains("(#some-heading)"));
+        let out = convert_markdown(input);
+        assert!(out.contains(">important</mark>"), "got: {out}");
+        assert!(out.contains(">run()</code>"), "got: {out}");
     }
 
     #[test]
@@ -4160,6 +4263,206 @@ mod tests {
                 "anchor for {heading:?} drifted from comrak: {html}",
             );
         }
+    }
+
+    /// The list the editor completes from has to name the ids that are on
+    /// screen. Rendering the same document and reading its `id=` attributes
+    /// back is the only check that cannot drift from comrak with it.
+    #[test]
+    fn heading_anchors_are_the_ids_the_renderer_writes() {
+        let markdown = concat!(
+            "# 11. Mermaid Diagrams\n\n",
+            "Prose.\n\n",
+            "## Objectives\n\n",
+            "Prose.\n\n",
+            "## Objectives\n\n",
+            "Setext heading\n",
+            "---\n\n",
+            "## A **bold** word and `code`\n\n",
+            "## 1. 概述\n\n",
+            "```bash\n",
+            "# not a heading, a shell comment\n",
+            "```\n",
+        );
+
+        let anchors = heading_anchors(markdown);
+        let texts: Vec<&str> = anchors.iter().map(|a| a.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "11. Mermaid Diagrams",
+                "Objectives",
+                "Objectives",
+                "Setext heading",
+                "A bold word and code",
+                "1. 概述",
+            ],
+            "a fenced `#` line is not a heading, and setext headings are",
+        );
+
+        let html = convert_markdown(markdown);
+        for anchor in &anchors {
+            assert!(
+                html.contains(&format!("id=\"{}\"", anchor.slug)),
+                "id {:?} for heading {:?} is not in the rendered document: {html}",
+                anchor.slug,
+                anchor.text,
+            );
+        }
+
+        // The repeated heading is numbered, or completion would offer one link
+        // for two sections and silently reach only the first.
+        let objectives: Vec<&str> = anchors
+            .iter()
+            .filter(|a| a.text == "Objectives")
+            .map(|a| a.slug.as_str())
+            .collect();
+        assert_eq!(objectives, vec!["objectives", "objectives-1"]);
+
+        // And the line numbers are the buffer's, so the list can be ordered
+        // and a completion can say where it points.
+        assert_eq!(anchors[0].line, 1);
+        assert_eq!(anchors[0].level, 1);
+        assert_eq!(anchors[1].level, 2);
+    }
+
+    /// comrak never sees the buffer: four preprocessing steps run first, and
+    /// two of them rewrite what a heading READS as. A completion list built
+    /// from the raw text reports ids for headings that were never rendered.
+    /// Measured, before this was fixed:
+    ///
+    ///     ## Wiki [[note#Setup]] here   rendered wiki-note--setup-here
+    ///                                   raw      wiki-notesetup-here
+    ///     ## See $[a](b)$ inline        rendered see-ab-inline
+    ///                                   raw      see-a-inline
+    ///
+    /// Every case is checked against the id the renderer actually wrote, so
+    /// this cannot drift with a change to the preprocessing chain.
+    #[test]
+    fn heading_anchors_match_the_renderer_through_every_preprocessing_step() {
+        for markdown in [
+            // Math: masked before the parse, restored after it.
+            "## A heading with $x_1$\n",
+            "## 关于 $x_1$ 的说明\n",
+            "## Solve $x + 1 = 2$ now\n",
+            "## $$E = mc^2$$\n",
+            "## Escaped \\$5 and $y_2$\n",
+            // Math whose source looks like markup. The renderer anchorizes the
+            // source; parsing the buffer would see a link and take its text.
+            "## See $[a](b)$ inline\n",
+            "## Math $a*b*c$ here\n",
+            // A wikilink is a LINK by the time comrak parses it, and its text
+            // is the "Note > Heading" spelling `process_wikilinks` chose.
+            "## Wiki [[note#Setup]] here\n",
+            "## Wiki [[#Setup|jump]] here\n",
+            // Ordinary inline markup, which comrak strips for the id.
+            "## A [real link](https://x.dev) here\n",
+            "## Code `let x = 1;` here\n",
+            "## A **bold** and *italic* heading\n",
+        ] {
+            let html = convert_markdown(markdown);
+            let rendered = html
+                .split("id=\"")
+                .nth(1)
+                .and_then(|rest| rest.split('"').next())
+                .unwrap_or_default()
+                .to_owned();
+            let ours = heading_anchors(markdown)
+                .first()
+                .map(|anchor| anchor.slug.clone())
+                .unwrap_or_default();
+
+            assert!(!rendered.is_empty(), "no id rendered for {markdown:?}");
+            assert_eq!(
+                ours, rendered,
+                "completion would offer {ours:?} for {markdown:?}, but the \
+                 renderer wrote {rendered:?}",
+            );
+        }
+    }
+
+    /// The spellings people actually write, and the ones they collide with.
+    ///
+    /// Every extension added here takes a character some other feature already
+    /// uses, so the question is never "does it work" but "what did it take
+    /// from". Each row was measured before being enabled; the `||` row is the
+    /// one that failed, which is why spoilers are off.
+    /// The three that were measured and left off, and the ordinary text each
+    /// would have misread. A test rather than a comment, so that turning one
+    /// on shows what it costs before the pull request is opened.
+    #[test]
+    fn the_syntaxes_that_would_misread_ordinary_text() {
+        // `~x~` is GFM strikethrough — one or two tildes — so a subscript
+        // extension takes a spelling GitHub already renders.
+        assert!(convert_markdown("H~2~O\n").contains("<del"));
+        assert!(convert_markdown("~struck~\n").contains("<del"));
+
+        // Two carets in a paragraph pair up. This sentence renders as written
+        // today, here and on GitHub, and a superscript extension would eat it.
+        let prose = convert_markdown("a^2 + b^2 = c^2\n");
+        assert!(prose.contains("a^2 + b^2 = c^2"), "got: {prose}");
+        assert!(!prose.contains("<sup"), "got: {prose}");
+
+        // `||` is an empty table cell — see the dedicated test for the row it
+        // would break.
+        assert!(!convert_markdown("||spoiler||\n").contains("class=\"spoiler\""));
+    }
+
+    #[test]
+    fn syntax_coexistence() {
+        let cases: &[(&str, &str, &str)] = &[
+            // The characters this group did NOT take, still meaning what they
+            // meant. See `markdown_options` for why.
+            ("~~gone~~", "<del", "strikethrough, unchanged"),
+            ("H~2~O", "<del", "a lone tilde is still GFM strikethrough"),
+            ("text^[a note]", "footnote-ref", "the inline footnote still owns `^[`"),
+            ("A paragraph. ^abc123", "block-id-anchor", "and a block id its own shape"),
+            // Inserted text against the `+` that starts a list.
+            ("++added++", "<ins", "inserted text"),
+            ("+ item one\n+ item two", "<ul", "a `+` list is still a list"),
+            // The false positives that would make prose unreadable.
+            ("I know C++ and also C++ well", "C++ and also C++", "C++ in prose is not inserted text"),
+            ("see ~/notes and ~/tmp", "~/notes and ~/tmp", "home paths are not subscripts"),
+            ("`H~2~O ^2^ ++y++`", "<code", "and none of it applies inside code"),
+        ];
+
+        for (markdown, expected, why) in cases {
+            let html = convert_markdown(&format!("{markdown}\n"));
+            assert!(html.contains(expected), "{why}: {markdown:?} produced {html}");
+        }
+    }
+
+    /// Why `options.extension.spoiler` is off.
+    ///
+    /// `||text||` is the spoiler spelling, and `| 1 || 3 |` is how an empty
+    /// table cell is written. With spoilers on, the row collapses into one cell
+    /// reading "1 || 3" — measured, which is why this is a test and not a
+    /// comment. Tables are core; spoilers are a Discord convention.
+    #[test]
+    fn an_empty_table_cell_is_not_a_spoiler() {
+        let html = convert_markdown("| a | b |\n|---|---|\n| 1 || 3 |\n");
+        assert!(html.contains("<td data-sourcepos=\"3:2-3:4\">1</td>"), "{html}");
+        assert!(!html.contains("1 || 3"), "the `||` was swallowed: {html}");
+        assert!(!html.contains("class=\"spoiler\""), "{html}");
+    }
+
+    /// What moving these two to comrak bought, beyond two fewer preprocessors.
+    ///
+    /// Both regexes were single-line and stopped at the first delimiter they
+    /// saw. The parser has the block structure, so it does not have to.
+    #[test]
+    fn the_parser_reaches_where_the_patterns_could_not() {
+        // `==([^=\n]+)==` could not cross a line break, so a highlight that
+        // wrapped came out as literal `==` on both sides.
+        let wrapped = convert_markdown("==a highlight that\nwraps a line==\n");
+        assert!(wrapped.contains("</mark>"), "got: {wrapped}");
+        assert!(!wrapped.contains("=="), "got: {wrapped}");
+
+        // `\^\[([^\]\n]+)\]` stopped at the first `]`, so a note containing
+        // brackets lost its tail and left a stray `]` in the paragraph.
+        let nested = convert_markdown("text^[a note with [brackets] inside]\n");
+        assert!(nested.contains("a note with [brackets] inside"), "got: {nested}");
+        assert!(!nested.contains("inside]</p>"), "the tail was dropped: {nested}");
     }
 
     #[test]
@@ -4712,10 +5015,14 @@ mod tests {
         // rather than a participant in it. `restore_math_spans` also runs on
         // the rendered HTML — it is the second half of `mask_math_spans`,
         // which *is* registered, and it never sees the source buffer.
+        // `markdown_options` returns the parser configuration and never
+        // touches the text at all; it is shared with `heading_anchors`, which
+        // has to parse the document the way the renderer does.
         let not_a_transform = [
             "markdown_to_html",
             "annotate_task_checkboxes",
             "restore_math_spans",
+            "markdown_options",
         ];
 
         let mut found: Vec<String> = call

@@ -1,0 +1,84 @@
+name: Bug report
+description: Something in Markpad is broken or behaves unexpectedly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill in what you can — a partial report is genuinely useful, and nothing below is required.
+
+        **One problem per issue, please.** If you have hit several, open one issue for each: problems added to the end of an existing report tend to get lost in the thread while the first one is being discussed.
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install Markpad?
+      description: This is often the single most useful line in the report — the installer and the portable build, or a snap and an AppImage, fail in different ways.
+      options:
+        - "Windows — installer (Markpad_…_setup.exe)"
+        - "Windows — portable (Markpad_….exe)"
+        - "Windows — Chocolatey"
+        - "macOS — .dmg"
+        - "Linux — AppImage"
+        - "Linux — .deb"
+        - "Linux — .rpm"
+        - "Linux — snap"
+        - "Built from source"
+        - "Not sure"
+
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: Shown in Settings, or in the About / Markpad menu.
+      placeholder: "2.7.0"
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS and version
+      placeholder: "Windows 11 24H2 · macOS 26.1 · Ubuntu 24.04"
+
+  - type: input
+    id: linux-details
+    attributes:
+      label: "Linux only: distribution, session and GPU/driver"
+      description: Skip this on Windows and macOS. On Linux it is usually what localises the bug.
+      placeholder: "CachyOS · GNOME on Wayland (also tried X11) · Intel Arc, Mesa"
+
+  - type: textarea
+    id: what-happens
+    attributes:
+      label: What happens
+      placeholder: Paste any error text from the terminal or a dialog here too — it is often the fastest route to the cause.
+
+  - type: textarea
+    id: what-expected
+    attributes:
+      label: What you expected
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. See …
+
+  - type: textarea
+    id: source-document
+    attributes:
+      label: The document, if one triggers it
+      description: If the bug only shows up with a particular file, attach the `.md` or paste the smallest part that still reproduces it. Reports that depend on a document and do not include one often cannot be reproduced at all.
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Drag images straight into this box.
+
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else

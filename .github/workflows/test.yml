@@ -2,16 +2,24 @@ name: Test
 
 on:
   pull_request:
+  # Contributors now branch inside this repository instead of a fork, so a
+  # commit can reach master without ever having been a pull request. Without
+  # this trigger no workflow listens to `push` at all and such a commit is
+  # never tested. Restricted to master: pull request branches already run the
+  # suite through the `pull_request` trigger above.
+  push:
+    branches:
+      - master
 
 jobs:
   test:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: lts/*
           cache: 'npm'

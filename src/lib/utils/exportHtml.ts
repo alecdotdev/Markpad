@@ -4,7 +4,7 @@ import { resolvePath } from './markdown.js';
 const localMarkdownExtensionPattern = /\.(?:md|markdown|mdown|mkd|txt)$/i;
 const windowsDrivePathPattern = /^[a-zA-Z]:[\\/]/;
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
 	return value
 		.replace(/&/g, '&amp;')
 		.replace(/</g, '&lt;')
@@ -144,8 +144,4 @@ export function renderStaticFrontMatterPanel(frontMatter: FrontMatterParseResult
 </summary>
 <div class="frontmatter-grid">${rows}</div>
 </details>`;
-}
-
-export function escapeHtmlText(value: string): string {
-	return escapeHtml(value);
 }

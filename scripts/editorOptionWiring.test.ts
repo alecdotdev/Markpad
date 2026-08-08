@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { containsUnusualLineTerminators } from 'monaco-editor/esm/vs/base/common/strings.js';
+import {
+	EditorOptions,
+	inUntrustedWorkspace,
+	type UnicodeHighlightOptions,
+} from 'monaco-editor/esm/vs/editor/common/config/editorOptions.js';
+import {
+	UnicodeTextModelHighlighter,
+	type UnicodeHighlightResult,
+} from 'monaco-editor/esm/vs/editor/common/services/unicodeTextModelHighlighter.js';
+import ts from 'typescript';
+
 import { readSource, sliceBetween } from './sourceTree.js';
 
 // Editor.svelte translates the settings store into Monaco options and
@@ -160,5 +172,311 @@ test('Show Whitespace renders every whitespace run, not just trailing', () => {
 		count(editor, /renderWhitespace: settings\.showWhitespace \? "all" : "none"/g),
 		2,
 		'creation and updateOptions agree on "all"',
+	);
+});
+
+// ----------------------------------------------------------------- executed
+//
+// Everything above matches Editor.svelte as text, because a keybinding and a
+// settings-driven enum cannot be exercised without a DOM. `unicodeHighlight`
+// can do better, and the weak form would be particularly bad here: asserting
+// that the string "ambiguousCharacters" occurs in the file says nothing about
+// which characters Monaco ends up outlining, which is the entire contract.
+//
+// So the option literal is lifted out of the real `monaco.editor.create` call,
+// evaluated, and pushed through the same two pieces of Monaco the running
+// editor uses — `EditorOptions.unicodeHighlight.applyUpdate` to merge it over
+// the shipped defaults, and `UnicodeTextModelHighlighter` to decide what gets a
+// box. A regression has to survive Monaco's own code to reach the assertions.
+
+/**
+ * The one option literal Editor.svelte passes to `callee`, evaluated against a
+ * given settings store.
+ *
+ * `settings` is a plain object rather than a fixture of the real store: an
+ * absent key reads as `undefined`, which is what a falsy setting does to every
+ * ternary in these literals anyway, so naming only the keys a test cares about
+ * keeps that test readable. It is a parameter at all because a settings-driven
+ * option cannot be judged from one evaluation — wiring that is right for one
+ * value of a setting and wrong for the other is the defect shape this whole
+ * file exists for.
+ */
+function optionsPassedTo(callee: string, settings: Record<string, unknown> = {}): Record<string, unknown> {
+	const script = sliceBetween(editor, '<script lang="ts">', '</script>');
+	const source = ts.createSourceFile('Editor.ts', script, ts.ScriptTarget.Latest, true);
+
+	const literals: ts.Expression[] = [];
+	const visit = (node: ts.Node): void => {
+		if (ts.isCallExpression(node) && node.expression.getText(source) === callee) {
+			assert.equal(
+				node.arguments.length,
+				callee === 'monaco.editor.create' ? 2 : 1,
+				`${callee} takes the options object last`,
+			);
+			literals.push(node.arguments[node.arguments.length - 1]);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(source);
+
+	// Also the check that this file is looking at the only editor in the app: a
+	// second `create` call would need the same options and would not be covered
+	// by anything below. The same holds for a second `updateOptions`, which is
+	// the effect race #369 removed.
+	assert.equal(literals.length, 1, `exactly one ${callee} call site in Editor.svelte`);
+
+	const js = ts.transpileModule(`(${literals[0].getText(source)})`, {
+		compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+	}).outputText;
+
+	// The literals close over six locals, stubbed rather than reconstructed.
+	// `documentOptions` is the spread that hands the editor the active tab's
+	// model (or `value`/`language` when there is no tab); an empty object is the
+	// right stub because nothing it can contain is an option this file asserts
+	// on. `zoomLevel` is 100, the neutral factor, for the same reason.
+	return new Function(
+		'settings',
+		'value',
+		'language',
+		'getTheme',
+		'documentOptions',
+		'zoomLevel',
+		`return ${js};`,
+	)(settings, '', 'markdown', () => 'app-theme-dark', {}, 100) as Record<string, unknown>;
+}
+
+/** The options object Editor.svelte hands to `monaco.editor.create`, evaluated. */
+function createdEditorOptions(): Record<string, unknown> {
+	return optionsPassedTo('monaco.editor.create');
+}
+
+/**
+ * Monaco's shipped defaults with the component's option merged over them.
+ *
+ * `?? {}` models the real absence case rather than guarding: a component that
+ * passes no `unicodeHighlight` gets Monaco's defaults, which is the state this
+ * whole section exists to move away from. Without it, deleting the option from
+ * Editor.svelte fails the tests below with a TypeError raised inside Monaco
+ * instead of the assertion naming the characters that came back.
+ */
+function effectiveUnicodeHighlight(passed: unknown): UnicodeHighlightOptions {
+	const option = EditorOptions.unicodeHighlight;
+	return option.applyUpdate(option.defaultValue, passed ?? {}).newValue;
+}
+
+/**
+ * What Monaco would outline in `lines`, given an effective option set.
+ *
+ * Mirrors `resolveOptions()` in unicodeHighlighter.ts, which is not exported.
+ * `trusted` is true because that is what standalone Monaco reports —
+ * `StandaloneWorkspaceTrustManagementService.isWorkspaceTrusted()` returns true
+ * unconditionally. That is why `nonBasicASCII`, whose default is the
+ * `inUntrustedWorkspace` sentinel, is already off and needs no setting in
+ * Editor.svelte: it resolves through `!trusted`.
+ */
+function outlined(lines: string[], effective: UnicodeHighlightOptions): UnicodeHighlightResult {
+	const trusted = true;
+	const through = (value: boolean | 'inUntrustedWorkspace') =>
+		value === inUntrustedWorkspace ? !trusted : value;
+	return UnicodeTextModelHighlighter.computeUnicodeHighlights(
+		{ getLineCount: () => lines.length, getLineContent: (n: number) => lines[n - 1] },
+		{
+			nonBasicASCII: through(effective.nonBasicASCII),
+			ambiguousCharacters: effective.ambiguousCharacters,
+			invisibleCharacters: effective.invisibleCharacters,
+			includeComments: through(effective.includeComments),
+			includeStrings: through(effective.includeStrings),
+			allowedCodePoints: Object.keys(effective.allowedCharacters).map((c) => c.codePointAt(0)),
+			// The real value is derived from the OS locale and Monaco's UI
+			// language. It is pinned here because it makes no difference: the
+			// fullwidth forms are confusable in every locale Monaco ships, zh-CN
+			// and ja-JP included, which is why the reporters saw boxes on
+			// CJK systems in the first place.
+			allowedLocales: ['en'],
+		},
+	);
+}
+
+// Prose a CJK author actually types. The boxes need a basic-ASCII character in
+// the same word as the fullwidth punctuation — `shouldHighlightNonBasicASCII`
+// suppresses the highlight when the surrounding word is entirely non-ASCII —
+// so a Latin technical term or a Markdown emphasis marker is what triggers it.
+const CJK_PROSE = [
+	'使用 Monaco，然后保存。',
+	'安装依赖（npm ci），再运行测试。',
+	'这是 Markdown，不是 HTML。',
+	'打开 Settings：Editor，字体大小。',
+	'**粗体**，*斜体*，`代码`。',
+	'标题（English Title）说明',
+	'你好，世界。（测试）！？',
+];
+
+test('the editor turns off ambiguous-character highlighting and nothing else', () => {
+	// Reports #186 and #94 are both Monaco outlining fullwidth punctuation.
+	// Narrowness is the assertion: `unicodeHighlight: false` or a third
+	// sub-option would also make the boxes go away, and would take the
+	// invisible-character warning with it.
+	const options = createdEditorOptions();
+	assert.deepEqual(
+		options.unicodeHighlight,
+		{ ambiguousCharacters: false },
+		'exactly one sub-option is overridden',
+	);
+});
+
+test('no box is drawn on fullwidth CJK punctuation', () => {
+	const effective = effectiveUnicodeHighlight(createdEditorOptions().unicodeHighlight);
+	const found = outlined(CJK_PROSE, effective);
+	assert.equal(
+		found.ranges.length,
+		0,
+		`nothing outlined in CJK prose, got ${JSON.stringify(
+			found.ranges.map((r) => CJK_PROSE[r.startLineNumber - 1].slice(r.startColumn - 1, r.endColumn - 1)),
+		)}`,
+	);
+	assert.equal(found.ambiguousCharacterCount, 0);
+});
+
+test('the fixtures still reproduce the bug once the option is taken away', () => {
+	// Without this the test above could pass because Monaco stopped treating
+	// the fullwidth forms as confusable — an upgrade would quietly leave it
+	// asserting nothing. It fails loudly instead, on the fixtures rather than
+	// on the fix.
+	const withDefaults = effectiveUnicodeHighlight({ ambiguousCharacters: true });
+	const found = outlined(CJK_PROSE, withDefaults);
+	assert.ok(
+		found.ambiguousCharacterCount >= 6,
+		`Monaco's defaults still box CJK punctuation, got ${found.ambiguousCharacterCount}`,
+	);
+});
+
+test('the invisible-character warning survives the fix', () => {
+	// A stray NBSP or zero-width space is a real hazard in Markdown — an NBSP
+	// after `-` stops a list from parsing — and unlike the punctuation it is
+	// never something the author typed on purpose. Turning the whole feature
+	// off would have taken it with it.
+	const effective = effectiveUnicodeHighlight(createdEditorOptions().unicodeHighlight);
+	assert.equal(effective.invisibleCharacters, true, 'left at the Monaco default');
+
+	const found = outlined(['a b', 'x​z'], effective);
+	assert.equal(found.invisibleCharacterCount, 2, 'NBSP and zero-width space are still flagged');
+});
+
+// ------------------------------------------------- the defaults left in force
+//
+// Everything above is an option Editor.svelte was passing wrongly. The two
+// below are options it was not passing at all, so `monaco.editor.create`'s
+// default was deciding — and deciding against something the app states
+// elsewhere.
+//
+// Both are read through the option's own `validate`, the function the real
+// `create` runs over what it is handed. That is not ceremony: `validate`
+// silently returns the option's *default* for anything outside its accepted
+// set, so `"Off"`, `0`, or an enum member renamed in a Monaco upgrade would
+// leave the editor exactly as it is today while an `assert.equal` on the
+// literal stayed green.
+
+/**
+ * What both occurrence-highlighting options resolve to, for one value of the
+ * one setting that is supposed to drive them.
+ */
+function occurrenceHighlighting(
+	callee: string,
+	occurrencesHighlight: boolean,
+): { occurrencesHighlight: string; selectionHighlight: boolean } {
+	const options = optionsPassedTo(callee, { occurrencesHighlight });
+	return {
+		occurrencesHighlight: EditorOptions.occurrencesHighlight.validate(options.occurrencesHighlight),
+		selectionHighlight: EditorOptions.selectionHighlight.validate(options.selectionHighlight),
+	};
+}
+
+test('"Highlight Occurrences" off leaves nothing highlighting occurrences', () => {
+	// The setting (`settings.occurrencesHighlight`, default false, labelled
+	// "Highlight Occurrences" / 高亮匹配项 / 一致箇所の強調) drove Monaco's
+	// `occurrencesHighlight` alone. Monaco splits the feature in two:
+	// `SelectionHighlighter` gates itself on `selectionHighlight` and consults
+	// `occurrencesHighlight` only to choose which decoration style to draw with.
+	// So at the setting's own default, selecting a word still highlighted every
+	// other copy of it — the promise the label makes was kept by half the
+	// editor.
+	//
+	// Both call sites, because they can disagree: two effects writing one option
+	// with different values is what #369 found in `fontSize`, and an option set
+	// only at construction stops tracking the setting the moment a user toggles
+	// it.
+	for (const callee of ['monaco.editor.create', 'editor.updateOptions']) {
+		assert.deepEqual(
+			occurrenceHighlighting(callee, false),
+			{ occurrencesHighlight: 'off', selectionHighlight: false },
+			`${callee}: with the setting off both occurrence highlighters must be off — ` +
+				'selectionHighlight is the one SelectionHighlighter actually gates on',
+		);
+		assert.deepEqual(
+			occurrenceHighlighting(callee, true),
+			{ occurrencesHighlight: 'singleFile', selectionHighlight: true },
+			`${callee}: with the setting on the same one switch must turn both on`,
+		);
+	}
+});
+
+test('an unset selectionHighlight still means "highlight the selection"', () => {
+	// The other half of the test above, for the same reason the CJK fixtures are
+	// re-checked against Monaco's defaults: without this, dropping
+	// `selectionHighlight` from Editor.svelte would pass if Monaco ever flipped
+	// that default, and the test would be asserting nothing. It fails on Monaco
+	// instead, rather than on the fix.
+	assert.equal(
+		EditorOptions.selectionHighlight.validate(undefined),
+		true,
+		"Monaco still highlights the selection's occurrences when the option is not passed",
+	);
+	assert.notEqual(
+		EditorOptions.occurrencesHighlight.validate(undefined),
+		'off',
+		'…and still runs the other highlighter, so neither is covered by leaving it out',
+	);
+});
+
+test('the editor does not offer to rewrite a document containing U+2028', () => {
+	// `unusualLineTerminators` defaults to 'prompt'. On 'prompt',
+	// UnusualLineTerminatorsDetector calls IDialogService.confirm, which in a
+	// standalone build is StandaloneDialogService — `mainWindow.confirm(...)`,
+	// an unstyled browser dialog carrying Monaco's English string, inside an app
+	// whose own UI ships 26 locales, offering to delete characters out of the
+	// user's file. The guard exists to protect JavaScript string literals, which
+	// U+2028 and U+2029 terminate; Markdown has no such hazard.
+	//
+	// 'auto' is not the alternative: it makes the same edit with no dialog.
+	assert.equal(
+		EditorOptions.unusualLineTerminators.validate(createdEditorOptions().unusualLineTerminators),
+		'off',
+		'the detector must return early instead of reaching the dialog',
+	);
+
+	// The default this moves away from, and the reason the assertion above is
+	// not spelled against the literal: anything Monaco does not recognise
+	// resolves straight back to the dialog.
+	assert.equal(EditorOptions.unusualLineTerminators.validate(undefined), 'prompt');
+	assert.equal(EditorOptions.unusualLineTerminators.validate('never'), 'prompt');
+	assert.equal(EditorOptions.unusualLineTerminators.validate('Off'), 'prompt');
+});
+
+test('the character that opens that dialog is one prose really carries', () => {
+	// Not hypothetical: U+2028 is what several word processors and PDF text
+	// extractors emit for a soft line break, so it arrives by pasting. This is
+	// Monaco's own predicate — its result is what the piece-tree buffer stores
+	// as `mightContainUnusualLineTerminators`, the flag the detector reads
+	// before it prompts.
+	//
+	// Spelled as escapes rather than as the characters themselves: the value
+	// Monaco sees is identical, and a reviewer can tell which character each
+	// fixture is about instead of staring at an invisible one.
+	assert.equal(containsUnusualLineTerminators('A pasted paragraph with a soft\u2028break.'), true);
+	assert.equal(containsUnusualLineTerminators('Two paragraphs,\u2029joined.'), true);
+	assert.equal(
+		containsUnusualLineTerminators('# Heading\n\nOrdinary markdown\r\nwith both line endings.\n'),
+		false,
+		'ordinary line endings are not what this is about',
 	);
 });

@@ -19,6 +19,7 @@
 	import { updateStore } from '../stores/update.svelte.js';
 	import { fade, scale, fly } from 'svelte/transition';
 	import { t, getSupportedLanguages } from '../utils/i18n.js';
+	import { shortcutSections } from '../utils/shortcuts.js';
 	import type { LanguageCode } from '../utils/i18n.js';
 	import { getEditorToolbarTools } from '../utils/editorToolbar.js';
 	import { getTitlebarToolbarActions, type TitlebarToolbarPlacement } from '../utils/titlebarToolbar.js';
@@ -36,7 +37,7 @@
 		onclose,
 	} = $props<{ show?: boolean; theme?: string; onSetTheme?: (t: string) => void; onclose: () => void }>();
 
-	let activeCategory = $state<'editor' | 'preview' | 'appearance' | 'toolbars' | 'files'>('editor');
+	let activeCategory = $state<'editor' | 'preview' | 'appearance' | 'toolbars' | 'files' | 'shortcuts'>('editor');
 	let highlightMenuOpen = $state(false);
 
 	function updatePreviewMaxWidth(value: unknown) {
@@ -815,6 +816,26 @@
 							</svg>
 							{t('settings.files', settings.language)}
 					</button>
+					<button class="nav-item" class:active={activeCategory === 'shortcuts'} onclick={() => (activeCategory = 'shortcuts')}>
+						<svg
+								xmlns="http://www.w3.org/2000/svg"
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round">
+								<rect x="2" y="6" width="20" height="12" rx="2" ry="2"></rect>
+								<line x1="6" y1="10" x2="6" y2="10"></line>
+								<line x1="10" y1="10" x2="10" y2="10"></line>
+								<line x1="14" y1="10" x2="14" y2="10"></line>
+								<line x1="18" y1="10" x2="18" y2="10"></line>
+								<line x1="8" y1="14" x2="16" y2="14"></line>
+							</svg>
+							{t('settings.shortcuts', settings.language)}
+					</button>
 
 					<div class="nav-footer">
 						<button
@@ -919,11 +940,23 @@
 								</div>
 							</div>
 
-							<div class="setting-item" class:modified={modified.editorMaxWidth}>
+<div class="setting-item">
+								<label for="editor-word-wrap">{t('settings.wordWrap', settings.language)}</label>
+								<div class="select-wrapper">
+									<select id="editor-word-wrap" bind:value={settings.wordWrap}>
+										<option value="off">{t('menu.wordWrapOff', settings.language)}</option>
+										<option value="on">{t('menu.wordWrapOn', settings.language)}</option>
+										<option value="wordWrapColumn">{t('menu.wordWrapColumn', settings.language)}</option>
+									</select>
+									<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+								</div>
+							</div>
+
+							<div class="setting-item" class:modified={modified.editorMaxWidth} class:inactive={settings.wordWrap !== 'wordWrapColumn'}>
 								<label for="editor-max-width">{t('settings.wrapColumn', settings.language)}</label>
 								<div class="slider-container">
 									<div class="number-input-wrapper horizontal">
-										<button class="spin-btn minus" onclick={() => stepSetting(settings.editorMaxWidth, -EDITOR_MAX_WIDTH_RANGE.step, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)} aria-label={t('common.decrease', settings.language)}>
+										<button class="spin-btn minus" disabled={settings.wordWrap !== 'wordWrapColumn'} onclick={() => stepSetting(settings.editorMaxWidth, -EDITOR_MAX_WIDTH_RANGE.step, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)} aria-label={t('common.decrease', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
@@ -939,8 +972,9 @@
 											onblur={(e) => commitNumberInput(e, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)}
 											onkeydown={(e) => handleNumberKeydown(e, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)}
 											class="number-input"
+											disabled={settings.wordWrap !== 'wordWrapColumn'}
 										/>
-										<button class="spin-btn plus" onclick={() => stepSetting(settings.editorMaxWidth, EDITOR_MAX_WIDTH_RANGE.step, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)} aria-label={t('common.increase', settings.language)}>
+										<button class="spin-btn plus" disabled={settings.wordWrap !== 'wordWrapColumn'} onclick={() => stepSetting(settings.editorMaxWidth, EDITOR_MAX_WIDTH_RANGE.step, EDITOR_MAX_WIDTH_RANGE, setEditorMaxWidth)} aria-label={t('common.increase', settings.language)}>
 											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 												><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 										</button>
@@ -949,18 +983,7 @@
 								</div>
 							</div>
 
-							<div class="setting-item">
-								<label for="editor-word-wrap">{t('settings.wordWrap', settings.language)}</label>
-								<div class="select-wrapper">
-									<select id="editor-word-wrap" bind:value={settings.wordWrap}>
-										<option value="off">{t('menu.wordWrapOff', settings.language)}</option>
-										<option value="on">{t('menu.wordWrapOn', settings.language)}</option>
-										<option value="wordWrapColumn">{t('menu.wordWrapColumn', settings.language)}</option>
-									</select>
-									<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-								</div>
-							</div>
-
+							
 							<div class="setting-item">
 								<label for="editor-line-numbers">{t('settings.lineNumbers', settings.language)}</label>
 								<label class="toggle">
@@ -1001,10 +1024,10 @@
 								</label>
 							</div>
 
-							<div class="setting-item">
+							<div class="setting-item" class:inactive={!settings.statusBar}>
 								<label for="editor-word-count">{t('settings.wordCount', settings.language)}</label>
 								<label class="toggle">
-									<input id="editor-word-count" type="checkbox" checked={settings.wordCount} onchange={() => settings.toggleWordCount()} />
+									<input id="editor-word-count" type="checkbox" checked={settings.wordCount} disabled={!settings.statusBar} onchange={() => settings.toggleWordCount()} />
 									<span class="toggle-slider"></span>
 								</label>
 							</div>
@@ -1297,11 +1320,15 @@
 							</div>
 
 							<div class="setting-item">
-								<label for="appearance-start-editor">{t('settings.startInEditor', settings.language)}</label>
-								<label class="toggle">
-									<input id="appearance-start-editor" type="checkbox" checked={settings.startInEditor} onchange={() => settings.toggleStartInEditor()} />
-									<span class="toggle-slider"></span>
-								</label>
+								<label for="appearance-open-file-mode">{t('settings.openFileMode', settings.language)}</label>
+								<div class="select-wrapper">
+									<select id="appearance-open-file-mode" bind:value={settings.openFileMode}>
+										<option value="preview">{t('settings.preview', settings.language)}</option>
+										<option value="editor">{t('settings.editor', settings.language)}</option>
+										<option value="split">{t('menu.splitView', settings.language)}</option>
+									</select>
+									<svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+								</div>
 							</div>
 							<div class="setting-item">
 								<label for="appearance-new-file-mode">{t('settings.newFileDefaultMode', settings.language)}</label>
@@ -1546,15 +1573,36 @@
 								<span class="toggle-slider"></span>
 							</label>
 						</div>
-
-						<div class="setting-item">
-							<label for="files-confirm-before-save">{t('settings.confirmBeforeSave', settings.language)}</label>
-							<label class="toggle">
-								<input id="files-confirm-before-save" type="checkbox" checked={settings.confirmBeforeSave} onchange={() => settings.toggleConfirmBeforeSave()} />
-								<span class="toggle-slider"></span>
-							</label>
-						</div>
 					</div>
+					{:else if activeCategory === 'shortcuts'}
+					<!--
+						Read-only, on purpose. Remapping needs conflict detection,
+						persistence, reset-to-default and chord capture inside a webview, and
+						it is a product-direction call; this pane is the part of the value
+						that needs none of them.
+
+						Every chord below comes from `shortcuts.ts`, and
+						`scripts/shortcutRegistry.test.ts` fires each one at the real
+						handlers — so this list cannot drift away from what the keys do.
+					-->
+					{#each shortcutSections(settings.osType === 'macos' ? 'macos' : 'windows') as section (section.group)}
+						<div class="settings-group">
+							<div class="settings-group-header">
+								<h2>{t(section.labelKey, settings.language)}</h2>
+							</div>
+
+							{#each section.entries as entry (entry.id)}
+								<div class="shortcut-row">
+									<span class="shortcut-name">{t(entry.labelKey, settings.language)}</span>
+									<span class="shortcut-keys">
+										{#each entry.chords as chord (chord)}
+											<kbd>{chord}</kbd>
+										{/each}
+									</span>
+								</div>
+							{/each}
+						</div>
+					{/each}
 					{/if}
 				</div>
 			</div>
@@ -1888,6 +1936,39 @@
 		color: var(--color-fg-default);
 	}
 
+	/* Read-only shortcut rows: a command on the left, its chord(s) on the right. */
+	.shortcut-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 6px 0;
+	}
+
+	.shortcut-name {
+		color: var(--color-fg-default);
+		font-size: 13px;
+	}
+
+	.shortcut-keys {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 6px;
+	}
+
+	.shortcut-keys kbd {
+		font-family: var(--code-font, monospace);
+		font-size: 11px;
+		line-height: 1.4;
+		white-space: nowrap;
+		color: var(--color-fg-muted);
+		background: var(--color-canvas-subtle);
+		border: 1px solid var(--color-border-default);
+		border-radius: 4px;
+		padding: 2px 6px;
+	}
+
 	.settings-group-header {
 		display: flex;
 		align-items: center;
@@ -1918,6 +1999,24 @@
 
 	.reset-text-btn:hover:not(.disabled) {
 		color: var(--color-accent-fg);
+	}
+
+	/*
+	 * A control whose prerequisite is off. It stays visible and readable — the
+	 * reader needs to see that the setting exists, and where it went — but says
+	 * plainly that nothing it does can take effect yet. The prerequisite is
+	 * always the row directly above it.
+	 */
+	.setting-item.inactive label:first-child,
+	.setting-item.inactive .slider-container,
+	.setting-item.inactive .toggle {
+		opacity: 0.45;
+	}
+
+	.setting-item.inactive .toggle,
+	.setting-item.inactive .number-input,
+	.setting-item.inactive .spin-btn {
+		cursor: default;
 	}
 
 	.reset-text-btn.disabled {

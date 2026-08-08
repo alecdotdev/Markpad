@@ -14,21 +14,102 @@ jobs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: lts/*
 
       - name: Get Version
         id: get_version
         shell: bash
         run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
+      # Every Markpad up to v2.7.0 has the pre-transfer endpoint compiled in and
+      # reaches the current feed only through GitHub's transfer redirect, which a
+      # repository or fork at the old location voids permanently. RELEASING.md §5
+      # has the detail; this is the part that notices.
+      #
+      # The assertion is the property, not a proxy for it. It does not ask whether
+      # a redirect exists — something may legitimately occupy the old location, so
+      # long as that URL still yields this repository's feed. It asks for the feed
+      # and checks where the feed points. A network failure is not evidence either
+      # way and warns instead of blocking a release on a flake.
+      - name: The endpoint old installs still use must lead to this repository
+        shell: bash
+        run: |
+          legacy='https://github.com/alecdotdev/Markpad/releases/latest/download/latest.json'
+          feed=''
+          for attempt in 1 2 3; do
+            if feed=$(curl -fsSL --max-time 30 "$legacy"); then break; fi
+            feed=''
+            sleep $(( attempt * 5 ))
+          done
+
+          if [ -z "$feed" ]; then
+            echo "::warning::Could not fetch $legacy after three attempts. Treating as unknown, not as failure."
+            exit 0
+          fi
+
+          urls=$(printf '%s' "$feed" | jq -r '.platforms | to_entries[] | .value.url' 2>/dev/null || true)
+          if [ -z "$urls" ]; then
+            echo "::error::$legacy answered, but not with an updater feed. Every install up to v2.7.0 asks this URL for its updates and will now be told there is none. See RELEASING.md section 5."
+            exit 1
+          fi
+
+          foreign=$(printf '%s\n' "$urls" | grep -v "$GITHUB_REPOSITORY/" || true)
+          if [ -n "$foreign" ]; then
+            echo "::error::$legacy serves a feed pointing somewhere other than $GITHUB_REPOSITORY:"
+            printf '  %s\n' $foreign
+            echo "::error::Installs up to v2.7.0 would follow it. See RELEASING.md section 5."
+            exit 1
+          fi
+
+          echo "$legacy still serves a feed for $GITHUB_REPOSITORY."
+
+      # A download table, above the generated changelog.
+      #
+      # GitHub's asset list is one flat, alphabetically sorted column: there is
+      # no way to group it by platform, and the file names alone do not say
+      # which of the two Windows executables installs and which does not. The
+      # release BODY is the one part of that page this repository controls, so
+      # the table goes there, and every row is a direct link.
+      #
+      # Version-stamped file names are what the bundler produces and what
+      # `latest.json` points at, so they are written out here rather than using
+      # the `/releases/latest/download/<name>` permalink, which only works for
+      # names that carry no version.
+      - name: Compose the download table
+        id: download_table
+        run: |
+          VERSION='${{ steps.get_version.outputs.version }}'
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}"
+          {
+            echo 'body<<RELEASE_BODY'
+            echo '## Download'
+            echo
+            echo '| System | Chip | Download | |'
+            echo '|---|---|---|---|'
+            echo "| **Windows** | Intel / AMD | [\`Markpad_${VERSION}_x64-setup.exe\`](${BASE}/Markpad_${VERSION}_x64-setup.exe) | installer |"
+            echo "| | Intel / AMD | [\`Markpad_${VERSION}_x64.exe\`](${BASE}/Markpad_${VERSION}_x64.exe) | portable |"
+            echo "| | ARM64 | [\`Markpad_${VERSION}_arm64-setup.exe\`](${BASE}/Markpad_${VERSION}_arm64-setup.exe) | installer |"
+            echo "| | ARM64 | [\`Markpad_${VERSION}_arm64.exe\`](${BASE}/Markpad_${VERSION}_arm64.exe) | portable |"
+            echo "| **macOS** | Intel **and** Apple Silicon | [\`Markpad_${VERSION}_universal.dmg\`](${BASE}/Markpad_${VERSION}_universal.dmg) | one file for both |"
+            echo "| **Linux** | x86-64 | [\`Markpad_${VERSION}_amd64.AppImage\`](${BASE}/Markpad_${VERSION}_amd64.AppImage) | portable |"
+            echo "| | x86-64 | [\`Markpad_${VERSION}_amd64.deb\`](${BASE}/Markpad_${VERSION}_amd64.deb) | Debian, Ubuntu |"
+            echo "| | x86-64 | [\`Markpad-${VERSION}-1.x86_64.rpm\`](${BASE}/Markpad-${VERSION}-1.x86_64.rpm) | Fedora, RHEL, openSUSE |"
+            echo
+            echo 'The two Windows files differ only in that one installs and one does not.'
+            echo 'Package managers: `choco install markpad-app` (Windows), `sudo snap install markpad` (Linux).'
+            echo
+            echo '---'
+            echo 'RELEASE_BODY'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -37,6 +118,7 @@ jobs:
           draft: true
           prerelease: false
           generate_release_notes: true
+          body: ${{ steps.download_table.outputs.body }}
 
   build:
     needs: create-release
@@ -68,12 +150,12 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: lts/*
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -88,12 +170,12 @@ jobs:
           librsvg2-dev \
           patchelf \
           rpm \
-          libwebkit2gtk-4.1-0=2.44.0-2 \
-          libwebkit2gtk-4.1-dev=2.44.0-2 \
-          libjavascriptcoregtk-4.1-0=2.44.0-2 \
-          libjavascriptcoregtk-4.1-dev=2.44.0-2 \
-          gir1.2-javascriptcoregtk-4.1=2.44.0-2 \
-          gir1.2-webkit2-4.1=2.44.0-2
+          libwebkit2gtk-4.1-0 \
+          libwebkit2gtk-4.1-dev \
+          libjavascriptcoregtk-4.1-0 \
+          libjavascriptcoregtk-4.1-dev \
+          gir1.2-javascriptcoregtk-4.1 \
+          gir1.2-webkit2-4.1
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf rpm xdg-utils \
           libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 
@@ -189,6 +271,72 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
+
+      # tauri/linuxdeploy bundles libwayland-client.so.0 (and other host-graphics
+      # libraries) from the ubuntu-24.04 runner into the AppImage. On a host whose
+      # Mesa is newer than the runner's, that older bundled libwayland-client
+      # shadows the system one and breaks host libEGL: WebKit's WebProcess aborts
+      # with "Could not create default EGL display: EGL_BAD_PARAMETER" and the
+      # window comes up blank. These libraries are on the AppImage excludelist
+      # precisely because they must come from the host. Strip them, repack, and
+      # re-sign so the updater signature still matches. See #498; #463 fixed the
+      # separate WebKitGTK version pin.
+      - name: Strip host-coupled libraries from AppImage
+        if: matrix.platform == 'ubuntu-24.04'
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' | head -1)
+          if [ -z "$APPIMAGE" ]; then
+            echo "::error::No AppImage found to repackage" >&2
+            exit 1
+          fi
+          APPIMAGE=$(realpath "$APPIMAGE")
+          echo "Repackaging $APPIMAGE"
+
+          # appimagetool + a type2 runtime. --appimage-extract-and-run (below) and
+          # --appimage-extract both unpack without libfuse2, which the runner lacks.
+          tools=$(mktemp -d)
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O "$tools/appimagetool"
+          wget -q https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64 -O "$tools/runtime-x86_64"
+          chmod +x "$tools/appimagetool"
+
+          work=$(mktemp -d)
+          ( cd "$work" && "$APPIMAGE" --appimage-extract >/dev/null )
+          libdir="$work/squashfs-root/usr/lib"
+
+          # Host-coupled graphics libraries (AppImageCommunity/pkg2appimage
+          # excludelist). libwayland-client.so.0 is the one that actually breaks
+          # EGL; the rest belong to the host graphics stack for the same reason.
+          for lib in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1 \
+                     libwayland-server.so.0 libxcb-render.so.0 libxcb-shm.so.0; do
+            rm -fv "$libdir/$lib"
+          done
+          if [ -e "$libdir/libwayland-client.so.0" ]; then
+            echo "::error::libwayland-client.so.0 still bundled after strip" >&2
+            exit 1
+          fi
+
+          # Repack in place so the filename (and updater target) is unchanged.
+          ARCH=x86_64 "$tools/appimagetool" --appimage-extract-and-run \
+            --runtime-file "$tools/runtime-x86_64" \
+            "$work/squashfs-root" "$APPIMAGE"
+
+          # Re-sign: tauri build already produced a .sig for the pre-strip file,
+          # which no longer matches. signer sign reads the key/password from the
+          # env above and writes <APPIMAGE>.sig, which the upload and the
+          # latest.json job below both consume.
+          npm run tauri signer sign -- "$APPIMAGE"
+          if [ ! -f "$APPIMAGE.sig" ]; then
+            echo "::error::signer sign did not produce $APPIMAGE.sig" >&2
+            exit 1
+          fi
+
+          echo "Repacked and re-signed:"
+          ls -la "$APPIMAGE" "$APPIMAGE.sig"
 
       - name: Upload Linux Artifacts
         if: matrix.platform == 'ubuntu-24.04'
@@ -300,6 +448,28 @@ jobs:
           WINDOWS_AARCH64=$(platform_entry "$WIN_ARM_SIG")
           LINUX_X86_64=$(platform_entry "$LINUX_SIG")
 
+          # Every key below is a plain {os}-{arch}, and that is load-bearing.
+          #
+          # tauri-plugin-updater looks up two keys in order: {os}-{arch}-{installer}
+          # first, then {os}-{arch}. The first is only tried when the binary knows
+          # its own bundle type, and ours does not on Windows or Linux --
+          # `__TAURI_BUNDLE_TYPE` is written into the binary by patching it after
+          # the build, and that patch fails on both, three times in the v2.7.0 run:
+          #   Warn Failed to add bundler type to the binary: __TAURI_BUNDLE_TYPE
+          #   variable not found in binary. ... Updater plugin may not be able to
+          #   update this package.
+          # macOS is unaffected: tauri-utils returns BundleType::App there without
+          # reading the variable.
+          #
+          # So Windows and Linux clients ask only for {os}-{arch}, which is what
+          # this file publishes, and the warning is inert for us.
+          #
+          # Adding a per-installer key -- "windows-x86_64-nsis" say -- would end
+          # that. It would be the key those clients cannot ask for, so they would
+          # keep resolving the unsuffixed one and silently ignore the new entry;
+          # remove the unsuffixed one in the same edit and they get
+          # TargetsNotFound and stop updating. If per-installer keys are ever
+          # wanted, the missing bundle type has to be fixed first.
           jq -n \
             --arg version "$VERSION" \
             --arg notes "See https://github.com/${REPO}/releases/tag/v${VERSION}" \

@@ -84,12 +84,9 @@ pub struct PinnedTag {
     pub files: Vec<String>,
 }
 
-fn pinned_tags_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| error.to_string())?;
-    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+fn pinned_tags_path(app: &AppHandle) -> Result<std::path::PathBuf, crate::error::Error> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir)?;
     Ok(dir.join("pinned-tags.json"))
 }
 
@@ -187,12 +184,13 @@ fn update_pinned_tags(
     lock: &Mutex<()>,
     path: &Path,
     edit: impl FnOnce(&mut Vec<PinnedTag>),
-) -> Result<(), String> {
+) -> Result<(), crate::error::Error> {
     let _guard = lock_recover(lock);
     let mut tags = read_pinned_tags_at(path);
     edit(&mut tags);
-    let json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
-    crate::atomic_write(path, json.as_bytes()).map_err(|error| error.to_string())
+    let json = serde_json::to_string(&tags)?;
+    crate::atomic_write(path, json.as_bytes())?;
+    Ok(())
 }
 
 fn save_pinned_tag_at(
@@ -201,7 +199,7 @@ fn save_pinned_tag_at(
     name: String,
     color: String,
     files: Vec<String>,
-) -> Result<(), String> {
+) -> Result<(), crate::error::Error> {
     update_pinned_tags(lock, path, move |tags| {
         if let Some(tag) = tags.iter_mut().find(|tag| tag.name == name) {
             tag.color = color;
@@ -212,16 +210,18 @@ fn save_pinned_tag_at(
     })
 }
 
-fn remove_pinned_tag_at(lock: &Mutex<()>, path: &Path, name: String) -> Result<(), String> {
+fn remove_pinned_tag_at(lock: &Mutex<()>, path: &Path, name: String) -> Result<(), crate::error::Error> {
     update_pinned_tags(lock, path, move |tags| {
         tags.retain(|tag| tag.name != name);
     })
 }
 
+#[tauri::command]
 pub fn list_pinned_tags(app: AppHandle) -> Vec<PinnedTag> {
     read_pinned_tags(&app)
 }
 
+#[tauri::command]
 pub fn save_pinned_tag(
     app: AppHandle,
     name: String,
@@ -230,15 +230,17 @@ pub fn save_pinned_tag(
 ) -> Result<(), String> {
     let path = pinned_tags_path(&app)?;
     let state = app.state::<AppState>();
-    save_pinned_tag_at(&state.pinned_tags, &path, name, color, files)
+    save_pinned_tag_at(&state.pinned_tags, &path, name, color, files).map_err(String::from)
 }
 
+#[tauri::command]
 pub fn remove_pinned_tag(app: AppHandle, name: String) -> Result<(), String> {
     let path = pinned_tags_path(&app)?;
     let state = app.state::<AppState>();
-    remove_pinned_tag_at(&state.pinned_tags, &path, name)
+    remove_pinned_tag_at(&state.pinned_tags, &path, name).map_err(String::from)
 }
 
+#[tauri::command]
 pub fn set_window_meta(
     window: tauri::Window,
     state: State<'_, AppState>,
@@ -294,11 +296,13 @@ fn tag_held_by_another_window(
         .any(|(other, meta)| other != label && meta.tag_name.as_deref() == Some(name))
 }
 
+#[tauri::command]
 pub fn is_window_tag_taken(window: tauri::Window, state: State<'_, AppState>, name: String) -> bool {
     let registry = lock_recover(&state.window_registry);
     tag_held_by_another_window(&registry, window.label(), &name)
 }
 
+#[tauri::command]
 pub fn list_viewer_windows(state: State<'_, AppState>) -> Vec<WindowListEntry> {
     let registry = lock_recover(&state.window_registry);
     let mut list: Vec<WindowListEntry> = registry
@@ -312,6 +316,7 @@ pub fn list_viewer_windows(state: State<'_, AppState>) -> Vec<WindowListEntry> {
     list
 }
 
+#[tauri::command]
 pub fn offer_tab_to_window(
     app: AppHandle,
     broker: State<'_, crate::tab_transfer::TabTransferBroker>,
@@ -326,6 +331,7 @@ pub fn offer_tab_to_window(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
 pub fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
     let window = app
         .get_webview_window(&label)
@@ -334,15 +340,16 @@ pub fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
 pub async fn show_window(window: tauri::Window) {
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
 }
 
-fn window_state_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+fn window_state_path(app: &AppHandle) -> Result<std::path::PathBuf, crate::error::Error> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir)?;
     Ok(dir.join("window-state-v2.json"))
 }
 
@@ -355,16 +362,88 @@ fn window_state_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 /// next launch restores no tabs at all. `atomic_write` publishes the new
 /// snapshot with a rename: the file on disk is either entirely the old
 /// session or entirely the new one.
+#[tauri::command]
 pub fn save_window_state(app: AppHandle, json: String) -> Result<(), String> {
     crate::atomic_write(&window_state_path(&app)?, json.as_bytes()).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
 pub fn load_window_state(app: AppHandle) -> Option<String> {
     fs::read_to_string(window_state_path(&app).ok()?).ok()
 }
 
+#[tauri::command]
 pub fn clear_window_state(app: AppHandle) -> Result<(), String> {
     let path = window_state_path(&app)?;
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn restore_progress_path(app: &AppHandle) -> Result<std::path::PathBuf, crate::error::Error> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir)?;
+    Ok(dir.join("restore-progress-v1.json"))
+}
+
+/// Publishes the restore breadcrumb by rename, but without `atomic_write`'s
+/// fsyncs.
+///
+/// The breadcrumb is the record a launch leaves before it reads a document, so
+/// that the launch after it knows which document killed it. It lives here for
+/// the reason the snapshot does: `localStorage.setItem` is an async message to
+/// the WebKit storage process, and the abnormal termination this record exists
+/// to survive is exactly the event that loses messages in flight. Keeping the
+/// one piece of state whose whole job is to outlive a kill in the store this
+/// codebase had already proved does not survive one is what left #201's
+/// reporter relaunching into the same hang.
+///
+/// The rename is not decoration: `fs::write` truncates before it writes, so a
+/// process killed mid-call leaves an empty file — and an empty breadcrumb
+/// reads as "nothing was interrupted", the one direction this record must
+/// never fail in. What it does *not* need is durability past a power cut. The
+/// event it survives is the process dying, and a rename the kernel has
+/// accepted is visible to every later process whether or not it reached the
+/// platter; after a power cut the breadcrumb is simply absent and startup
+/// behaves as it did before this file existed. That is worth separating from
+/// `atomic_write`, which runs on the user's documents and must survive the
+/// stronger event, because this one runs once per document on every launch:
+/// measured on macOS/APFS with a 122-byte payload, `atomic_write`'s two fsyncs
+/// cost ~8 ms per call against ~0.2 ms for temp-file-plus-rename.
+fn write_restore_progress(path: &Path, json: &str) -> std::io::Result<()> {
+    // Two Markpad processes (Windows, Linux) would otherwise share a temp name
+    // and the loser would delete the winner's file out from under its rename.
+    let temp = path.with_file_name(format!(".restore-progress-{}.tmp", std::process::id()));
+    let write = (|| -> std::io::Result<()> {
+        let mut file = fs::File::create(&temp)?;
+        std::io::Write::write_all(&mut file, json.as_bytes())?;
+        // Closed before the rename: Windows tolerates renaming an open handle
+        // only because Rust opens with FILE_SHARE_DELETE, which is a detail of
+        // the standard library rather than a promise to this caller.
+        drop(file);
+        fs::rename(&temp, path)
+    })();
+    if let Err(error) = write {
+        let _ = fs::remove_file(&temp);
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn save_restore_progress(app: AppHandle, json: String) -> Result<(), String> {
+    write_restore_progress(&restore_progress_path(&app)?, &json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn load_restore_progress(app: AppHandle) -> Option<String> {
+    fs::read_to_string(restore_progress_path(&app).ok()?).ok()
+}
+
+#[tauri::command]
+pub fn clear_restore_progress(app: AppHandle) -> Result<(), String> {
+    let path = restore_progress_path(&app)?;
     if path.exists() {
         fs::remove_file(path).map_err(|e| e.to_string())?;
     }
@@ -486,11 +565,13 @@ pub fn watch_file(
     Ok(())
 }
 
+#[tauri::command]
 pub fn unwatch_file(window: tauri::Window, state: State<'_, WatcherState>) -> Result<(), String> {
     lock_recover(&state.watchers).remove(window.label());
     Ok(())
 }
 
+#[tauri::command]
 pub fn send_markdown_path(state: State<'_, AppState>) -> Vec<String> {
     let mut files: Vec<String> = std::env::args()
         .skip(1)
@@ -789,6 +870,82 @@ mod tests {
         .unwrap();
         let tags = read_pinned_tags_at(&path);
         assert_eq!(names(&tags), HashSet::from(["after".to_string()]));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The breadcrumb must never be readable half-written.
+    ///
+    /// Its two failure directions are not symmetric. A stale record costs one
+    /// spurious deferral: a document the user can reopen by hand. An empty or
+    /// truncated one parses as "no interruption", so the next launch walks
+    /// back into whatever killed the last one — the failure the record exists
+    /// to prevent. `fs::write` truncates before it writes, which puts an empty
+    /// file on disk for as long as the write takes, so the write goes through
+    /// a temp file and a rename instead.
+    ///
+    /// Asserts the property a reader can observe rather than the mechanism:
+    /// every read either fails (no file yet) or yields one of the payloads the
+    /// writer actually wrote, whole.
+    #[test]
+    fn a_reader_never_sees_a_half_written_breadcrumb() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize};
+
+        let dir = temp_dir("restore-progress-torn");
+        let path = dir.join("restore-progress-v1.json");
+
+        // Long enough that a truncating writer is observable. A hundred bytes
+        // might reach the file in one step on some filesystems and make this
+        // test lie; eight kilobytes will not.
+        let payloads: Vec<String> = (0..4u8)
+            .map(|i| {
+                let pending = format!("/{}{}.md", (b'a' + i) as char, "x".repeat(8192));
+                format!("{{\"running\":true,\"pending\":\"{pending}\",\"deferred\":[],\"interruptions\":0}}")
+            })
+            .collect();
+
+        let writing = AtomicBool::new(true);
+        let whole_reads = AtomicUsize::new(0);
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                for round in 0..300 {
+                    write_restore_progress(&path, &payloads[round % payloads.len()]).unwrap();
+                }
+                writing.store(false, Ordering::Relaxed);
+            });
+            scope.spawn(|| {
+                while writing.load(Ordering::Relaxed) {
+                    // A failed read is the file not existing yet, which is the
+                    // one state startup already handles correctly.
+                    if let Ok(text) = fs::read_to_string(&path) {
+                        assert!(
+                            payloads.contains(&text),
+                            "a launch read a breadcrumb of {} bytes that is not any record the writer wrote; \
+                             startup would parse it as 'nothing was interrupted'",
+                            text.len()
+                        );
+                        whole_reads.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            });
+        });
+
+        // Without this the assertion above is vacuous: a reader that never
+        // managed to open the file would sail through having checked nothing.
+        assert!(
+            whole_reads.load(Ordering::Relaxed) > 0,
+            "the reader never read the breadcrumb at all, so it proved nothing"
+        );
+
+        // The temp file is an implementation detail of the write and must not
+        // outlive it, or app_config_dir fills up one launch at a time.
+        let left_behind: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "restore-progress-v1.json")
+            .collect();
+        assert_eq!(left_behind, Vec::<String>::new());
 
         fs::remove_dir_all(&dir).unwrap();
     }

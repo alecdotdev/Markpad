@@ -49,6 +49,7 @@ const {
 	katexFontUrlsToEmbed,
 } = await import('../src/lib/utils/exportFonts.ts');
 const { exportAsHtml } = await import('../src/lib/utils/export.ts');
+const { DEFAULT_PREVIEW_MAX_WIDTH } = await import('../src/lib/utils/previewWidth.ts');
 const { renderRichContent } = await import('../src/lib/utils/richContent.ts');
 
 // ---------------------------------------------------------------- fixtures
@@ -184,6 +185,9 @@ async function runExport(
 		tabPath: '/documents/notes.md',
 		mermaidTheme: options.mermaidTheme ?? 'neutral',
 		libraries: fakeLibraries(record) as any,
+		// The width the preview was reading at, which the export follows (#467).
+		// Irrelevant to what this file asserts; `exportContentWidth.test.ts` owns it.
+		contentWidth: DEFAULT_PREVIEW_MAX_WIDTH,
 	});
 
 	return {

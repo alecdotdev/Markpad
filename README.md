@@ -7,7 +7,7 @@
 
   <p>A lightweight, minimalist Markdown viewer and text editor built for productivity across Windows, macOS, and Linux.</p>
 
-  <a href="https://markpad.dev">Website</a> // <a href="https://github.com/sftwrdotdev/Markpad/releases/latest">Download Latest Release</a> // <a href="https://github.com/sftwrdotdev/Markpad/issues">Report a Bug</a>
+  <a href="https://markpad.dev">Website</a> // <a href="#download">Download</a> // <a href="samples/markdown-syntax.md">Markdown support</a> // <a href="https://github.com/sftwrdotdev/Markpad/issues">Report a Bug</a> // <a href="README.zh-CN.md">简体中文</a>
 </div>
 
 <br />
@@ -15,35 +15,33 @@
 ![demo](pics/demo.gif)
 ## Features
 
-- Tabbed interface
-- Multi-window support
-- Window tags and pinned sessions
-- Monaco editor (like VS Code)
-- Split view
-- Customizable toolbar and title bar icons
-- Multi-language support
-- Syntax highlighting both in editor and code blocks
-- Math equation support (KaTeX)
-- Mermaid diagram support
-- Vim mode
-- Auto-reload from disk
-- Zen mode
-- Table of contents
-- Configurable default mode for new files (editor or preview)
-- Custom themes
-- Paste images into editor
-- Custom typography and font settings
-- Content zooming
-- Image embeds
-- PDF and HTML export
-- Familiar GitHub styled markdown rendering
-- Tiny memory usage (~10MB)
-- No telemetry or bloat
-- Free and open-source
-- Lightweight native UI
-- Cross-platform (Windows, macOS, Linux)
+**Reading**
+- GitHub-styled rendering, with syntax highlighting in code blocks
+- Maths (KaTeX) and diagrams (Mermaid)
+- Table of contents that follows wherever you scroll
+- Folding by heading, and a Zen mode with everything else out of the way
+- Content zoom, custom typography, custom themes (VS Code themes import)
 
-## Installation
+**Editing**
+- Monaco — the editor from VS Code — with Vim mode
+- Split view, kept in sync line for line
+- Heading completion for links, and a customisable formatting toolbar
+- Paste an image straight into the document; drag files in to open them
+
+**Documents**
+- Tabs, multiple windows, window tags, and a session that comes back
+- Auto-reload when a file changes on disk
+- Export to HTML, print to PDF
+- Wikilinks, embeds and callouts alongside standard Markdown — see
+  **[Markdown support](samples/markdown-syntax.md)** for exactly what renders,
+  and what happens to it elsewhere
+
+**The rest**
+- Windows, macOS and Linux
+- ~10MB of memory, no telemetry, free and open source
+- 26 interface languages
+
+## Download
 
 ### Package Managers
 
@@ -59,9 +57,22 @@ choco install markpad-app
 sudo snap install markpad 
 ```
 
-### Direct Download
+### Direct download
 
-Download the latest executable or installer from the [releases page](https://github.com/alecdotdev/Markpad/releases/latest) or from [markpad.sftwr.dev](https://markpad.sftwr.dev)
+Every file below is on the [latest release](https://github.com/sftwrdotdev/Markpad/releases/latest) page, and on [markpad.sftwr.dev](https://markpad.sftwr.dev).
+
+| System | Chip | File | |
+|---|---|---|---|
+| **Windows** | Intel / AMD | `Markpad_x.y.z_x64-setup.exe` | installer |
+| | Intel / AMD | `Markpad_x.y.z_x64.exe` | portable, no installation |
+| | ARM64 | `Markpad_x.y.z_arm64-setup.exe` | installer |
+| | ARM64 | `Markpad_x.y.z_arm64.exe` | portable |
+| **macOS** | Intel **and** Apple Silicon | `Markpad_x.y.z_universal.dmg` | one file for both |
+| **Linux** | x86-64 | `Markpad_x.y.z_amd64.AppImage` | portable, no installation |
+| | x86-64 | `Markpad_x.y.z_amd64.deb` | Debian, Ubuntu |
+| | x86-64 | `Markpad-x.y.z-1.x86_64.rpm` | Fedora, RHEL, openSUSE |
+
+The two Windows files differ only in that one installs and one does not — `-setup.exe` puts Markpad in Program Files and the Start menu; the plain `.exe` runs from wherever you put it.
 
 > After a direct `.dmg` (macOS), `*-setup.exe` (Windows NSIS) or `.AppImage` (Linux) install, Markpad self-updates from GitHub releases via the in-app *Check for Updates…* entry (macOS app menu, or Settings elsewhere). Snap, Chocolatey, `.deb` and `.rpm` users continue to update through their distribution channels.
 
@@ -83,7 +94,7 @@ The result is placed in `dist/test-bundle/`. It is not a distributable release: 
 
 ## Issues & Feedback
 
-If you find a bug, have a feature request, or just want to leave some feedback, please [open an issue](https://github.com/alecdotdev/Markpad/issues/new/choose). I'm actively developing Markpad and love hearing from users!
+If you find a bug, have a feature request, or just want to leave some feedback, please [open an issue](https://github.com/sftwrdotdev/Markpad/issues/new/choose). I'm actively developing Markpad and love hearing from users!
 
 ## Contributing
 

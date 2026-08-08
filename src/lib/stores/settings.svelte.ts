@@ -8,6 +8,15 @@ import {
 	normalizeEditorToolbarOrder,
 } from '../utils/editorToolbar.js';
 import {
+	DEFAULT_AUTO_SAVE,
+	resolveAutoSave,
+} from '../utils/autoSaveSetting.js';
+import {
+	DEFAULT_OPEN_FILE_MODE,
+	resolveOpenFileMode,
+	type OpenFileMode,
+} from '../utils/openFileMode.js';
+import {
 	DEFAULT_TITLEBAR_TOOLBAR_ORDER,
 	DEFAULT_TITLEBAR_TOOLBAR_PLACEMENT,
 	applyTitlebarToolbarMove,
@@ -196,6 +205,15 @@ export function stepWithinRange(current: unknown, delta: number, range: NumericS
 	return clampToRange(clampToRange(current, range) + delta, range);
 }
 
+const LEGACY_START_IN_EDITOR_KEY = 'editor.startInEditor';
+const LEGACY_AUTO_SAVE_KEY = 'editor.autoSave';
+const LEGACY_CONFIRM_BEFORE_SAVE_KEY = 'editor.confirmBeforeSave';
+
+function readStoredKey(key: string): string | null {
+	if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return null;
+	return localStorage.getItem(key);
+}
+
 function parseStoredStringList(value: string | null): string[] | null {
 	if (value === null) return null;
 	try {
@@ -250,7 +268,7 @@ export interface PersistedSetting<T> {
  * hop. It also makes redundant writes free in the ordinary single-window case.
  */
 export function writeStoredSetting(key: string, value: string | null): boolean {
-	if (typeof localStorage === 'undefined') return false;
+	if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return false;
 	const current = localStorage.getItem(key);
 	if (value === null) {
 		if (current === null) return false;
@@ -264,7 +282,7 @@ export function writeStoredSetting(key: string, value: string | null): boolean {
 
 /** Applies everything currently in localStorage onto `target`. */
 function loadPersistedSettings<T>(target: T, entries: readonly PersistedSetting<T>[]): void {
-	if (typeof localStorage === 'undefined') return;
+	if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return;
 	for (const entry of entries) {
 		entry.load(target, localStorage.getItem(entry.key));
 	}
@@ -295,7 +313,7 @@ function installPersistedSettings<T>(target: T, entries: readonly PersistedSetti
 		if (typeof window === 'undefined') return;
 		const entriesByKey = new Map(entries.map((entry) => [entry.key, entry]));
 		const onStorage = (event: StorageEvent) => {
-			if (event.storageArea && typeof localStorage !== 'undefined' && event.storageArea !== localStorage) return;
+			if (event.storageArea && typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function' && event.storageArea !== localStorage) return;
 			// A null key means the whole store was cleared; re-read everything.
 			if (event.key === null) {
 				loadPersistedSettings(target, entries);
@@ -332,7 +350,7 @@ export class SettingsStore {
 	} | null>(null);
 	occurrencesHighlight = $state(false);
 	showWhitespace = $state(false);
-	startInEditor = $state(false);
+	openFileMode = $state<OpenFileMode>(DEFAULT_OPEN_FILE_MODE);
 	newFileDefaultMode = $state(true);
 	showRecentFiles = $state(true);
 	editorMaxWidth = $state(80);
@@ -358,14 +376,14 @@ export class SettingsStore {
 	codeFont = $state('Consolas');
 	codeFontSize = $state(14);
 
-	// File-save behavior. autoSave = silently persist edits without Cmd+S.
-	// confirmBeforeSave = if true, keep the unsaved-changes modals on close/toggle
-	// (i.e. ask for confirmation) even when autoSave is on.
-	autoSave = $state(true);
-	confirmBeforeSave = $state(false);
+	// File-save behavior: on, edits are persisted without Cmd+S; off, they are
+	// kept until saved and closing asks. One switch, because that is the number
+	// of behaviours the app has — see `autoSaveSetting.ts` for the pair it
+	// replaced and why the two of them were never independent.
+	autoSave = $state(DEFAULT_AUTO_SAVE);
 
 	constructor() {
-		if (typeof localStorage === 'undefined') return;
+		if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return;
 
 		const entries = createSettingsPersistence();
 
@@ -482,10 +500,6 @@ export class SettingsStore {
 		this.showWhitespace = !this.showWhitespace;
 	}
 
-	toggleStartInEditor() {
-		this.startInEditor = !this.startInEditor;
-	}
-
 	toggleNewFileDefaultMode() {
 		this.newFileDefaultMode = !this.newFileDefaultMode;
 	}
@@ -508,10 +522,6 @@ export class SettingsStore {
 
 	toggleAutoSave() {
 		this.autoSave = !this.autoSave;
-	}
-
-	toggleConfirmBeforeSave() {
-		this.confirmBeforeSave = !this.confirmBeforeSave;
 	}
 
 	setLanguage(lang: LanguageCode) {
@@ -680,7 +690,16 @@ export function createSettingsPersistence(): PersistedSetting<SettingsStore>[] {
 		booleanSetting('editor.showWhitespace', (s) => s.showWhitespace, (s, v) => { s.showWhitespace = v; }),
 		booleanSetting('editor.showToc', (s) => s.showToc, (s, v) => { s.showToc = v; }),
 		stringSetting('editor.highlightColor', (s) => s.highlightColor, (s, v) => { s.highlightColor = v; }),
-		booleanSetting('editor.startInEditor', (s) => s.startInEditor, (s, v) => { s.startInEditor = v; }),
+		{
+			key: 'editor.openFileMode',
+			read: (s) => s.openFileMode,
+			// The second key is read, never written: it is the boolean this
+			// setting replaced, and it is what an existing install still has on
+			// the first launch after the upgrade. See `resolveOpenFileMode`.
+			load: (s, raw) => {
+				s.openFileMode = resolveOpenFileMode(raw, readStoredKey(LEGACY_START_IN_EDITOR_KEY));
+			},
+		},
 		booleanSetting('editor.newFileDefaultMode', (s) => s.newFileDefaultMode, (s, v) => { s.newFileDefaultMode = v; }),
 		booleanSetting('editor.showRecentFiles', (s) => s.showRecentFiles, (s, v) => { s.showRecentFiles = v; }),
 		numberSetting('editor.maxWidth', EDITOR_MAX_WIDTH_RANGE, (s) => s.editorMaxWidth, (s, v) => { s.editorMaxWidth = v; }),
@@ -743,8 +762,20 @@ export function createSettingsPersistence(): PersistedSetting<SettingsStore>[] {
 		numberSetting('preview.fontSize', PREVIEW_FONT_SIZE_RANGE, (s) => s.previewFontSize, (s, v) => { s.previewFontSize = v; }),
 		stringSetting('preview.codeFont', (s) => s.codeFont, (s, v) => { s.codeFont = v; }),
 		numberSetting('preview.codeFontSize', CODE_FONT_SIZE_RANGE, (s) => s.codeFontSize, (s, v) => { s.codeFontSize = v; }),
-		booleanSetting('editor.autoSave', (s) => s.autoSave, (s, v) => { s.autoSave = v; }),
-		booleanSetting('editor.confirmBeforeSave', (s) => s.confirmBeforeSave, (s, v) => { s.confirmBeforeSave = v; }),
+		{
+			key: 'editor.autoSaveEdits',
+			read: (s) => String(s.autoSave),
+			// The two older keys are read, never written: they are what an
+			// existing install still has on the first launch after the upgrade.
+			// See `resolveAutoSave`.
+			load: (s, raw) => {
+				s.autoSave = resolveAutoSave(
+					raw,
+					readStoredKey(LEGACY_AUTO_SAVE_KEY),
+					readStoredKey(LEGACY_CONFIRM_BEFORE_SAVE_KEY),
+				);
+			},
+		},
 		{
 			key: 'editor.preZenState',
 			read: (s) => (s.preZenState ? JSON.stringify(s.preZenState) : null),

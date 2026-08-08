@@ -144,12 +144,21 @@ function libraries() {
 	};
 }
 
+/** What comrak stamps on the `<pre>` of the n-th fenced block in a document. */
+function sourceposOf(index: number): string {
+	const start = index * 10 + 1;
+	return `${start}:1-${start + 5}:3`;
+}
+
 /** Runs the real preview pipeline over one code block per captured diagram. */
 async function renderDiagrams(): Promise<Map<string, ShimElement>> {
 	resetDiagramCache();
 	const root = (globalThis as any).document.createElement('div');
 	root.innerHTML = Object.values(CORPUS.diagrams)
-		.map((diagram) => `<pre><code class="language-mermaid">${escapeHtml(diagram.source)}</code></pre>`)
+		.map(
+			(diagram, index) =>
+				`<pre data-sourcepos="${sourceposOf(index)}"><code class="language-mermaid">${escapeHtml(diagram.source)}</code></pre>`,
+		)
 		.join('');
 
 	await renderRichContent({
@@ -226,6 +235,26 @@ test('the preview asks Mermaid for labels a sanitizer cannot delete', async () =
 		// reason the diagram filter cannot be the document policy.
 		assert.equal(container.querySelectorAll('style').length, 1, `${name}: the diagram must keep its own stylesheet`);
 	}
+});
+
+/**
+ * A diagram replaces its `<pre>` outright — Mermaid's SVG has nothing of the
+ * code block left in it — so unless the source range comes across with it, a
+ * diagram is the one block in the preview that maps to no source line at all.
+ * Scroll sync and the tab's reading position both resolve a position by
+ * descending to the annotated element that owns it, and several hundred
+ * unannotated pixels get attributed to whatever block is nearest instead.
+ */
+test('a rendered diagram answers for the source lines it replaced', async () => {
+	const diagrams = await renderDiagrams();
+
+	Object.keys(CORPUS.diagrams).forEach((name, index) => {
+		assert.equal(
+			diagrams.get(name)!.getAttribute('data-sourcepos'),
+			sourceposOf(index),
+			`${name}: the diagram container must carry the source range of the code block it replaced`,
+		);
+	});
 });
 
 test('the Node runner has no DOM, so the filter above was the identity function', () => {

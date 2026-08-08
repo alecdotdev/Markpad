@@ -10,6 +10,7 @@
 	import { settings } from '../stores/settings.svelte.js';
 	import { t } from '../utils/i18n.js';
 	import { getConfiguredTitlebarToolbarIds } from '../utils/titlebarToolbar.js';
+	import { shortcutLabel } from '../utils/shortcuts.js';
 	import { hasRealFilePath } from '../utils/tabFileActions.js';
 	import { getVersion } from '@tauri-apps/api/app';
 
@@ -248,7 +249,7 @@
 		align: 'center' as 'left' | 'center' | 'right',
 	});
 
-	function showTooltip(e: MouseEvent, text: string, shortcutKey: string = '', force: boolean = false) {
+	function showTooltip(e: MouseEvent, text: string, shortcut: string | undefined = '', force: boolean = false) {
 		if (!force && (kebabMenuOpen || homeMenuOpen)) return;
 		const target = e.currentTarget as HTMLElement;
 		const rect = target.getBoundingClientRect();
@@ -256,7 +257,10 @@
 		const edgeThreshold = 100;
 
 		tooltip.text = text;
-		tooltip.shortcut = shortcutKey ? `${modifier}+${shortcutKey}` : '';
+		// A COMPLETE chord, from the registry — not a suffix this function
+		// prefixes with the modifier. Composing it here is what made the
+		// Reload-from-Disk tooltip read "Ctrl+F5" for a binding that is plain F5.
+		tooltip.shortcut = shortcut ?? '';
 
 		if (rect.left < edgeThreshold) {
 			tooltip.align = 'left';
@@ -494,7 +498,7 @@
 						y2="15"></line
 					></svg>
 				{t('menu.newFile', currentLanguage)}
-				<span class="menu-shortcut">{modifier}+T</span>
+				<span class="menu-shortcut">{shortcutLabel('file-new', modifier)}</span>
 			</button>
 			<button
 				class="home-menu-item"
@@ -510,7 +514,7 @@
 						y2="10"></line
 					></svg>
 				{t('menu.openFile', currentLanguage)}
-				<span class="menu-shortcut">{modifier}+O</span>
+				<span class="menu-shortcut">{shortcutLabel('file-open', modifier)}</span>
 			</button>
 					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.isEditing)}
 						<button
@@ -524,7 +528,7 @@
 								points="7 3 7 8 15 8"></polyline
 							></svg>
 						{t('menu.save', currentLanguage)}
-						<span class="menu-shortcut">{modifier}+S</span>
+						<span class="menu-shortcut">{shortcutLabel('file-save', modifier)}</span>
 					</button>
 					<button
 						class="home-menu-item"
@@ -537,7 +541,7 @@
 								points="7 3 7 8 15 8"></polyline
 							></svg>
 						{t('menu.saveAs', currentLanguage)}
-						<span class="menu-shortcut">{modifier}+Shift+S</span>
+						<span class="menu-shortcut">{shortcutLabel('file-save-as', modifier)}</span>
 					</button>
 					{#if currentFile !== ''}
 						<button
@@ -549,7 +553,7 @@
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 								><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15A9 9 0 1 1 18 5.64L23 10"></path></svg>
 							{t('menu.reloadFromDisk', currentLanguage)}
-							<span class="menu-shortcut">F5</span>
+							<span class="menu-shortcut">{shortcutLabel('file-reload', modifier)}</span>
 						</button>
 					{/if}
 					{/if}
@@ -612,7 +616,7 @@
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 						><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
 					{t('menu.exit', currentLanguage)}
-					<span class="menu-shortcut">{modifier}+Q</span>
+					<span class="menu-shortcut">{shortcutLabel('app-exit', modifier)}</span>
 				</button>
 					<div class="home-menu-divider"></div>
 					<button
@@ -732,7 +736,7 @@
 							<polyline points="15 18 9 12 15 6"></polyline>
 						</svg>
 						<span class="action-label">{t('menu.back', currentLanguage)}</span>
-						<span class="menu-shortcut">Alt+Left</span>
+						<span class="menu-shortcut">{shortcutLabel('nav-back', modifier)}</span>
 					</button>
 				{:else if id === 'forward'}
 					<button
@@ -752,7 +756,7 @@
 							<polyline points="9 18 15 12 9 6"></polyline>
 						</svg>
 						<span class="action-label">{t('menu.forward', currentLanguage)}</span>
-						<span class="menu-shortcut">Alt+Right</span>
+						<span class="menu-shortcut">{shortcutLabel('nav-forward', modifier)}</span>
 					</button>
 				{:else if id === 'settings'}
 					<button
@@ -810,7 +814,7 @@
 							{/if}
 						</svg>
 						<span class="action-label">{t('menu.zenMode', currentLanguage)}</span>
-						<span class="menu-shortcut">{modifier}+Shift+Z</span>
+						<span class="menu-shortcut">{shortcutLabel('toggle-zen-mode', modifier)}</span>
 					</button>
 				{:else if id === 'tabs'}
 					<button
@@ -819,7 +823,7 @@
 						style:pointer-events={settings.zenMode ? 'none' : 'auto'}
 						onclick={() => settings.toggleTabs()}
 						aria-label={t('tooltip.tabs', currentLanguage).replace('{{action}}', settings.showTabs ? t('tooltip.hide', currentLanguage) : t('tooltip.show', currentLanguage))}
-											onmouseenter={(e) => showTooltip(e, t('tooltip.tabs', currentLanguage).replace('{{action}}', settings.showTabs ? t('tooltip.hide', currentLanguage) : t('tooltip.show', currentLanguage)), 'Shift+B')}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.tabs', currentLanguage).replace('{{action}}', settings.showTabs ? t('tooltip.hide', currentLanguage) : t('tooltip.show', currentLanguage)), shortcutLabel('toggle-tabs', modifier))}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}
 						transition:fly={{ x: 10, duration: 200 }}>
@@ -829,7 +833,7 @@
 							<line x1="9" y1="21" x2="9" y2="9"></line>
 						</svg>
 						<span class="action-label">{t('menu.tabs', currentLanguage).replace('{{action}}', settings.showTabs ? t('menu.hide', currentLanguage) : t('menu.show', currentLanguage) )}</span>
-						<span class="menu-shortcut">{modifier}+Shift+B</span>
+						<span class="menu-shortcut">{shortcutLabel('toggle-tabs', modifier)}</span>
 					</button>
 				{:else if id === 'find'}
 					<button
@@ -840,7 +844,7 @@
 							onfind?.();
 						}}
 						aria-label={t('tooltip.find', currentLanguage)}
-											onmouseenter={(e) => showTooltip(e, t('tooltip.find', currentLanguage), 'F')}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.find', currentLanguage), shortcutLabel('app-find', modifier))}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}
 						transition:fly={{ x: 10, duration: 200 }}>
@@ -849,7 +853,7 @@
 							<line x1="21" y1="21" x2="16.65" y2="16.65"></line>
 						</svg>
 						<span class="action-label">{t('menu.find', currentLanguage)}</span>
-						<span class="menu-shortcut">{modifier}+F</span>
+						<span class="menu-shortcut">{shortcutLabel('app-find', modifier)}</span>
 					</button>
 				{:else if id === 'open_loc'}
 					<button
@@ -874,7 +878,7 @@
 						class="title-action-btn {tabManager.activeTab?.isSplit ? 'active' : ''}"
 						onclick={() => ontoggleSplit?.()}
 						aria-label={t('tooltip.toggleSplitView', currentLanguage)}
-											onmouseenter={(e) => showTooltip(e, t('tooltip.splitView', currentLanguage), '\\')}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.splitView', currentLanguage), shortcutLabel('view-toggle-split', modifier))}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}
 						transition:fly={{ x: 10, duration: 200 }}>
@@ -889,7 +893,7 @@
 								transform="rotate(0 13 2)"></rect
 							></svg>
 						<span class="action-label">{t('menu.splitView', currentLanguage)}</span>
-						<span class="menu-shortcut">{modifier}+{'\\'}</span>
+						<span class="menu-shortcut">{shortcutLabel('view-toggle-split', modifier)}</span>
 					</button>
 				{:else if id === 'sync'}
 					<button
@@ -927,14 +931,14 @@
 							onreloadFromDisk?.();
 						}}
 						aria-label={t('tooltip.reloadFromDisk', currentLanguage)}
-											onmouseenter={(e) => showTooltip(e, t('tooltip.reloadFromDisk', currentLanguage), 'F5')}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.reloadFromDisk', currentLanguage), shortcutLabel('file-reload', modifier))}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}
 						transition:fly={{ x: 10, duration: 200 }}>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 							><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15A9 9 0 1 1 18 5.64L23 10"></path></svg>
 						<span class="action-label">{t('menu.reloadFromDisk', currentLanguage)}</span>
-						<span class="menu-shortcut">F5</span>
+						<span class="menu-shortcut">{shortcutLabel('file-reload', modifier)}</span>
 					</button>
 				{:else if id === 'live'}
 					<button
@@ -955,13 +959,13 @@
 						class="title-action-btn {isEditing ? 'active' : ''}"
 						onclick={ontoggleEdit}
 						aria-label={t('tooltip.editFile', currentLanguage)}
-											onmouseenter={(e) => showTooltip(e, t('tooltip.editFile', currentLanguage), 'E')}
+											onmouseenter={(e) => showTooltip(e, t('tooltip.editFile', currentLanguage), shortcutLabel('view-toggle-edit', modifier))}
 						onmousedown={(e) => e.preventDefault()}
 						onmouseleave={hideTooltip}>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 							><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
 						<span class="action-label">{t('menu.editor', currentLanguage)}</span>
-						<span class="menu-shortcut">{modifier}+E</span>
+						<span class="menu-shortcut">{shortcutLabel('view-toggle-edit', modifier)}</span>
 					</button>
 				{:else if id === 'editorToolbar'}
 					<button

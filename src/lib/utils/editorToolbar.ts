@@ -1,3 +1,5 @@
+import { shortcutLabel } from './shortcuts.js';
+
 type EditorToolbarGroup = 'inline' | 'block' | 'list' | 'insert';
 
 export type EditorToolbarTool = {
@@ -8,15 +10,21 @@ export type EditorToolbarTool = {
 	group: EditorToolbarGroup;
 };
 
-export type EditorToolbarMove = {
+type EditorToolbarMove = {
 	fromIndex: number;
 	toIndex: number;
 };
 
-const EDITOR_TOOLBAR_TOOLS: EditorToolbarTool[] = [
-	{ id: 'fmt-bold', label: 'B', name: 'Bold', shortcut: (modifier) => `${modifier}+B`, group: 'inline' },
-	{ id: 'fmt-italic', label: 'I', name: 'Italic', shortcut: (modifier) => `${modifier}+I`, group: 'inline' },
-	{ id: 'fmt-underline', label: 'U', name: 'Underline', shortcut: (modifier) => `${modifier}+U`, group: 'inline' },
+/**
+ * The buttons, without their shortcut hints — those come from the registry.
+ *
+ * A tool id IS the Monaco action id, which is also the registry id, so a button
+ * and the shortcut it advertises cannot be attached to different commands.
+ */
+const BASE_TOOLBAR_TOOLS: ReadonlyArray<Omit<EditorToolbarTool, 'shortcut'>> = [
+	{ id: 'fmt-bold', label: 'B', name: 'Bold', group: 'inline' },
+	{ id: 'fmt-italic', label: 'I', name: 'Italic', group: 'inline' },
+	{ id: 'fmt-underline', label: 'U', name: 'Underline', group: 'inline' },
 	{ id: 'fmt-inline-code', label: '`', name: 'Inline Code', group: 'inline' },
 	{ id: 'fmt-code-block', label: '{}', name: 'Code Block', group: 'block' },
 	{ id: 'fmt-quote', label: '>', name: 'Quote', group: 'block' },
@@ -27,8 +35,20 @@ const EDITOR_TOOLBAR_TOOLS: EditorToolbarTool[] = [
 	{ id: 'fmt-numbered-list', label: '1.', name: 'Numbered List', group: 'list' },
 	{ id: 'fmt-checklist', label: '[ ]', name: 'Checklist', group: 'list' },
 	{ id: 'fmt-link', label: '[]', name: 'Link', group: 'insert' },
-	{ id: 'insert-table-simple', label: '#', name: 'Table', shortcut: (modifier) => `${modifier}+K T`, group: 'insert' },
+	{ id: 'insert-table-simple', label: '#', name: 'Table', group: 'insert' },
 ];
+
+/**
+ * The tooltip hint used to be a second copy of each chord, kept in step with
+ * `Editor.svelte` by hand until #480 wrote a test for it. It is now read from
+ * `shortcuts.ts`, so a tool with no registry row advertises nothing — which is
+ * the same rule the test enforces from the other side.
+ */
+const EDITOR_TOOLBAR_TOOLS: EditorToolbarTool[] = BASE_TOOLBAR_TOOLS.map((tool) =>
+	shortcutLabel(tool.id, 'Ctrl') === undefined
+		? { ...tool }
+		: { ...tool, shortcut: (modifier: 'Ctrl' | 'Cmd') => shortcutLabel(tool.id, modifier)! },
+);
 
 export const DEFAULT_EDITOR_TOOLBAR_ORDER = EDITOR_TOOLBAR_TOOLS.map((tool) => tool.id);
 

@@ -250,7 +250,6 @@ test('closing a tab mid-write does not leave the older snapshot on disk', async 
 	// then renames on top, and there is no longer a tab to raise a flag on.
 	reset();
 	settings.autoSave = true;
-	settings.confirmBeforeSave = false;
 	const session = makeSession();
 	const tabId = await openDirtyTab(session, '/notes/e.md', 'A');
 	writeDurationsMs = [30, 5];

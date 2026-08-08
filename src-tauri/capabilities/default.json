@@ -4,7 +4,6 @@
   "description": "Capability for all Markpad windows",
   "windows": [
     "main",
-    "installer",
     "window-*"
   ],
   "permissions": [

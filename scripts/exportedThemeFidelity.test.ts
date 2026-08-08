@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { buildExportDocument, exportThemeAttribute } from '../src/lib/utils/export.js';
+import { DEFAULT_PREVIEW_MAX_WIDTH } from '../src/lib/utils/previewWidth.js';
 import { readSource } from './sourceTree.js';
 
 const styles = readSource('src/styles.css');
@@ -25,6 +26,7 @@ function build(theme: string | null | undefined, extra: Partial<{ styles: string
 		title: extra.title ?? 'Notes',
 		styles: extra.styles ?? '',
 		articleHtml: extra.articleHtml ?? '<p>body</p>',
+		contentWidth: DEFAULT_PREVIEW_MAX_WIDTH,
 	});
 }
 

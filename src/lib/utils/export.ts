@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getMarkdownBodyWithoutFrontMatter, parseFrontMatter } from './frontMatter.js';
 import { processMarkdownHtml } from './markdown.js';
 import {
-	escapeHtmlText,
+	escapeHtml,
 	renderStaticFrontMatterPanel,
 	resolveExportImagePath,
 	rewriteMarkdownHrefForExport,
@@ -21,11 +21,20 @@ import {
 	inlineKatexFontFaces,
 	katexFontUrlsToEmbed,
 } from './exportFonts.js';
+import { normalizePreviewMaxWidth } from './previewWidth.js';
 
 interface ExportContext {
 	rawContent: string;
 	tabTitle: string;
 	tabPath: string;
+	/**
+	 * The cap the preview is currently reading at, i.e. the value
+	 * `getPreviewContentWidth(settings.previewMaxWidth, isFullWidth)` hands the
+	 * live `.markdown-body` as `--preview-max-width`. `null` is full-width mode.
+	 * The export follows it rather than carrying a width of its own — see
+	 * `exportContentMaxWidth`.
+	 */
+	contentWidth: number | null;
 	/**
 	 * Mermaid's theme name for the appearance this export is being made in.
 	 * Unlike the PDF route — paper is always white, so that one forces a light
@@ -44,7 +53,7 @@ interface ExportContext {
 	libraries: RichContentLibraries | null;
 }
 
-export type ExportHtmlResult = {
+type ExportHtmlResult = {
 	path: string;
 	embeddedImages: number;
 	missingImages: number;
@@ -121,6 +130,38 @@ export interface ExportDocumentInput {
 	styles: string;
 	/** The finished `.markdown-body` content. */
 	articleHtml: string;
+	/** See `ExportContext.contentWidth` and `exportContentMaxWidth`. */
+	contentWidth: number | null;
+}
+
+/**
+ * The `max-width` an exported `.markdown-body` is given.
+ *
+ * The export used to hard-code `900px`, which was nobody's number: not the
+ * user's Preview → Max width (#346–#349, renamed in #456), and not even the
+ * app's own default of 880. So a document read at 640 or at 1600 arrived at
+ * 900 regardless, and the setting that governs every other rendering of the
+ * same document silently stopped at the file dialog. It follows the setting
+ * now: one source of truth, and what leaves the app is the measure it was
+ * written and read at.
+ *
+ * `null` is full-width mode, and it becomes `none` rather than the preview's
+ * `100%`. The two are equivalent for this element — `.markdown-body` is a block
+ * child of `<body>`, so a percentage cap resolves to the width it already has —
+ * but `none` says the intended thing without depending on that reasoning, and
+ * it cannot interact with `box-sizing` the way a percentage can. `margin: 0
+ * auto` then centres nothing (there is no slack to distribute) and the
+ * `padding: 40px !important` still holds the text off the window edge, which is
+ * exactly how the preview behaves in full-width mode.
+ *
+ * The value is normalized here rather than trusted, because this is the seam
+ * where it stops being a number and becomes a CSS declaration: `previewMaxWidth`
+ * is restored from localStorage, and a corrupted or hand-edited key must not be
+ * able to interpolate itself raw into the exported stylesheet. An unusable value
+ * degrades to the app default the same way the preview's does.
+ */
+export function exportContentMaxWidth(contentWidth: number | null): string {
+	return contentWidth === null ? 'none' : `${normalizePreviewMaxWidth(contentWidth)}px`;
 }
 
 /**
@@ -135,7 +176,7 @@ export function buildExportDocument(input: ExportDocumentInput): string {
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtmlText(input.title || 'Export')}</title>
+<title>${escapeHtml(input.title || 'Export')}</title>
 <style>
 ${input.styles}
 html, body {
@@ -148,7 +189,7 @@ html, body {
 }
 .markdown-body {
 	padding: 40px !important;
-	max-width: 900px;
+	max-width: ${exportContentMaxWidth(input.contentWidth)};
 	margin: 0 auto;
 	height: auto !important;
 	overflow: visible !important;
@@ -404,6 +445,7 @@ export async function exportAsHtml(ctx: ExportContext): Promise<ExportHtmlResult
 		title: ctx.tabTitle,
 		styles,
 		articleHtml: article.root.innerHTML,
+		contentWidth: ctx.contentWidth,
 	});
 
 	try {

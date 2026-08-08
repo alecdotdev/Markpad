@@ -5,9 +5,18 @@
 	import { t, type LanguageCode } from '../utils/i18n.js';
 	import { MARKDOWN_LANGUAGE_ID, shouldLinkifyPastedUrl } from '../utils/pasteContext.js';
 	import { toggleLineMarker, type LineMarkerToolId } from '../utils/editorToolbar.js';
+	import { getTabModel, tabModelUri } from '../utils/tabModels.js';
+	import { installVimScrollCommands } from '../utils/vimScrollCommands.js';
 	import {
+		headingLinkContext,
+		headingQueryStart,
+		type HeadingAnchor,
+	} from '../utils/headingCompletion.js';
+	import {
+		getLineAtVerticalOffset,
 		getScrollSyncPositionFromPixels,
 		getScrollTopForSyncPosition,
+		getVerticalOffsetForLine,
 		type ScrollSyncPosition,
 	} from '../utils/scrollSync.js';
 
@@ -134,8 +143,50 @@
 		return /^(Mac|iPhone|iPad|iPod)/i.test(navigator.platform || '');
 	}
 
+	/**
+	 * The `ITextModel` belonging to a tab — Monaco's document object, and the
+	 * thing that owns the undo stack.
+	 *
+	 * One per tab, created here because this component holds the dynamically
+	 * imported Monaco namespace, and reaped by `TabManager` because that is
+	 * what knows a tab is gone; see `utils/tabModels.ts` for both halves.
+	 *
+	 * The language is re-applied on every call rather than only at creation.
+	 * `language` is derived from the ACTIVE TAB'S PATH, and a tab can be
+	 * repointed at a file of another type without being recreated — following a
+	 * link, back/forward, Save As. The model outlives all of those, so a
+	 * language fixed at creation would be the extension of whatever file the tab
+	 * held the first time it was edited. `setModelLanguage` is a no-op when the
+	 * id already matches.
+	 */
+	function acquireTabModel(tabId: string, seed: string, languageId: string) {
+		const model = getTabModel(tabId, () =>
+			monaco.editor.createModel(seed, languageId, monaco.Uri.parse(tabModelUri(tabId))),
+		);
+		if (model.getLanguageId() !== languageId) monaco.editor.setModelLanguage(model, languageId);
+		return model;
+	}
+
+	/**
+	 * The status-bar readings that are properties of the DOCUMENT rather than of
+	 * an edit: the language and the word count.
+	 *
+	 * They used to be refreshed only by `onDidChangeModelContent`, which was
+	 * enough while a tab switch went through `setValue` — that fires a content
+	 * change (a flush) as a side effect. `setModel` does not, because no content
+	 * changed: a different document arrived. So switching tabs has to ask for
+	 * these explicitly, or the status bar keeps the previous document's numbers.
+	 */
+	function syncStatusFromModel() {
+		const model = editor.getModel();
+		if (!model) return;
+		currentLanguage = model.getLanguageId();
+		const text = model.getValue();
+		wordCount = (text.match(/\S+/g) || []).filter((w) => /\w/.test(w)).length;
+	}
+
 	self.MonacoEnvironment = {
-		getWorker: function (_moduleId: any, label: string) {
+		getWorker: function (_moduleId: string, label: string) {
 			if (label === "json") {
 				return new jsonWorker();
 			}
@@ -246,9 +297,25 @@
 			return theme === "dark" ? "app-theme-dark" : "app-theme-light";
 		};
 
+		// The editor is a VIEW; the document it shows is the active tab's model.
+		// Passing `model` rather than `value`/`language` also settles ownership:
+		// `StandaloneEditor` only sets `_ownsModel` when it had to build the
+		// model itself, and `_postDetachModelCleanup` disposes the model on
+		// `editor.dispose()` only when it owns it. So a model handed in here
+		// SURVIVES the editor — which is the point, because this component is
+		// unmounted every time the user switches a tab to reading mode.
+		//
+		// With no active tab there is nothing to key a model by, so the editor
+		// builds and owns a throwaway one, exactly as it did before. That state
+		// is not reachable from the markup (the pane renders under
+		// `tabManager.activeTab`); it is the honest fallback for the window
+		// between the Monaco chunk resolving and this function running.
+		const documentOptions = currentTabId
+			? { model: acquireTabModel(currentTabId, value, language) }
+			: { value, language };
+
 		editor = monaco.editor.create(container, {
-			value: value,
-			language: language,
+			...documentOptions,
 			theme: getTheme(),
 			dragAndDrop: true,
 			automaticLayout: true,
@@ -269,10 +336,59 @@
 			occurrencesHighlight: settings.occurrencesHighlight
 				? "singleFile"
 				: "off",
+			// The other half of "Highlight Occurrences". Monaco splits the
+			// feature across two options, and `SelectionHighlighter` gates
+			// itself on `selectionHighlight` — it reads `occurrencesHighlight`
+			// only to choose which decoration style to draw with. Left unset,
+			// `selectionHighlight` defaults to true, so with the setting off —
+			// which is its default — selecting a word still highlighted every
+			// other copy of it, from a switch the app never exposed. Same shape
+			// as the defects #369 fixed: a setting that does not control the
+			// thing its label names.
+			selectionHighlight: settings.occurrencesHighlight,
 			fontSize: settings.editorFontSize,
 			fontFamily: settings.editorFont,
 			wordBasedSuggestions: "off",
 			quickSuggestions: false,
+			// Monaco's Unicode highlighter is built for source code, where a
+			// character that looks like ASCII but is not is an attack vector. In
+			// prose it fires on the punctuation CJK authors type all day: `，`
+			// `！` `？` `（` `）` `；` `：` are all confusables of an ASCII
+			// counterpart, so Monaco outlines each one (#186, #94).
+			//
+			// It only fires when the confusable shares a word with basic ASCII —
+			// shouldHighlightNonBasicASCII() suppresses the box when the
+			// surrounding word is entirely non-ASCII — which is why pure CJK
+			// looks fine and `使用 Monaco，然后保存。` or `安装依赖（npm ci）` does
+			// not. Latin technical terms inside CJK prose are the normal case,
+			// and `**粗体**，` triggers it with no Latin word at all.
+			//
+			// invisibleCharacters stays at its default: a stray zero-width space
+			// or NBSP is a real hazard in Markdown (an NBSP after `-` stops a
+			// list from parsing) and it never fires on something typed on
+			// purpose. nonBasicASCII needs no setting — it defaults to
+			// `inUntrustedWorkspace` and standalone Monaco's workspace-trust
+			// service returns true unconditionally, so it is already off; were it
+			// on, every ideograph would be boxed rather than the punctuation.
+			unicodeHighlight: { ambiguousCharacters: false },
+			// The same argument one option over. U+2028 (LINE SEPARATOR) and
+			// U+2029 (PARAGRAPH SEPARATOR) break a JavaScript string literal,
+			// which is what Monaco's guard is for; in Markdown they are just
+			// characters, and they arrive by ordinary means — several word
+			// processors and PDF text extractors emit U+2028 for a soft line
+			// break, so pasting one in is normal here.
+			//
+			// The default is 'prompt', and in standalone Monaco that prompt is
+			// `StandaloneDialogService.doConfirm`, i.e. a bare
+			// `mainWindow.confirm()`: an unstyled browser dialog inside a Tauri
+			// window, carrying Monaco's English string in an app translated
+			// into 26 locales, offering to rewrite the user's bytes. 'auto'
+			// would rewrite them without asking, which is worse.
+			//
+			// 'off' loses no visibility: the line renderer substitutes U+FFFD
+			// for LINE_SEPARATOR and PARAGRAPH_SEPARATOR unconditionally, so
+			// they stay as visible as they ever were. Only the dialog goes.
+			unusualLineTerminators: "off",
 			renderWhitespace: settings.showWhitespace ? "all" : "none",
 			padding: { top: 20 },
 			scrollbar: {
@@ -328,13 +444,7 @@
 				}
 			}
 
-			const model = editor.getModel();
-			if (model) {
-				const text = model.getValue();
-				wordCount = (text.match(/\S+/g) || []).filter((w) =>
-					/\w/.test(w),
-				).length;
-			}
+			syncStatusFromModel();
 		});
 
 		editor.onDidChangeCursorPosition((e) => {
@@ -358,11 +468,7 @@
 			}
 		});
 
-		if (editor.getModel()) {
-			currentLanguage = editor.getModel()?.getLanguageId() || "markdown";
-			const text = editor.getModel()?.getValue() || "";
-			wordCount = (text.match(/\S+/g) || []).filter((w) => /\w/.test(w)).length;
-		}
+		syncStatusFromModel();
 
 		const wheelListener = (e: WheelEvent) => {
 			if (e.ctrlKey || e.metaKey) {
@@ -378,13 +484,75 @@
 
 		container.addEventListener("wheel", wheelListener, { capture: true });
 
-		const completionProvider = monaco.languages.registerCompletionItemProvider(
+		/**
+	 * This document's headings, from the Rust side that renders them.
+	 *
+	 * Cached on the model's version, which changes on every edit: a completion
+	 * fires per keystroke once the dropdown is open, and re-parsing a
+	 * 3,000-line document for each of them would be paid for nothing — the
+	 * headings cannot have moved between two keystrokes of the same edit.
+	 *
+	 * Asked of Rust rather than derived here: the ids come out of comrak's
+	 * anchorizer, and a second implementation in TypeScript would drift from
+	 * it silently, producing links that look right and land nowhere.
+	 */
+	let anchorCache: { version: number; anchors: HeadingAnchor[] } | null = null;
+
+	async function headingAnchors(model: Monaco.editor.ITextModel): Promise<HeadingAnchor[]> {
+		const version = model.getVersionId();
+		if (anchorCache?.version === version) return anchorCache.anchors;
+
+		try {
+			const anchors = (await invoke("list_heading_anchors", {
+				markdown: model.getValue(),
+			})) as HeadingAnchor[];
+			anchorCache = { version, anchors };
+			return anchors;
+		} catch {
+			return [];
+		}
+	}
+
+	const completionProvider = monaco.languages.registerCompletionItemProvider(
 			"markdown",
 			{
-				triggerCharacters: ["(", "/", "\\", '"'],
+				triggerCharacters: ["(", "/", "\\", '"', "#"],
 				provideCompletionItems: async (model, position) => {
 					const lineContent = model.getLineContent(position.lineNumber);
 					const prefix = lineContent.substring(0, position.column - 1);
+
+					// #200: this document's headings, as link targets. Asked
+					// first because `](#` is also the tail of the embed context
+					// below — once a `#` is typed the answer is headings, not
+					// files.
+					const headingContext = headingLinkContext(prefix);
+					if (headingContext) {
+						const anchors = await headingAnchors(model);
+						const range = new monaco.Range(
+							position.lineNumber,
+							headingQueryStart(prefix) + 1,
+							position.lineNumber,
+							position.column,
+						);
+
+						return {
+							suggestions: anchors.map((anchor, index) => ({
+								// Labelled by what it reads as, inserted as
+								// whatever that context needs. Monaco filters on
+								// the label, so typing "mermaid" finds
+								// "11. Mermaid Diagrams" and writes the slug.
+								label: anchor.text,
+								detail: `#${anchor.slug}`,
+								kind: monaco.languages.CompletionItemKind.Reference,
+								insertText:
+									headingContext === "slug" ? anchor.slug : anchor.text,
+								// Document order, not alphabetical: a heading's
+								// neighbours are what the writer is thinking in.
+								sortText: String(index).padStart(5, "0"),
+								range,
+							})),
+						};
+					}
 
 					const isEmbedContext = /(!?\[.*\]\(|<img.*src=["']|src=["'])$/.test(
 						prefix,
@@ -925,39 +1093,83 @@
 				run: () => toggleFormat("<u>|</u>", "tag"),
 			}),
 
+			// The six bindings below were chosen against the whole keymap, not
+			// against VS Code's: standalone Monaco and VS Code do not ship the
+			// same defaults, and the chords the mainstream Markdown editors use
+			// for these actions are the ones Monaco is most likely to be sitting
+			// on. `addAction` registers at weight 1000, above every Monaco
+			// default, so a clash is silent — our action simply wins and the
+			// Monaco command loses its key. The reasoning per binding is below,
+			// and `formatShortcutKeymap.test.ts` is what stops the next one from
+			// landing on an occupied chord.
+
 			editor.addAction({
 				id: "fmt-inline-code",
 				label: t('menu.inlineCode', lang),
+				// GitHub's Markdown editor binds inline code to Ctrl/Cmd+E, but
+				// plain Ctrl/Cmd+E is already `view-toggle-edit` here — which is
+				// itself the mainstream reading (Obsidian and Mark Text both use
+				// it for edit/read). So: same letter, plus Shift. Typora's
+				// Ctrl+Shift+` and Mark Text's Ctrl+` are rejected on purpose —
+				// #121 is *about* the backtick being a dead key on QWERTZ.
+				keybindings: [
+					monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyE,
+				],
 				run: () => toggleFormat("`"),
 			}),
 
 			editor.addAction({
 				id: "fmt-code-block",
 				label: t('menu.codeBlock', lang),
+				// No mainstream chord survives contact with Monaco. Typora and
+				// Mark Text both use Ctrl+Shift+K on Windows/Linux, which is
+				// `editor.action.deleteLines` on BOTH platforms, and both switch
+				// to Cmd+Option+C on macOS, which is `toggleFindCaseSensitive`.
+				// F is for the fences ("Code Fences" is Typora's own name for
+				// the command); it is free everywhere.
+				keybindings: [
+					monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
+				],
 				run: () => wrapAsCodeBlock(),
 			}),
 
 			editor.addAction({
 				id: "fmt-quote",
 				label: t('menu.quote', lang),
+				// GitHub's documented blockquote chord, and the only one that is
+				// the same on both platforms in any editor surveyed: Shift+. is
+				// `>` on a US layout, the blockquote marker itself. Typora and
+				// Mark Text use Ctrl+Shift+Q, which macOS cannot deliver —
+				// Shift+Cmd+Q is the system Log Out — which is why both of them
+				// fall back to Cmd+Option+Q there.
+				keybindings: [
+					monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Period,
+				],
 				run: () => toggleLineMarkerTool("fmt-quote"),
 			}),
 
+			// Typora binds Ctrl/Cmd+1..6 and Mark Text binds Cmd+1..6; Markpad
+			// has only three heading actions, so it binds three. 4, 5 and 6 are
+			// left unbound rather than given to something else, so completing
+			// the range later moves nothing.
 			editor.addAction({
 				id: "fmt-heading-1",
 				label: t('menu.heading1', lang),
+				keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Digit1],
 				run: () => toggleLineMarkerTool("fmt-heading-1"),
 			}),
 
 			editor.addAction({
 				id: "fmt-heading-2",
 				label: t('menu.heading2', lang),
+				keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Digit2],
 				run: () => toggleLineMarkerTool("fmt-heading-2"),
 			}),
 
 			editor.addAction({
 				id: "fmt-heading-3",
 				label: t('menu.heading3', lang),
+				keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Digit3],
 				run: () => toggleLineMarkerTool("fmt-heading-3"),
 			}),
 
@@ -1164,26 +1376,58 @@
 		return Math.max(0, Math.min(getEditorContentScrollMax(), editor.getTopForLineNumber(safeBodyStartLine)));
 	}
 
+	// Monaco's own line -> pixel measurement, which already accounts for folded
+	// regions, wrapped lines and view zones. `getLineAtVerticalOffset` inverts it
+	// by binary search, so this is called ~log2(lineCount) times per sync.
+	function getEditorLineTop(line: number) {
+		return editor ? editor.getTopForLineNumber(line) : 0;
+	}
+
 	function getEditorScrollSyncPosition() {
 		if (!editor) {
 			return { section: 'body', ratio: 0 } satisfies ScrollSyncPosition;
 		}
 
-		return getScrollSyncPositionFromPixels(
+		const position = getScrollSyncPositionFromPixels(
 			editor.getScrollTop(),
 			getEditorContentScrollMax(),
 			getEditorFrontMatterScrollEnd(),
 		);
+
+		// Front matter renders as a panel in the preview with no source range, so
+		// there is nothing for a line to resolve against there; the section ratio
+		// carries it, exactly as before.
+		const model = position.section === 'body' ? editor.getModel() : null;
+		if (!model) return position;
+
+		const line = getLineAtVerticalOffset(editor.getScrollTop(), model.getLineCount(), getEditorLineTop);
+
+		return Number.isFinite(line) ? { ...position, line } : position;
 	}
 
 	export function syncScrollToPosition(position: ScrollSyncPosition) {
 		if (!editor) return;
 
-		const targetScroll = getScrollTopForSyncPosition(
-			position,
-			getEditorContentScrollMax(),
-			getEditorFrontMatterScrollEnd(),
-		);
+		const scrollMax = getEditorContentScrollMax();
+		let targetScroll: number | null = null;
+
+		if (position.section === 'body' && position.line !== undefined) {
+			const model = editor.getModel();
+			if (model) {
+				const offset = getVerticalOffsetForLine(position.line, model.getLineCount(), getEditorLineTop);
+				if (Number.isFinite(offset)) targetScroll = offset;
+			}
+		}
+
+		if (targetScroll === null) {
+			targetScroll = getScrollTopForSyncPosition(position, scrollMax, getEditorFrontMatterScrollEnd());
+		}
+
+		// Clamp before the threshold: a line near the end of the document resolves
+		// to an offset the editor cannot reach, and an unreachable target produces
+		// no scroll event — which would leave `isApplyingExternalScroll` to be
+		// spent on the reader's next real scroll instead of on this one.
+		targetScroll = Math.max(0, Math.min(scrollMax, targetScroll));
 
 		if (Math.abs(editor.getScrollTop() - targetScroll) <= 5) return;
 
@@ -1219,35 +1463,68 @@
 		}
 	});
 
+	// Tab activation. A switch swaps the editor's MODEL; it does not overwrite
+	// one shared buffer any more, which is the whole of #391: `setValue` is
+	// defined to clear the undo stack (`TextModel._setValueFromTextBuffer` →
+	// `_commandManager.clear()`), so every switch away and back used to cost the
+	// user their undo history. Undo now lives on the document, which is Monaco's
+	// intended usage and how VS Code works.
+	//
+	// `setValue` is still here, and still clears undo, for the case it is
+	// actually right for: the tab's buffer was REPLACED behind the editor's back
+	// — a reload from disk, an external change the user accepted, a truncated
+	// buffer completed, a link followed inside this tab, a task checkbox toggled
+	// from the preview. Those hand the model a different document, and an undo
+	// stack from the old one would splice two texts together. The `getValue()`
+	// comparison is what tells the two apart: an ordinary tab switch finds the
+	// model already holding its own text and touches nothing.
+	//
+	// Making external writes undoable instead (`pushEditOperation`) is a real
+	// option and #391 suggests it, but it is a second behaviour change — it
+	// would let Ctrl+Z resurrect a buffer that the truncation and lossy-decode
+	// guards (#374, #379) exist to keep away from the file — so it is
+	// deliberately not part of this one.
 	$effect(() => {
 		const activeTabId = tabManager.activeTabId;
 		const content = value;
+		const languageId = language;
 
 		if (!editorReady || !editor) return;
 
-		if (activeTabId !== currentTabId) {
-			if (currentTabId) {
-				const state = editor.saveViewState();
-				tabManager.updateTabEditorState(currentTabId, state);
-			}
+		const switched = activeTabId !== currentTabId;
 
-			currentTabId = activeTabId;
-			
-			if (editor.getValue() !== content) {
-				editor.setValue(content);
-			}
+		if (switched && currentTabId) {
+			const state = editor.saveViewState();
+			tabManager.updateTabEditorState(currentTabId, state);
+		}
 
+		currentTabId = activeTabId;
+
+		if (activeTabId) {
+			const model = acquireTabModel(activeTabId, content, languageId);
+			if (editor.getModel() !== model) editor.setModel(model);
+		}
+
+		if (editor.getValue() !== content) {
+			editor.setValue(content);
+		}
+
+		if (switched) {
+			// The view state is the editor's, not the model's — cursor, scroll,
+			// selections and the folding contribution — so it still has to be
+			// restored by hand, and only after the model it describes is
+			// attached.
 			if (tabManager.activeTab?.editorViewState) {
 				editor.restoreViewState(tabManager.activeTab.editorViewState);
 			} else {
 				editor.setScrollTop(0);
 				editor.setPosition({ lineNumber: 1, column: 1 });
 			}
-		} else {
-			if (editor.getValue() !== content) {
-				editor.setValue(content);
-			}
 		}
+
+		// Cheap on the hot path: this effect re-runs on every keystroke (it
+		// reads `value`), and on a keystroke neither test holds.
+		if (switched || currentLanguage !== languageId) syncStatusFromModel();
 	});
 
 	$effect(() => {
@@ -1269,6 +1546,7 @@
 				occurrencesHighlight: settings.occurrencesHighlight
 					? "singleFile"
 					: "off",
+				selectionHighlight: settings.occurrencesHighlight,
 				fontSize: settings.editorFontSize * (zoomLevel / 100),
 				fontFamily: settings.editorFont,
 				renderWhitespace: settings.showWhitespace ? "all" : "none",
@@ -1298,7 +1576,12 @@
 			let vim: { dispose: () => void } | null = null;
 			const currentEditor = editor;
 			const currentStatusNode = vimStatusNode;
-			import("monaco-vim").then(({ initVimMode }) => {
+			import("monaco-vim").then(({ initVimMode, VimMode }) => {
+				// Before the adapter is attached, and unconditionally: it patches
+				// monaco-vim's own module-level command tables, which outlive this
+				// effect, and it is idempotent. See vimScrollCommands.ts for what
+				// 0.4.4 does to `zz`, `zt`, `zb`, `z.`, `z-` and `z<CR>` (#104).
+				installVimScrollCommands(VimMode);
 				if (disposed) return;
 				vim = initVimMode(currentEditor, currentStatusNode);
 			});

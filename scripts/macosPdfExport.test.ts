@@ -9,7 +9,7 @@ test('all Markpad webviews may invoke Tauri native printing', () => {
 		permissions: string[];
 	};
 
-	assert.deepEqual(capability.windows, ['main', 'installer', 'window-*']);
+	assert.deepEqual(capability.windows, ['main', 'window-*']);
 	assert.ok(
 		capability.permissions.includes('core:webview:allow-print'),
 		'macOS replaces window.print() with Tauri native printing, which requires this permission',

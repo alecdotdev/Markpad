@@ -81,6 +81,29 @@ class DocumentBuilder {
 		this.line = end + 1;
 	}
 
+	/**
+	 * A paragraph the author soft-wrapped over several source lines.
+	 * `convert_markdown` sets `render.hardbreaks`, so comrak ends every line but
+	 * the last with `<br data-sourcepos="…" />` — the exact shape recorded in
+	 * `renderProtocolFixtures.ts`. Every one of those `br`s is a `[data-sourcepos]`
+	 * element that `findAnchorElement` can descend into and that reports
+	 * `offsetTop === 0, offsetHeight === 0` to the restore.
+	 */
+	wrappedParagraph(lines: string[]) {
+		const start = this.line;
+		const end = start + lines.length - 1;
+		const html = lines
+			.map((text, index) =>
+				index === lines.length - 1
+					? text
+					: `${text}<br data-sourcepos="${start + index}:${text.length + 1}-${start + index}:${text.length + 1}" />\n`,
+			)
+			.join('');
+		this.blocks.push({ startLine: start, endLine: end });
+		this.parts.push(`<p data-sourcepos="${start}:1-${end}:${lines[lines.length - 1].length}">${html}</p>`);
+		this.line = end + 1;
+	}
+
 	code(lines: string[]) {
 		const start = this.line;
 		const end = start + lines.length + 1;
@@ -289,6 +312,77 @@ test('a collapsed fold resolves to the collapsed wrapper, not to its hidden cont
 	const element = match.element as ShimElement;
 	assert.ok(element.classList.contains('foldable-content-wrapper'));
 	assert.ok(element.classList.contains('is-collapsed'));
+});
+
+/**
+ * A document with no headings at all: `processMarkdownHtml` creates no fold
+ * wrappers, so every rendered block stays a top-level child. Issue #153's
+ * follow-up report is about exactly this shape.
+ */
+function buildTextOnlyDocument(paragraphs: number) {
+	const doc = new DocumentBuilder();
+	for (let i = 1; i <= paragraphs; i += 1) {
+		doc.wrappedParagraph([
+			`Paragraph ${i} first line of prose the author soft-wrapped.`,
+			`Paragraph ${i} second line, still the same markdown block.`,
+			`Paragraph ${i} third and final line of the block.`,
+		]);
+		doc.blank();
+	}
+	return doc;
+}
+
+/**
+ * The resolver may only return an element that can tell the restore where it
+ * is. `getAnchorScrollTop` is handed `offsetTop` and `offsetHeight`, and a `br`
+ * reports `0` for both in every browser — so resolving to one is not a near
+ * miss, it is `scrollTop = 0`: the reader is thrown to the top of the document.
+ *
+ * Measured in Chrome over this pipeline's own output: an anchor resolved to a
+ * `br` restored to 0 from scroll offsets of 219, 328, 438, 547, 657 and 766 px.
+ * The shim has no layout, so this is asserted structurally instead — that is
+ * also why the rates above could read 100% while the round trip was broken.
+ */
+test('a soft-wrapped paragraph resolves to the paragraph, never to its <br>', () => {
+	const doc = new DocumentBuilder();
+	doc.wrappedParagraph(['first line', 'second line', 'third line']);
+	const body = parseHtml(processMarkdownHtml(doc.html(), FILE_PATH, new Set())).body;
+
+	assert.ok(body.querySelectorAll('br[data-sourcepos]').length > 0, 'fixture must contain annotated hard breaks');
+
+	for (const line of [1, 2, 3]) {
+		const match = findAnchorElement(body, line);
+		assert.ok(match, `line ${line} must resolve`);
+		assert.equal((match.element as ShimElement).tagName, 'P', `line ${line} resolved to a boxless element`);
+		assert.deepEqual({ startLine: match.startLine, endLine: match.endLine }, { startLine: 1, endLine: 3 });
+	}
+});
+
+test('heading-less document: every anchor line resolves to an element with a box', (t) => {
+	const doc = buildTextOnlyDocument(150);
+	const result = measure(doc, 300);
+
+	t.diagnostic(`text-only: ${doc.lineCount} source lines, ${result.annotatedElements} elements with data-sourcepos`);
+	t.diagnostic(`text-only: ${result.topLevelChildren} top-level children, ` +
+		`${result.topLevelWithSourcepos} of them with data-sourcepos`);
+	t.diagnostic(`text-only: findAnchorElement ${result.fixed.hits}/${result.fixed.total} (${result.fixed.percent}%)`);
+
+	assert.equal(result.fixed.hits, result.fixed.total);
+
+	// Every source line the renderer attributed to a block, not just the sample:
+	// the failure is per-line, and two of every three lines of a soft-wrapped
+	// paragraph are `br` lines.
+	let boxless = 0;
+	let total = 0;
+	for (const block of doc.blocks) {
+		for (let line = block.startLine; line <= block.endLine; line += 1) {
+			total += 1;
+			const match = findAnchorElement(result.body, line);
+			if (match && ['BR', 'WBR'].includes((match.element as ShimElement).tagName)) boxless += 1;
+		}
+	}
+	t.diagnostic(`text-only: ${boxless}/${total} anchor lines resolved to a boxless element`);
+	assert.equal(boxless, 0, `${boxless}/${total} anchor lines resolved to an element with no box`);
 });
 
 test('an anchor line past the end of the document does not resolve', () => {

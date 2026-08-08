@@ -17,7 +17,7 @@ You'll be prompted for a password. **Pick a strong one and store it together wit
 - `~/.tauri/markpad-updater.key`     — **PRIVATE**. Never commit. Never share. Back up to a password manager.
 - `~/.tauri/markpad-updater.key.pub` — **PUBLIC**. Shared with developers; ends up shipped inside Markpad.
 
-### 2. Add Secrets to `alecdotdev/Markpad`
+### 2. Add Secrets to `sftwrdotdev/Markpad`
 
 In the GitHub repo settings → Secrets and variables → Actions → New repository secret:
 
@@ -42,6 +42,22 @@ If you ever lose the private key:
 - A new keypair has to be generated, embedded in a new release, and that release has to be installed manually by every user.
 - Communicate this in release notes so users aren't blindsided.
 
+### 5. `alecdotdev/Markpad` is load-bearing
+
+The updater endpoint in `src-tauri/tauri.conf.json` points at **`sftwrdotdev/Markpad`**. (`scripts/releaseWorkflow.test.ts` holds that name and the endpoint together — if the repository ever moves again, this line moves with it.)
+
+That only helps builds made from here on. The endpoint is compiled into the binary, so every copy up to and including v2.7.0 asks GitHub for `https://github.com/alecdotdev/Markpad/releases/latest/download/latest.json` and reaches the current feed only because GitHub answers with a 301. Those installs use that redirect for as long as they run.
+
+GitHub voids a transfer redirect if the old location is occupied. From [Transferring a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/transferring-a-repository):
+
+> If you create a new repository or fork at the previous repository location, the redirects to the transferred repository will be permanently deleted.
+
+So: **do not create a repository named `Markpad` under `alecdotdev`, do not fork this repository to `alecdotdev`, and do not transfer Markpad back and away again.** A fork is the easy mistake — it copies the code and not the releases, so that URL 404s the moment one exists.
+
+The failure is quiet and unfixable from here: `latest.json` 404s, the updater reports no update available, and users on old versions simply stop being offered new ones. It is not a code-execution risk — the pinned `pubkey` means whoever serves that URL cannot produce a signature that installs.
+
+**`build.yml` checks this before creating a release.** It fetches that URL and asserts the feed's download URLs still name this repository, so it tests what actually matters rather than whether a repository exists at the old location — occupying it while serving a correct feed would pass, correctly. A network failure warns instead of blocking.
+
 ## Per-release workflow
 
 The workflow uses `npm ci`, so its installed dependency graph is exactly the committed lockfile. Do not replace it with `npm install` in release jobs. The same applies to [`snapcraft.yaml`](snapcraft.yaml), which builds the snap outside GitHub Actions; `scripts/releaseWorkflow.test.ts` guards both.
@@ -59,7 +75,7 @@ The workflow uses `npm ci`, so its installed dependency graph is exactly the com
    - GitHub UI: Actions → "Build and Release" → Run workflow → master
    - Or CLI: `gh workflow run build.yml --ref master`
 4. **Wait** ~30 min for matrix builds to finish, plus ~2 min for `generate-update-feed`.
-5. **Open the draft release** on the [Releases page](https://github.com/alecdotdev/Markpad/releases). Verify the assets:
+5. **Open the draft release** on the [Releases page](https://github.com/sftwrdotdev/Markpad/releases). Verify the assets:
    - **macOS**: `*.dmg`, `*.app.tar.gz`, `*.app.tar.gz.sig`
    - **Windows x64**: `Markpad_<version>_x64.exe` (portable), `*_x64-setup.exe` (NSIS installer), `*_x64-setup.exe.sig`
    - **Windows ARM64**: `Markpad_<version>_arm64.exe` (portable), `*_arm64-setup.exe` (NSIS installer), `*_arm64-setup.exe.sig`

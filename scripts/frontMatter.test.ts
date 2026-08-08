@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-	addFrontMatterListItem,
 	addFrontMatterListItems,
 	getMarkdownBodyWithoutFrontMatter,
 	getFrontMatterListItems,
@@ -104,8 +103,8 @@ test('getFrontMatterListItems returns string tag values for YAML lists', () => {
 test('front matter tag helpers add, edit, and remove tags predictably', () => {
 	const original = ['logger', 'synlog'];
 
-	assert.deepEqual(addFrontMatterListItem(original, ' appconfig '), ['logger', 'synlog', 'appconfig']);
-	assert.deepEqual(addFrontMatterListItem(original, 'logger'), ['logger', 'synlog']);
+	assert.deepEqual(addFrontMatterListItems(original, [' appconfig ']), ['logger', 'synlog', 'appconfig']);
+	assert.deepEqual(addFrontMatterListItems(original, ['logger']), ['logger', 'synlog']);
 	assert.deepEqual(addFrontMatterListItems(original, [' ', 'synlog', 'codesite, onoff']), ['logger', 'synlog', 'codesite', 'onoff']);
 	assert.deepEqual(updateFrontMatterListItem(original, 1, ' syslog '), ['logger', 'syslog']);
 	assert.deepEqual(updateFrontMatterListItem(original, 1, 'logger'), ['logger', 'synlog']);

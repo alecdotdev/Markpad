@@ -1,14 +1,23 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
+
 	import { settings } from '../stores/settings.svelte.js';
 	import { t } from '../utils/i18n.js';
+	import { activeTocIdForLine, sourceLineOf } from '../utils/tocFollow.js';
 
-	let { markdownBody, htmlContent, onBeforeJump, collapsedHeaders, ontoggleFold, oncopyref, oncontext, onjump, onshowTooltip, onhideTooltip } = $props<{
+	let { markdownBody, htmlContent, activeLine = null, onBeforeJump, collapsedHeaders, ontoggleFold, oncopyref, oncontext, onjump, onshowTooltip, onhideTooltip } = $props<{
 		markdownBody: HTMLElement | null;
 		htmlContent: string;
+		/**
+		 * The source line at the top of the EDITOR's viewport, or `null` when the
+		 * outline should follow the preview alone (the setting is off, or nothing
+		 * is being edited). See `tocFollow.ts`.
+		 */
+		activeLine?: number | null;
 		onBeforeJump?: () => void;
 		collapsedHeaders?: Set<string>;
 		ontoggleFold?: (id: string) => void;
-		oncopyref?: (text: string) => void;
+		oncopyref?: (text: string, slug: string) => void;
 		oncontext?: (e: MouseEvent, item: TocItem) => void;
 		onjump?: (id: string, text: string, sourceLine: number | null) => void;
 		onshowTooltip?: (e: MouseEvent, text: string, shortcut?: string, align?: 'top' | 'right' | 'left' | 'below') => void;
@@ -21,6 +30,8 @@
 		level: number;
 		isBlock: boolean;
 		hasChildren?: boolean;
+		/** Where this entry starts in the source, for following the editor. */
+		line: number | null;
 	}
 
 	let items = $state<TocItem[]>([]);
@@ -43,7 +54,7 @@
 				const anchor = h.querySelector('a.anchor') as HTMLElement | null;
 				const id = h.id || (anchor ? anchor.id : '');
 				if (id) {
-					result.push({ id, text: text.trim(), level: parseInt(h.tagName[1], 10), isBlock: false });
+					result.push({ id, text: text.trim(), level: parseInt(h.tagName[1], 10), isBlock: false, line: sourceLineOf(h.dataset.sourcepos) });
 				}
 			}
 
@@ -51,7 +62,7 @@
 			for (const el of Array.from(blockAnchors)) {
 				const id = el.id;
 				const label = el.getAttribute('data-label') || id;
-				result.push({ id, text: label, level: 0, isBlock: true });
+				result.push({ id, text: label, level: 0, isBlock: true, line: sourceLineOf(el.dataset.sourcepos) });
 			}
 
 			const allIds = new Map<string, number>();
@@ -75,8 +86,8 @@
 				}
 			}
 
-			const currentFingerprint = items.map(i => `${i.id}-${i.text}-${i.level}`).join('|');
-			const newFingerprint = result.map(i => `${i.id}-${i.text}-${i.level}`).join('|');
+			const currentFingerprint = items.map(i => `${i.id}-${i.text}-${i.level}-${i.line}`).join('|');
+			const newFingerprint = result.map(i => `${i.id}-${i.text}-${i.level}-${i.line}`).join('|');
 			
 			if (currentFingerprint !== newFingerprint) {
 				items = result;
@@ -130,43 +141,62 @@
 		return result;
 	});
 
+	/**
+	 * The preview's scroll clears the highlight a click left on its target.
+	 *
+	 * Which entry is CURRENT is no longer decided here. This used to walk the
+	 * visible entries, `querySelector` each one out of the preview and measure
+	 * its box against the container — a lookup and a layout read per heading,
+	 * per scroll event, and an answer only the preview could give. Both panes
+	 * now send a source line instead (`activeLine`), and one rule picks the
+	 * entry from it.
+	 */
 	function handleScroll() {
-		if (!markdownBody || items.length === 0) return;
-		
-		if (!clickLock && activeTargetEl) {
-			activeTargetEl.classList.remove('toc-target-active');
-			activeTargetEl = null;
-		}
+		if (clickLock || !activeTargetEl) return;
 
-		if (clickLock) return;
-
-		const containerRect = markdownBody.getBoundingClientRect();
-		let currentActive = visibleItems[0]?.id || null;
-
-		for (const item of visibleItems) {
-			const el = markdownBody.querySelector(`[id="${CSS.escape(item.id)}"]`);
-			if (el) {
-				const rect = el.getBoundingClientRect();
-				if (rect.top - containerRect.top < 150) {
-					currentActive = item.id;
-				} else {
-					break;
-				}
-			}
-		}
-
-		if (activeId !== currentActive) {
-			activeId = currentActive;
-			scrollTocIntoView();
-		}
+		activeTargetEl.classList.remove('toc-target-active');
+		activeTargetEl = null;
 	}
 
+	/**
+	 * Keep the current entry in the MIDDLE of the outline, not merely on screen.
+	 *
+	 * `block: 'nearest'` scrolls the least it can get away with, so the outline
+	 * sat still until the current entry crossed an edge and then jumped by one
+	 * row — the reader saw the highlight walk down to the last visible line and
+	 * stay pinned there, with no idea what came next. Centring costs the same
+	 * one call and keeps the entries either side of where you are visible,
+	 * which is the reason to look at an outline while scrolling at all.
+	 */
 	function scrollTocIntoView() {
 		if (tocContainer && activeId) {
 			const activeEl = tocContainer.querySelector(`[data-id="${CSS.escape(activeId)}"]`);
-			if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+			if (activeEl) activeEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
 		}
 	}
+
+	/**
+	 * Which entry the reader is on, from whichever pane they are scrolling.
+	 *
+	 * This is the whole of #169. The outline used to decide by rendered box,
+	 * which only the preview has: in editor-only mode the preview never
+	 * scrolls, and in split view it moves only while scroll sync is on, so the
+	 * outline sat still. A source line is something both panes can produce, and
+	 * resolving it is a comparison rather than a layout read.
+	 *
+	 * A click still wins until its own scroll settles — the same `clickLock`
+	 * the preview's handler respected.
+	 */
+	$effect(() => {
+		const line = activeLine;
+		if (line === null || clickLock) return;
+
+		const next = activeTocIdForLine(visibleItems, line);
+		if (next === null || next === untrack(() => activeId)) return;
+
+		activeId = next;
+		untrack(scrollTocIntoView);
+	});
 
 	$effect(() => {
 		// Capture the element the listener was attached to: the cleanup must
@@ -193,8 +223,7 @@
 			scrollTocIntoView();
 			
 			const item = items.find(i => i.id === id);
-			const sourceLine = Number(el.dataset.sourcepos?.match(/^(\d+):/)?.[1]);
-			if (item) onjump?.(id, item.text, Number.isInteger(sourceLine) ? sourceLine : null);
+			if (item) onjump?.(id, item.text, sourceLineOf(el.dataset.sourcepos));
 
 			// highlight element persistently until scroll
 			if (activeTargetEl) activeTargetEl.classList.remove('toc-target-active');
@@ -279,7 +308,7 @@
 								class="toc-link {activeId === item.id ? 'active' : ''}"
 								data-id={item.id}
 								onclick={() => jumpTo(item.id)}
-								oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); oncontext ? oncontext(e, item) : oncopyref?.(item.text); }}
+								oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); oncontext ? oncontext(e, item) : oncopyref?.(item.text, item.id); }}
 								use:checkTruncation>
 								{item.text}
 							</button>

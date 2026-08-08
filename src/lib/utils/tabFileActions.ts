@@ -2,7 +2,7 @@ import { isHomePath } from './homeTab.js';
 
 type TabFileActionId = 'copy-path' | 'open-location';
 
-export type TabFileAction = {
+type TabFileAction = {
 	id: TabFileActionId;
 	labelKey: string;
 	disabled: boolean;

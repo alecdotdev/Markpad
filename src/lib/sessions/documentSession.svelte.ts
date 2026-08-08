@@ -32,7 +32,7 @@ export type LoadMarkdownOptions = {
  * `conflict` means the owning tab has unsaved edits, so the choice belongs
  * to the user rather than to a background reload.
  */
-export type ExternalChangeOutcome =
+type ExternalChangeOutcome =
 	| { action: 'ignore' }
 	| { action: 'reload'; tabId: string; path: string }
 	| { action: 'conflict'; tabId: string; path: string };
@@ -368,7 +368,24 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			const tab = tabManager.tabs.find((item) => item.id === activeId);
 
 			if (isMarkdown) {
-				if (tab && !loadOptions.preserveEditState && !existing) tab.isEditing = settings.startInEditor;
+				if (tab && !loadOptions.preserveEditState && !existing) {
+					// #183: the reporter turns split view on for every file he
+					// opens, so what a picked file opens as is one preference with
+					// three answers (`openFileMode.ts`).
+					//
+					// Split goes through `setSplitEnabled` rather than assigning
+					// the flag, so the tab carries the scroll-sync preference the
+					// toggle would have given it — a fresh tab is created
+					// `isScrollSynced: false` and would otherwise silently drop it.
+					//
+					// And both are applied BEFORE `initialIsSplit` is read, so a
+					// document opening into either editable mode takes the
+					// full-read branch below: those panes can write, and an editor
+					// bound to the 50KB preview slice is one keystroke away from
+					// auto-saving it back over the whole file.
+					tab.isEditing = settings.openFileMode === 'editor';
+					if (settings.openFileMode === 'split') tabManager.setSplitEnabled(tab.id, true);
+				}
 				const initialIsEditing = tab?.isEditing ?? false;
 				const initialIsSplit = tab?.isSplit ?? false;
 				// `open_markdown_preview` returns only the first 50KB of a large
@@ -602,7 +619,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 		const tab = tabManager.tabs.find((item) => item.id === tabId);
 		if (!tab || (!tab.isDirty && tab.path !== '')) return true;
 		if (!tab.isDirty) return true;
-		if (settings.autoSave && !settings.confirmBeforeSave && tab.path !== '') {
+		if (settings.autoSave && tab.path !== '') {
 			const success = await saveContent(tabId);
 			if (success && !tab.isDirty) return true;
 			if (success) options.onCloseSaveNewerEdits();

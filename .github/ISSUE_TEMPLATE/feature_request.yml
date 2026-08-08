@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest something Markpad should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      placeholder: What you were trying to do when you wanted it.
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like?
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried instead?
+      description: Workarounds, other editors, or nothing — all three are useful to know.

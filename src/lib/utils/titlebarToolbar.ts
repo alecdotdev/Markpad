@@ -1,6 +1,6 @@
 export type TitlebarToolbarPlacement = 'bar' | 'menu';
 
-export type TitlebarToolbarAction = {
+type TitlebarToolbarAction = {
 	id: string;
 	labelKey: string;
 	fallbackName: string;
@@ -9,12 +9,12 @@ export type TitlebarToolbarAction = {
 	required?: boolean;
 };
 
-export type TitlebarToolbarMove = {
+type TitlebarToolbarMove = {
 	fromIndex: number;
 	toIndex: number;
 };
 
-export type ConfiguredTitlebarToolbarIds = {
+type ConfiguredTitlebarToolbarIds = {
 	visibleIds: string[];
 	barIds: string[];
 	menuIds: string[];

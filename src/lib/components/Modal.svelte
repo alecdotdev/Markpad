@@ -114,7 +114,12 @@
 		class="modal-backdrop"
 		transition:fade={{ duration: 150 }}
 		onclick={handleBackdropClick}
-		oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+		oncontextmenu={(e) => {
+			// The prompt input needs the webview's Cut/Copy/Paste menu.
+			if ((e.target as HTMLElement).closest('input, textarea')) return;
+			e.preventDefault();
+			e.stopPropagation();
+		}}
 		role="presentation">
 		<div
 			class="modal-content {kind}"

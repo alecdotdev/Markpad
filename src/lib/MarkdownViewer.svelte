@@ -7,8 +7,6 @@
 	import { cubicOut } from 'svelte/easing';
 	import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 	import { open, save, ask } from '@tauri-apps/plugin-dialog';
-	import Installer from './Installer.svelte';
-	import Uninstaller from './Uninstaller.svelte';
 	import Settings from './components/Settings.svelte';
 	import TitleBar from './components/TitleBar.svelte';
 	import Editor from './components/Editor.svelte';
@@ -38,11 +36,18 @@ import {
 	type RichContentLibraries,
 } from './utils/richContent.js';
 import { observeFoldLayout } from './utils/foldLayout.js';
+import { routeDroppedFile, type DropPane } from './utils/fileDrop.js';
+import { headingReference, preferredReferenceStyle } from './utils/headingReference.js';
 import {
 	findAnchorElement,
 	getAnchorScrollTop,
-	parseSourceposLineRange,
+	getPreviewOffsetForSourceLine,
+	getSourceLineAtPreviewOffset,
+	measureAnchorBox,
 	PREVIEW_ANCHOR_OFFSET,
+	type AnchorBox,
+	type AnchorNode,
+	type OffsetLayoutNode,
 } from './utils/previewAnchor.js';
 import {
 	addFrontMatterListItems,
@@ -100,7 +105,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	import 'highlight.js/styles/github-dark.css';
 	import 'katex/dist/katex.min.css';
 
-	let mode = $state<'loading' | 'app' | 'installer' | 'uninstall'>('loading');
+	let mode = $state<'loading' | 'app'>('loading');
 	let isDisposed = false;
 
 	let showSettings = $state(false);
@@ -161,6 +166,28 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 	let isDragging = $state(false);
 	let dragTarget = $state<'editor' | 'preview' | null>(null);
+
+	/**
+	 * The reference for a heading of THIS document, in the spelling this
+	 * document is written in. See `headingReference.ts` — the inference falls
+	 * back to what the menu has always produced.
+	 */
+	function copyHeadingReference(text: string, slug: string) {
+		const tab = tabManager.activeTab;
+		const fileName = tab?.path ? tab.path.split(/[/\\]/).pop() || null : null;
+		const reference = headingReference({
+			text,
+			slug,
+			fileName,
+			style: preferredReferenceStyle(tab?.rawContent ?? ''),
+		});
+		invoke('clipboard_write_text', { text: reference });
+	}
+
+	function reportUnsupportedDrop(path: string) {
+		const filename = path.split(/[/\\]/).pop() || 'File';
+		addToast(t('toast.unsupportedFile').replace('{{filename}}', filename), 'error');
+	}
 	let editorPaneEl = $state<HTMLElement>();
 	let viewerPaneEl = $state<HTMLElement>();
 	let isProgrammaticScroll = false;
@@ -541,6 +568,17 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			addToast(`${message}: ${String(error)}`, 'error');
 		},
 		onWarning: (message, error) => console.warn(message, error),
+		// The console line above says the same thing in more detail, but in a
+		// packaged build nobody can open that console: the recovery mechanism
+		// was diagnosing itself and writing the answer where no one could read
+		// it. A document missing its content needs an explanation on screen.
+		onInterrupted: ({ deferredPath }) =>
+			addToast(
+				deferredPath
+					? t('toast.restoreInterruptedDeferred', settings.language).replace('{path}', deferredPath)
+					: t('toast.restoreInterrupted', settings.language),
+				'warning',
+			),
 	});
 
 	$effect(() => {
@@ -638,9 +676,20 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		await windowSession.persistState();
 	}
 
+	// Exit discards the snapshot on purpose — it is how "quit" differs from
+	// closing the window — but only once startup is over. Until `init` sets
+	// `mode` to 'app', the file on disk is still the only complete record of
+	// the session: `restore()` has rebuilt the tab list but is partway through
+	// reading those files back. That window is short unless a restored path is
+	// unreachable, and then it is the share timeout, once per tab, serially —
+	// which is exactly when the user starts looking for a way out. The loading
+	// screen renders the ☰ menu while every keyboard shortcut is inert
+	// (`handleKeyDown` returns on `mode !== 'app'`), so Exit is the control
+	// they reach. Discarding there costs them the session they were waiting
+	// for; falling through to a plain close writes it back instead.
 	async function appExit() {
 		await savePinnedTagIfNeeded();
-		if (settings.restoreStateOnReopen) {
+		if (settings.restoreStateOnReopen && mode === 'app') {
 			const hasUnsaved = tabManager.tabs.some((t) => t.isDirty || (t.path === '' && t.rawContent.trim() !== ''));
 			if (hasUnsaved) {
 				const response = await askCustom(t('modal.areYouSureYouWantToExit', settings.language), {
@@ -695,119 +744,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			invoke('unwatch_file').catch(console.error);
 		}
 	});
-
-	function processHighlights(root: Element) {
-		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-			acceptNode(node) {
-				let curr = node.parentElement;
-				while (curr && curr !== root) {
-					if (['CODE', 'PRE', 'SCRIPT', 'STYLE'].includes(curr.tagName)) return NodeFilter.FILTER_REJECT;
-					curr = curr.parentElement;
-				}
-				return NodeFilter.FILTER_ACCEPT;
-			},
-		});
-
-		const toReplace: { node: Text; replaced: string }[] = [];
-		let node: Node | null;
-		while ((node = walker.nextNode())) {
-			const text = (node as Text).nodeValue || '';
-			if (text.includes('==')) {
-				const replaced = text.replace(/==([^=\n]+)==/g, '<mark>$1</mark>');
-				if (replaced !== text) toReplace.push({ node: node as Text, replaced });
-			}
-		}
-		for (const { node, replaced } of toReplace) {
-			const span = root.ownerDocument!.createElement('span');
-			span.innerHTML = replaced;
-			node.parentNode?.replaceChild(span, node);
-		}
-	}
-
-	function processBlockIds(root: Element, doc: Document) {
-		// handle pre-emitted block-id spans from rust parser
-		for (const el of Array.from(root.querySelectorAll('.block-id, [data-block-id]'))) {
-			const rawId = el.getAttribute('data-block-id') || (el as HTMLElement).textContent?.replace(/^\^/, '').trim() || '';
-			if (!rawId) continue;
-			const anchor = doc.createElement('a');
-			anchor.id = rawId;
-			anchor.className = 'block-id-anchor';
-			anchor.setAttribute('data-label', rawId);
-			anchor.setAttribute('aria-hidden', 'true');
-			el.replaceWith(anchor);
-		}
-
-		// scan text nodes for trailing ^id pattern (text ^blockid at end of block)
-		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-			acceptNode(node) {
-				const parent = node.parentElement;
-				if (!parent) return NodeFilter.FILTER_REJECT;
-				if (['CODE', 'PRE', 'SCRIPT', 'STYLE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(parent.tagName)) return NodeFilter.FILTER_REJECT;
-				return NodeFilter.FILTER_ACCEPT;
-			},
-		});
-
-		const blockIdPattern = / \^([a-zA-Z0-9_-]+)\s*$/;
-		const nodes: { node: Text; id: string }[] = [];
-		let textNode: Node | null;
-		while ((textNode = walker.nextNode())) {
-			const text = (textNode as Text).nodeValue || '';
-			const match = text.match(blockIdPattern);
-			if (match) nodes.push({ node: textNode as Text, id: match[1] });
-		}
-
-		for (const { node, id } of nodes) {
-			const text = node.nodeValue || '';
-			const cleanText = text.replace(blockIdPattern, '');
-			const anchor = doc.createElement('a');
-			anchor.id = id;
-			anchor.className = 'block-id-anchor';
-			anchor.setAttribute('data-label', id);
-			anchor.setAttribute('aria-hidden', 'true');
-			const parent = node.parentNode;
-			if (parent) {
-				const textBefore = doc.createTextNode(cleanText);
-				parent.replaceChild(anchor, node);
-				parent.insertBefore(textBefore, anchor);
-			}
-		}
-	}
-
-	function processTaskItems(root: Element) {
-		for (const input of Array.from(root.querySelectorAll('li input[type="checkbox"]'))) {
-			input.setAttribute('data-task-checkbox', '');
-			input.removeAttribute('disabled');
-			(input as HTMLInputElement).style.cursor = 'pointer';
-
-			const li = input.closest('li');
-			if (!li) continue;
-
-			// wrap bare text/inline nodes after checkbox in a span for CSS targeting
-			const nodes = Array.from(li.childNodes);
-			const inputIdx = nodes.indexOf(input);
-			const afterInput = nodes.slice(inputIdx + 1);
-
-			// we loop until we hit a block child (like a nested UL)
-			const inlineNodes = [];
-			for (const n of afterInput) {
-				if (n.nodeType === 1 && ['P', 'DIV', 'UL', 'OL'].includes((n as Element).tagName)) break;
-				inlineNodes.push(n);
-			}
-
-			if (inlineNodes.length > 0) {
-				const wrapper = root.ownerDocument!.createElement('span');
-				wrapper.className = 'task-text';
-				for (const n of inlineNodes) wrapper.appendChild(n);
-				
-				// insert the newly wrapped span after the checkbox
-				li.insertBefore(wrapper, afterInput[inlineNodes.length] || null);
-			}
-
-			if ((input as HTMLInputElement).checked) {
-				li.classList.add('task-done');
-			}
-		}
-	}
 
 	// The preview and the export run the same filter in opposite orders, on
 	// purpose. The export sanitizes the renderer output first and processes
@@ -1150,10 +1086,14 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 						// line (see scripts/previewAnchorRestore.test.ts for the rate).
 						const match = findAnchorElement(body, tab.anchorLine);
 						if (match) {
-							const el = match.element as HTMLElement;
+							// Through the same measurement the sync path uses: an anchor
+							// inside a table or a code block resolves to an element whose
+							// `offsetTop` is measured from that table or that block's shell,
+							// and restoring to it would open the tab at the top instead.
+							const box = measurePreviewBox(match.element);
 							body.scrollTop = getAnchorScrollTop(
-								el.offsetTop,
-								el.offsetHeight,
+								box.top,
+								box.height,
 								match,
 								tab.anchorLine,
 								PREVIEW_ANCHOR_OFFSET,
@@ -1191,25 +1131,66 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		const panel = target.querySelector<HTMLElement>('.frontmatter' + '-panel');
 		if (!panel) return 0;
 
-		return Math.max(0, Math.min(getPreviewScrollMax(target), panel.offsetTop + panel.offsetHeight));
+		// In the same space as `target.scrollTop`, which is what it is compared
+		// against — see `measurePreviewBox`.
+		const box = measurePreviewBox(panel);
+		return Math.max(0, Math.min(getPreviewScrollMax(target), box.top + box.height));
 	}
 
-	function getPreviewScrollSyncPosition(target: HTMLElement) {
-		return getScrollSyncPositionFromPixels(
+	// Not `element.offsetTop`: that is measured from the element's offset parent,
+	// and the preview is full of them — every `<table>` is the offset parent of
+	// its own rows and cells, and `.code-block-shell` is positioned. See
+	// `measureAnchorBox` for what reading those raw does to the mapping.
+	function measurePreviewBox(node: AnchorNode): AnchorBox {
+		if (!markdownBody) return { top: Number.NaN, height: Number.NaN };
+		return measureAnchorBox(
+			node as unknown as OffsetLayoutNode,
+			markdownBody as unknown as OffsetLayoutNode,
+		);
+	}
+
+	function getPreviewScrollSyncPosition(target: HTMLElement): ScrollSyncPosition {
+		const position = getScrollSyncPositionFromPixels(
 			target.scrollTop,
 			getPreviewScrollMax(target),
 			getPreviewFrontMatterScrollEnd(target),
 		);
+
+		// Front matter is a rendered panel with no source range, so there is no
+		// line to send and the section ratio is the only thing that can carry it.
+		// This is the carve-out `scrollSync.ts` exists for, unchanged.
+		if (position.section !== 'body') return position;
+
+		const line = getSourceLineAtPreviewOffset(target, target.scrollTop, measurePreviewBox);
+
+		return line === null ? position : { ...position, line };
 	}
 
 	function scrollPreviewToSyncPosition(position: ScrollSyncPosition) {
 		if (!markdownBody) return;
 
-		const targetScroll = getScrollTopForSyncPosition(
-			position,
-			getPreviewScrollMax(markdownBody),
-			getPreviewFrontMatterScrollEnd(markdownBody),
-		);
+		const scrollMax = getPreviewScrollMax(markdownBody);
+		let targetScroll: number | null = null;
+
+		if (position.section === 'body' && position.line !== undefined) {
+			const offset = getPreviewOffsetForSourceLine(markdownBody, position.line, measurePreviewBox);
+			if (offset !== null) targetScroll = offset;
+		}
+
+		if (targetScroll === null) {
+			targetScroll = getScrollTopForSyncPosition(
+				position,
+				scrollMax,
+				getPreviewFrontMatterScrollEnd(markdownBody),
+			);
+		}
+
+		// The line mapping can point past either end — the last block interpolates
+		// beyond the bottom of a preview that has no room left to scroll. Clamping
+		// before the threshold check is what keeps `isProgrammaticScroll` honest:
+		// an unreachable target fires no scroll event, and the flag would then be
+		// spent swallowing the reader's next real scroll instead.
+		targetScroll = Math.max(0, Math.min(scrollMax, targetScroll));
 
 		if (Math.abs(markdownBody.scrollTop - targetScroll) <= 5) return;
 
@@ -1217,47 +1198,50 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		markdownBody.scrollTop = targetScroll;
 	}
 
+	/**
+	 * The source line the reader is on, for the outline to follow (#169).
+	 *
+	 * BOTH panes answer here, which is the point: the outline used to decide by
+	 * rendered box, and only the preview has those. A source line is something
+	 * either pane can produce — the editor sends one on every scroll (the same
+	 * position scroll sync uses, whether or not sync is on), and the preview
+	 * already computes one for the tab's reading position. One rule then picks
+	 * the entry, so the two panes cannot disagree about which heading is
+	 * current while both are on screen.
+	 */
+	let tocActiveLine = $state<number | null>(null);
+
 	function handleEditorScrollSync(position: ScrollSyncPosition) {
+		if (position.line !== undefined) tocActiveLine = position.line;
+
 		if (tabManager.activeTab?.isScrollSynced) {
 			scrollPreviewToSyncPosition(position);
 		}
 	}
 
-	type PreviewScrollAnchor = {
-		line: number;
-		ratio: number;
-	};
+	/**
+	 * The source line to save as this tab's reading position: the one rendered
+	 * `PREVIEW_ANCHOR_OFFSET` below the top of the viewport, which is where the
+	 * restore puts it back.
+	 *
+	 * This used to be its own scan — `querySelectorAll('[data-sourcepos]')` over
+	 * the whole preview, then `offsetTop` and `offsetHeight` on every element it
+	 * returned, on every scroll event. Two things were wrong with that beyond the
+	 * cost (8.3ms per event on a 13,000-line document, measured in Chrome). It
+	 * took the FIRST element covering the offset in document order, which is the
+	 * outermost, while the restore's `findAnchorElement` takes the narrowest — so
+	 * capture and restore disagreed about which block a position belonged to. And
+	 * it had no opinion about `<br>`, which carries a source range and no box, so
+	 * an anchor at the top of the document could resolve to one (#464).
+	 */
+	function getPreviewScrollAnchor(target: HTMLElement): number | null {
+		const line = getSourceLineAtPreviewOffset(
+			target,
+			target.scrollTop + PREVIEW_ANCHOR_OFFSET,
+			measurePreviewBox,
+		);
 
-	function getPreviewScrollAnchor(target: HTMLElement): PreviewScrollAnchor | null {
-		const anchorOffset = target.scrollTop + PREVIEW_ANCHOR_OFFSET;
-		const viewportRatio =
-			target.clientHeight > 0 ? Math.min(1, PREVIEW_ANCHOR_OFFSET / target.clientHeight) : 0;
-		const candidates = Array.from(target.querySelectorAll<HTMLElement>('[data-sourcepos]'));
-
-		let best: { el: HTMLElement; startLine: number; endLine: number; distance: number } | null = null;
-		for (const el of candidates) {
-			const range = parseSourceposLineRange(el.dataset.sourcepos);
-			if (!range) continue;
-
-			const top = el.offsetTop;
-			const bottom = top + el.offsetHeight;
-			const distance = anchorOffset < top ? top - anchorOffset : anchorOffset > bottom ? anchorOffset - bottom : 0;
-
-			if (!best || distance < best.distance) {
-				best = { el, startLine: range.startLine, endLine: range.endLine, distance };
-				if (distance === 0) break;
-			}
-		}
-
-		if (!best) return null;
-
-		const elementHeight = best.el.offsetHeight;
-		const relativeOffset = Math.max(0, Math.min(elementHeight, anchorOffset - best.el.offsetTop));
-		const elementRatio = elementHeight > 0 ? relativeOffset / elementHeight : 0;
-		const totalLines = best.endLine - best.startLine;
-		const line = best.startLine + Math.round(Math.max(0, totalLines) * elementRatio);
-
-		return { line, ratio: viewportRatio };
+		return line === null ? null : Math.round(line);
 	}
 
 	function syncEditorToPreviewScroll(target: HTMLElement) {
@@ -1299,9 +1283,13 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				tabManager.updateTabScrollPercentage(tabManager.activeTabId, percentage);
 			}
 
-			const anchor = getPreviewScrollAnchor(target);
-			if (anchor) {
-				tabManager.updateTabAnchorLine(tabManager.activeTabId, anchor.line);
+			// One descent, two consumers: the tab's reading position, and the
+			// outline. Both want the line at the top of the preview, and this is
+			// already the only place it is measured.
+			const anchorLine = getPreviewScrollAnchor(target);
+			if (anchorLine !== null) {
+				tabManager.updateTabAnchorLine(tabManager.activeTabId, anchorLine);
+				tocActiveLine = anchorLine;
 			}
 		}
 
@@ -1579,10 +1567,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	 */
 	async function flushBeforeLeavingEditableMode(tab: Tab) {
 		if (!tab.isDirty || tab.path === '') return;
-		// `confirmBeforeSave` disables the silent background save entirely
-		// (the Settings label promises confirmation before each write), so it
-		// disables this flush too.
-		if (!settings.autoSave || settings.confirmBeforeSave) return;
+		// Auto-save off means edits are kept until the user saves them, so
+		// leaving the pane must not write either — the close dialog asks.
+		if (!settings.autoSave) return;
 
 		const success = await saveContent(tab.id);
 		if (!success) {
@@ -1749,13 +1736,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	 * cancelled and a manual Cmd+S becomes the only path again.
 	 */
 	$effect(() => {
-		// Disable background auto-save in two cases:
-		//   1. The user turned `autoSave` off entirely.
-		//   2. The user enabled `confirmBeforeSave` — the Settings UI label
-		//      promises confirmation before each save, so silent debounced
-		//      writes contradict that contract. With this flag on, saves
-		//      happen only via Cmd+S or via the close/toggle modals.
-		if (!settings.autoSave || settings.confirmBeforeSave) {
+		// With auto-save off, saves happen only via Cmd+S or via the
+		// close/toggle modals, so every armed timer is dropped.
+		if (!settings.autoSave) {
 			untrack(() => {
 				for (const t of autoSaveTimers.values()) clearTimeout(t);
 				autoSaveTimers.clear();
@@ -1885,6 +1868,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			// so the diagrams have to be rendered for the same appearance.
 			mermaidTheme: currentMermaidTheme(),
 			libraries: richLibraries,
+			// The same value the live preview is wearing as `--preview-max-width`,
+			// so the exported file is read at the measure it was written at
+			// instead of the 900px the exporter used to hard-code (#467).
+			contentWidth: previewContentWidth,
 		});
 		if (result?.missingImages) {
 			addToast(`Exported HTML, but ${result.missingImages} local image(s) could not be embedded.`, 'warning');
@@ -2130,6 +2117,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		if (mode !== 'app') return;
 		const isInsideEditor = (e.target as HTMLElement).closest('.editor-container');
 		if (isInsideEditor) return;
+		// Text fields keep the webview's own editing menu (Cut/Copy/Paste);
+		// the document menu below is about the rendered preview and has no
+		// edit items, so swallowing the native one leaves no way to paste.
+		if ((e.target as HTMLElement).closest('input, textarea, [contenteditable="true"]')) return;
 		e.preventDefault();
 
 		const selection = window.getSelection();
@@ -2149,11 +2140,12 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		let copyRefItem: any[] = [];
 		if (heading) {
 			const text = heading.textContent?.trim() || '';
-			const tab = tabManager.activeTab;
-			const filename = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : '';
-			const ref = filename ? `[[${filename}#${text}]]` : `#${text}`;
+			// The rendered id, straight off the element: comrak wrote it, and
+			// the outline reads it the same way — it can be on an anchor comrak
+			// nests inside the heading rather than on the heading itself.
+			const slug = heading.id || heading.querySelector('a.anchor')?.id || '';
 			copyRefItem = [
-				{ label: t('menu.copyReference', uiLanguage), onClick: () => invoke('clipboard_write_text', { text: ref }) },
+				{ label: t('menu.copyReference', uiLanguage), onClick: () => copyHeadingReference(text, slug) },
 				{ separator: true },
 			];
 		}
@@ -2450,9 +2442,25 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			e.preventDefault();
 			closeFile();
 		}
-		if (cmdOrCtrl && !e.shiftKey && key === 't') {
+		// New file, both keys, whether or not the editor has focus (#392).
+		//
+		// Monaco resolves its own keybindings on the editor container and calls
+		// stopPropagation() when it consumes one, so this handler only ever runs
+		// for keystrokes the editor did not claim. That is how Ctrl+T came to
+		// mean two things: inside Monaco the `file-new` action answered it and
+		// opened an Untitled buffer, outside it this branch opened a Home tab.
+		// Both of the app's own labels already promised the first one — the tab
+		// strip's + button is titled "New Tab (Ctrl+T)" and the app menu prints
+		// Ctrl/Cmd+T beside "New File" — so the branch, not the labels, was the
+		// odd one out.
+		//
+		// `file-new` binds Ctrl/Cmd+N as well, and this handler used to know
+		// about only one of the two, which left Ctrl+N doing nothing at all
+		// outside the editor. Both are listed here so the two paths cannot
+		// drift again; `formatShortcutKeymap.test.ts` holds them equal.
+		if (cmdOrCtrl && !e.shiftKey && !e.altKey && (key === 't' || key === 'n')) {
 			e.preventDefault();
-			tabManager.addHomeTab();
+			handleNewFile();
 		}
 		if (cmdOrCtrl && !e.shiftKey && !e.altKey && key === 'o') {
 			e.preventDefault();
@@ -2476,7 +2484,18 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			// alone, identically for the hotkey and the toolbar button.
 			if (!isSplit) toggleEdit();
 		}
-		if (cmdOrCtrl && key === 's') {
+		if (cmdOrCtrl && e.shiftKey && !e.altKey && key === 's') {
+			// Save As. The app menu advertised this chord for as long as the menu has
+			// existed, but nothing ever bound it: the branch below matched on
+			// `cmdOrCtrl && key === 's'` with no Shift guard, so the advertised
+			// keystroke fell through to a plain Save and silently overwrote the file
+			// the user was asking to write somewhere else. `saveContentAs` had no
+			// keyboard path at all — its only caller was the menu button.
+			e.preventDefault();
+			saveContentAs();
+			return;
+		}
+		if (cmdOrCtrl && !e.shiftKey && key === 's') {
 			// Reading mode used to swallow the shortcut entirely. An untitled
 			// buffer reaches it with content still unsaved — `toggleEdit`
 			// only runs its save flow for tabs that already have a path — so
@@ -2735,28 +2754,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		window.addEventListener('pointercancel', onUp);
 	}
 
-	function getSplitTransition(node: Element, { isEditing, side }: { isEditing: boolean; side: 'left' | 'right' }) {
-		let shouldAnimate = false;
-		let x = 0;
-
-		if (side === 'left') {
-			if (!isEditing) {
-				shouldAnimate = true;
-				x = -50;
-			}
-		} else {
-			if (isEditing) {
-				shouldAnimate = true;
-				x = 50;
-			}
-		}
-
-		if (shouldAnimate) {
-			return fly(node, { x, duration: 250 });
-		}
-		return { duration: 0 };
-	}
-
 	onMount(() => {
 		loadRecentFiles();
 		isDisposed = false;
@@ -2774,7 +2771,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 			const init = async () => {
 				const appWindow = getCurrentWindow();
-				const appMode = (await invoke('get_app_mode')) as any;
 				if (isDisposed) return;
 
 			await windowSession.restore();
@@ -2859,7 +2855,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			);
 			unlisteners.push(
 				await appWindow.listen('menu-tab-undo', () => {
-					console.log('Received menu-tab-undo event');
 					handleUndoCloseTab();
 				}),
 			);
@@ -2929,7 +2924,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			unlisteners.push(await appWindow.listen('menu-app-quit',         () => appExit()));
 			unlisteners.push(
 				await appWindow.onCloseRequested(async (event) => {
-					console.log('onCloseRequested triggered');
 					if (isForceExiting) return;
 
 					// The red button is a native control, so it is NOT blocked
@@ -2965,7 +2959,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 							// walk. `saveContent` cancels each tab's pending timer
 							// itself, so no writer here can be raced by its own
 							// debounce.
-							if (settings.autoSave && !settings.confirmBeforeSave) {
+							if (settings.autoSave) {
 								for (const tab of dirtyTabs.filter((t) => t.path !== '')) {
 									const ok = await saveContent(tab.id);
 									if (!ok) {
@@ -3050,20 +3044,29 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 						const paths = event.payload.paths;
 						const currentEditor = editorPane;
 						if (currentEditor) currentEditor.hideDragCaret();
-						if (dragTarget === 'editor' && currentEditor) {
+						// Both panes route through `routeDroppedFile`. The editor's
+						// branch used to look for an image and silently discard
+						// everything else, so a `.md` dropped there did nothing at
+						// all while the same drop on the preview opened it.
+						const pane: DropPane | null =
+							dragTarget === 'editor' && currentEditor
+								? 'editor'
+								: dragTarget === 'preview' || (!isSplit && !isEditing)
+									? 'preview'
+									: null;
+
+						if (pane) {
 							paths.forEach(path => {
-								const ext = path.split('.').pop()?.toLowerCase();
-								if (ext && ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
-									currentEditor.handleDroppedFile(path, x, y);
-								}
-							});
-						} else if (dragTarget === 'preview' || (!isSplit && !isEditing)) {
-							paths.forEach(path => {
-								if (hasMarkdownLinkExtension(path)) {
-									loadMarkdown(path);
-								} else {
-									const filename = path.split(/[\/\\]/).pop() || 'File';
-									addToast(t('toast.unsupportedFile').replace('{{filename}}', filename), 'error');
+								switch (routeDroppedFile(path, pane)) {
+									case 'insert':
+										currentEditor?.handleDroppedFile(path, x, y);
+										break;
+									case 'open':
+										loadMarkdown(path);
+										break;
+									case 'unsupported':
+										reportUnsupportedDrop(path);
+										break;
 								}
 							});
 						}
@@ -3098,7 +3101,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				}
 			}
 
-			if (!isDisposed) mode = appMode;
+			if (!isDisposed) mode = 'app';
 		};
 
 		init();
@@ -3159,10 +3162,6 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 			<circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="4"></circle>
 		</svg>
 	</div>
-{:else if mode === 'installer'}
-	<Installer />
-{:else if mode === 'uninstall'}
-	<Uninstaller />
 {:else}
 	<TitleBar
 		{isFocused}
@@ -3402,7 +3401,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 																	<input
 																		id={frontMatterFieldId(field.key)}
 																		type={field.kind === 'number' ? 'number' : 'text'}
-																		value={field.editableValue}
+																		value={field.displayValue}
 																		onchange={(e) => handleFrontMatterEdit(field, (e.currentTarget as HTMLInputElement).value)} />
 																{/if}
 															{:else}
@@ -3481,13 +3480,14 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 									tabindex="0"
 									onpointerdown={startTocResize}
 									onkeydown={handleTocResizeKeyDown}></div>
-								<Toc 
+								<Toc
+									activeLine={tocActiveLine} 
 										{markdownBody} 
 										htmlContent={sanitizedHtml}
 										onBeforeJump={pushScrollHistory} 
 										{collapsedHeaders} 
 										ontoggleFold={toggleFold} 
-										oncopyref={(text: string) => { const tab = tabManager.activeTab; const fn = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : ''; invoke('clipboard_write_text', { text: fn ? `[[${fn}#${text}]]` : `#${text}` }); }}
+										oncopyref={(text: string, slug: string) => copyHeadingReference(text, slug)}
 										onjump={(id: string, text: string, sourceLine: number | null) => {
 											if (isEditing && editorPane) {
 												editorPane.revealHeader(sourceLine, text);
@@ -3502,9 +3502,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 													{ 
 														label: t('menu.copyReference', uiLanguage),
 														onClick: () => {
-															const tab = tabManager.activeTab;
-															const fn = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : '';
-															invoke('clipboard_write_text', { text: fn ? `[[${fn}#${item.text}]]` : `#${item.text}` });
+															copyHeadingReference(item.text, item.id);
 															docContextMenu.show = false;
 														} 
 													}
