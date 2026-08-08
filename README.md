@@ -7,7 +7,7 @@
 
   <p>A lightweight, minimalist Markdown viewer and text editor built for productivity across Windows, macOS, and Linux.</p>
 
-  <a href="https://markpad.dev">Website</a> // <a href="#download">Download</a> // <a href="samples/markdown-syntax.md">Markdown support</a> // <a href="https://github.com/sftwrdotdev/Markpad/issues">Report a Bug</a> // <a href="README.zh-CN.md">简体中文</a>
+  <a href="https://markpad.dev">Website</a> // <a href="#download">Download</a> // <a href="#what-markpad-renders">What Markpad renders</a> // <a href="https://github.com/sftwrdotdev/Markpad/issues">Report a Bug</a> // <a href="README.zh-CN.md">简体中文</a>
 </div>
 
 <br />
@@ -33,8 +33,7 @@
 - Auto-reload when a file changes on disk
 - Export to HTML, print to PDF
 - Wikilinks, embeds and callouts alongside standard Markdown — see
-  **[Markdown support](samples/markdown-syntax.md)** for exactly what renders,
-  and what happens to it elsewhere
+  **[What Markpad renders](#what-markpad-renders)** below
 
 **The rest**
 - Windows, macOS and Linux
@@ -75,6 +74,10 @@ Every file below is on the [latest release](https://github.com/sftwrdotdev/Markp
 The two Windows files differ only in that one installs and one does not — `-setup.exe` puts Markpad in Program Files and the Start menu; the plain `.exe` runs from wherever you put it.
 
 > After a direct `.dmg` (macOS), `*-setup.exe` (Windows NSIS) or `.AppImage` (Linux) install, Markpad self-updates from GitHub releases via the in-app *Check for Updates…* entry (macOS app menu, or Settings elsewhere). Snap, Chocolatey, `.deb` and `.rpm` users continue to update through their distribution channels.
+
+## What Markpad renders
+
+Every syntax Markpad renders is in one document — [**download `markdown-syntax.md`**](https://raw.githubusercontent.com/sftwrdotdev/Markpad/master/samples/markdown-syntax.md) and open it in Markpad: the preview shows each feature working, the editor beside it shows how each one is written ([read it on GitHub](samples/markdown-syntax.md) first if you like). Give the same file to an AI and it knows exactly what Markpad can render: ask it to reformat a document you already have, or to write a new one that uses the whole range — callouts, tables, footnotes, maths, diagrams — and open the result here.
 
 ## Installation from source
 
