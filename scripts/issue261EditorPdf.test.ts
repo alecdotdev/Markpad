@@ -1,17 +1,82 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { offsetOf, readSource, sliceBetween, sliceFrom } from './sourceTree.js';
+import { functionSource, offsetOf, readSource, sliceBetween, sliceFrom } from './sourceTree.js';
 
 const viewer = readSource('src/lib/MarkdownViewer.svelte');
 const styles = readSource('src/styles.css');
 
-test('editor context menu is not intercepted by the document menu', () => {
+test('a right-click in the editor gets the editor menu, before any other rule claims it', () => {
+	// #261/#266 was the document menu swallowing this event: it called
+	// `preventDefault()` before checking where the click was, and its
+	// full-viewport overlay then covered Monaco's menu, so Paste hit the
+	// overlay. The fix then was to hand the event to Monaco.
+	//
+	// Markpad draws this menu itself now (#207), because Monaco's Paste reads
+	// the clipboard through the webview and cannot work here. So the invariant
+	// is no longer "Monaco gets the event first" — it is that the editor's own
+	// branch runs before every other rule in the handler.
+	//
+	// The ordering matters for a reason that is easy to miss: Monaco takes
+	// input through a hidden `<textarea>`, so the carve-out that leaves real
+	// text fields their native menu would claim every right-click in the
+	// editor if it came first.
 	const handler = sliceBetween(viewer, 'function handleContextMenu(e: MouseEvent)', '\n\tfunction handleMouseOver');
-	const editorReturn = offsetOf(handler, 'if (isInsideEditor) return;');
-	const preventDefault = offsetOf(handler, 'e.preventDefault();');
+	const editorBranch = offsetOf(handler, "closest('.editor-container')");
+	const textFieldCarveOut = offsetOf(handler, "closest('input, textarea,");
+	const documentMenu = offsetOf(handler, 'e.preventDefault();');
 
-	assert.ok(editorReturn < preventDefault, 'Monaco must receive the event before the document menu prevents it');
+	assert.ok(editorBranch < textFieldCarveOut, "the hidden textarea must not claim the editor's right-click");
+	assert.ok(editorBranch < documentMenu, 'the editor branch runs before the document menu');
+	assert.match(handler, /showEditorContextMenu\(e\);\s*\n\s*return;/, 'and it shows a menu rather than bailing out');
+});
+
+test('the editor menu runs the same three functions the keyboard runs', () => {
+	// One implementation per operation is the whole point: six entry points
+	// (three keys, three menu items) and three functions. A menu item wired to
+	// its own inline implementation would drift from the shortcut silently.
+	const menu = functionSource(viewer, 'showEditorContextMenu');
+
+	for (const fn of ['cutToClipboard', 'copyToClipboard', 'pasteFromClipboard']) {
+		assert.match(menu, new RegExp(`editorPane\\?\\.${fn}\\(\\)`), `${fn} is what the menu item runs`);
+	}
+});
+
+test('the two Monaco entries this app can use survive drawing our own menu', () => {
+	// Drawing the menu ourselves means every item Monaco used to contribute is
+	// gone unless it is put back, and two of them work without a language
+	// provider — so they were there, and vanished, and were noticed only
+	// because someone went looking for them.
+	//
+	// The rest (Go to Symbol, Quick Fix, Refactor, Format, Rename) are gated on
+	// providers Markdown has none of and never appeared in this app.
+	const menu = functionSource(viewer, 'showEditorContextMenu');
+
+	assert.match(menu, /editor\.action\.quickCommand/, 'Command Palette');
+	assert.match(menu, /editor\.action\.changeAll/, 'Change All Occurrences');
+
+	// Through the app's own translations, which is a gain rather than parity:
+	// Monaco's menu is English whatever language the app is in.
+	assert.match(menu, /t\('menu\.commandPalette', uiLanguage\)/);
+	assert.match(menu, /t\('menu\.changeAllOccurrences', uiLanguage\)/);
+});
+
+test('every label the editor menu asks for exists in every language', () => {
+	// A missing key does not throw — `t()` falls back to English and then to
+	// the key itself, so a forgotten locale ships the string
+	// "menu.changeAllOccurrences" to the user.
+	const i18n = readSource('src/lib/utils/i18n.ts');
+	const locales = (i18n.match(/\n\s+menu: \{/g) ?? []).length;
+	assert.ok(locales >= 6, `expected at least six locales, found ${locales}`);
+
+	const menu = functionSource(viewer, 'showEditorContextMenu');
+	for (const key of [...menu.matchAll(/t\('menu\.(\w+)', uiLanguage\)/g)].map((m) => m[1])) {
+		assert.equal(
+			(i18n.match(new RegExp(`\\b${key}:`, 'g')) ?? []).length >= locales,
+			true,
+			`menu.${key} is missing from at least one language`,
+		);
+	}
 });
 
 test('print layout releases measured fold heights before text reflows', () => {
@@ -110,4 +175,49 @@ test('print layout keeps wide metadata tables readable', () => {
 	assert.match(printStyles, /\.markdown-body table th,[\s\S]*?overflow-wrap:\s*break-word\s*!important;/);
 	assert.match(printStyles, /\.markdown-body \.frontmatter-summary\s*\{[\s\S]*?box-sizing:\s*border-box\s*!important;/);
 	assert.match(printStyles, /\.markdown-body \.frontmatter-title\s*\{[\s\S]*?min-width:\s*0\s*!important;/);
+});
+
+
+test('the menu bar copies the same clipboard the other two routes do', () => {
+	// Cut, copy and paste run three functions of ours, reached from the
+	// keyboard and from the editor's context menu. macOS has a third way in
+	// that reaches none of them: Edit > Copy in the menu bar is a
+	// `PredefinedMenuItem::copy` (#527), which asks the WEBVIEW to copy —
+	// Monaco's implementation, not ours.
+	//
+	// Monaco's writes a styled `text/html` flavour beside the plain text, so
+	// without this option that route puts coloured monospace on the pasteboard
+	// while ⌘C and the context menu put Markdown. Removed once on the reasoning
+	// that Monaco's copy had become unreachable; it had not.
+	assert.match(readSource('src/lib/components/Editor.svelte'), /copyWithSyntaxHighlighting: false,/);
+	assert.match(readSource('src-tauri/src/lib.rs'), /PredefinedMenuItem::copy/, 'precondition: the menu bar route exists');
+});
+
+
+test('every clipboard entry point leaves the editor focused', () => {
+	// Reported from Windows as "⌘Z stopped working". It had not: paste from the
+	// context menu inserted the text and left focus on the menu item, so there
+	// was no caret and the next keystroke went nowhere. The visible symptom
+	// named a different feature than the broken one, which is why this is
+	// pinned rather than left to review.
+	//
+	// The ⌘X/⌘C/⌘V paths never needed it — a keybinding fires with the editor
+	// focused by definition — and that is exactly why it was missing once the
+	// same functions were given a second entry point.
+	//
+	// Focus first, not last, matching `runEditorAction`.
+	const editor = readSource('src/lib/components/Editor.svelte');
+
+	for (const fn of ['cutToClipboard', 'copyToClipboard', 'pasteFromClipboard']) {
+		const body = functionSource(editor, fn);
+		const focus = body.indexOf('editor?.focus()');
+		assert.notEqual(focus, -1, `${fn} does not restore focus`);
+
+		const work = Math.min(
+			...['clipboardTextForSelection', 'clipboard_read_image', 'try {']
+				.map((marker) => body.indexOf(marker))
+				.filter((at) => at !== -1),
+		);
+		assert.ok(focus < work, `${fn} focuses after doing its work`);
+	}
 });

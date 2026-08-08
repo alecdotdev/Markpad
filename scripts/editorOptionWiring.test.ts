@@ -13,7 +13,7 @@ import {
 } from 'monaco-editor/esm/vs/editor/common/services/unicodeTextModelHighlighter.js';
 import ts from 'typescript';
 
-import { readSource, sliceBetween } from './sourceTree.js';
+import { functionSource, readSource, sliceBetween } from './sourceTree.js';
 
 // Editor.svelte translates the settings store into Monaco options and
 // keybindings. Every regression locked here came from that translation layer
@@ -144,23 +144,36 @@ test('custom copy keeps Monaco\'s whole-line copy on an empty selection', () => 
 	// (editor.emptySelectionClipboard) and Sublime Text behave the same. Since
 	// custom-copy overrides the native copy action, bailing out on an empty
 	// selection deleted the behaviour outright.
-	const copyAction = sliceBetween(editor, 'id: "custom-copy"', 'id: "toggle-minimap"');
+	// The rule moved out of the copy action when cut, copy and the context
+	// menu were collapsed onto one implementation (#207): all of them need it,
+	// and a cut has to remove exactly what a copy would have taken.
+	const forSelection = functionSource(editor, 'clipboardTextForSelection');
 
 	assert.doesNotMatch(
-		copyAction,
+		forSelection,
 		/if \(!selection \|\| selection\.isEmpty\(\)\) return/,
 		'an empty selection is no longer an early return',
 	);
 	assert.match(
-		copyAction,
-		/selection\.isEmpty\(\)\s*\?\s*model\.getLineContent\(selection\.startLineNumber\) \+ model\.getEOL\(\)\s*:\s*model\.getValueInRange\(selection\)/,
-		'empty selection copies the current line plus its line ending',
+		forSelection,
+		/model\.getLineContent\(line\) \+ model\.getEOL\(\)/,
+		'empty selection takes the current line plus its line ending',
 	);
+	assert.match(
+		forSelection,
+		/model\.getValueInRange\(selection\)/,
+		'a real selection takes just the selection',
+	);
+
+	// One writer, so cut and copy cannot drift apart, and the whole-line rule
+	// above cannot be implemented twice with two different answers.
 	assert.equal(
-		count(copyAction, /invoke\("clipboard_write_text"/g),
-		1,
-		'both cases go through the one clipboard_write_text path',
+		count(editor, /invoke\('clipboard_write_text'/g),
+		2,
+		'clipboard_write_text is called from copyToClipboard and cutToClipboard, nowhere else',
 	);
+	assert.match(functionSource(editor, 'copyToClipboard'), /clipboardTextForSelection\(\)/);
+	assert.match(functionSource(editor, 'cutToClipboard'), /clipboardTextForSelection\(\)/);
 });
 
 test('Show Whitespace renders every whitespace run, not just trailing', () => {
