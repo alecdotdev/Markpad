@@ -339,6 +339,9 @@
 			automaticLayout: true,
 			minimap: { enabled: settings.minimap },
 			scrollBeyondLastLine: true,
+			stickyScroll: { enabled: settings.stickyScroll },
+			smoothScrolling: true,
+			cursorSmoothCaretAnimation: 'on',
 			wordWrap: settings.wordWrap as
 				| "on"
 				| "off"

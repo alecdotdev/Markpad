@@ -350,6 +350,7 @@ export class SettingsStore {
 	} | null>(null);
 	occurrencesHighlight = $state(false);
 	showWhitespace = $state(false);
+	stickyScroll = $state(true);
 	openFileMode = $state<OpenFileMode>(DEFAULT_OPEN_FILE_MODE);
 	newFileDefaultMode = $state(true);
 	showRecentFiles = $state(true);
@@ -498,6 +499,10 @@ export class SettingsStore {
 
 	toggleShowWhitespace() {
 		this.showWhitespace = !this.showWhitespace;
+	}
+
+	toggleStickyScroll() {
+		this.stickyScroll = !this.stickyScroll;
 	}
 
 	toggleNewFileDefaultMode() {
@@ -688,6 +693,7 @@ export function createSettingsPersistence(): PersistedSetting<SettingsStore>[] {
 		booleanSetting('editor.zenMode', (s) => s.zenMode, (s, v) => { s.zenMode = v; }),
 		booleanSetting('editor.occurrencesHighlight', (s) => s.occurrencesHighlight, (s, v) => { s.occurrencesHighlight = v; }),
 		booleanSetting('editor.showWhitespace', (s) => s.showWhitespace, (s, v) => { s.showWhitespace = v; }),
+		booleanSetting('editor.stickyScroll', (s) => s.stickyScroll, (s, v) => { s.stickyScroll = v; }),
 		booleanSetting('editor.showToc', (s) => s.showToc, (s, v) => { s.showToc = v; }),
 		stringSetting('editor.highlightColor', (s) => s.highlightColor, (s, v) => { s.highlightColor = v; }),
 		{
