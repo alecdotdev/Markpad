@@ -89,6 +89,7 @@ import {
 import { tabManager, type Tab } from './stores/tabs.svelte.js';
 import { snapshotTab } from './utils/tabTransfer.js';
 import { adjustPreviewMaxWidth, getPreviewContentWidth, getStoredPreviewFullWidth } from './utils/previewWidth.js';
+import { isTocOverhanging } from './utils/tocOverlay.js';
 import {
 	getScrollSyncPositionFromPixels,
 	getScrollTopForSyncPosition,
@@ -302,14 +303,46 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	// granularity of the numeric settings input, and arrow keys move the splitter 16px.
 	const TOC_RESIZE_STEP = 16;
 	let isTocResizing = $state(false);
+	let tocWrapperEl = $state<HTMLElement | null>(null);
+	let tocToggleEl = $state<HTMLElement | null>(null);
 	let previewContentWidth = $derived(getPreviewContentWidth(settings.previewMaxWidth, isFullWidth));
 	let isOverhanging = $derived(
-		isFullWidth || (viewerWidth > 0 && previewContentWidth !== null && settings.tocWidth > Math.max(50, (viewerWidth - previewContentWidth) / 2)),
+		isTocOverhanging({
+			isEditing,
+			isSplit,
+			tocSide: settings.tocSide,
+			isFullWidth,
+			viewerWidth,
+			previewContentWidth,
+			tocWidth: settings.tocWidth,
+		}),
 	);
 
 	$effect(() => {
 		localStorage.setItem('preview.fullWidth', String(isFullWidth));
 		localStorage.removeItem('isFullWidth');
+	});
+
+	/**
+	 * Reaching past a floating outline to touch what it is covering is a request
+	 * for it to move. Only while it IS covering something: pinned it is a
+	 * sidebar, and one sitting in the margin is not in anybody's way.
+	 */
+	$effect(() => {
+		if (!settings.showToc || settings.pinnedToc || !isOverhanging) return;
+		const dismiss = (e: PointerEvent) => {
+			const target = e.target as Node | null;
+			if (!target) return;
+			// The toggle button owns its own click; closing here as well would
+			// open and shut the panel in one gesture. Anything inside the panel —
+			// the resize handle included — is use, not dismissal.
+			if (tocWrapperEl?.contains(target) || tocToggleEl?.contains(target)) return;
+			settings.showToc = false;
+		};
+		// Capture, so a handler that stops propagation on its way up cannot leave
+		// the outline stranded over the text.
+		window.addEventListener('pointerdown', dismiss, { passive: true, capture: true });
+		return () => window.removeEventListener('pointerdown', dismiss, { capture: true });
 	});
 
 	import { parseAndApplyVscodeTheme, clearVscodeTheme } from './utils/theme';
@@ -3599,8 +3632,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 					<!-- Unified TOC Support -->
 					{#if isMarkdown && !showHome}
 						<div class="top-fade-mask" style="{settings.tocSide === 'left' ? 'left: 0;' : 'right: 0; left: auto;'}"></div>
-						<button 
-							class="toc-toggle-floating {settings.showToc ? 'expanded' : ''}" 
+						<button
+							bind:this={tocToggleEl}
+							class="toc-toggle-floating {settings.showToc ? 'expanded' : ''}"
 							class:on-right={settings.tocSide === 'right'}
 							class:in-edit-mode={isEditing && !settings.showToc}
 							onclick={() => settings.toggleToc()}
@@ -3625,9 +3659,10 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 						</button>
 
 						{#if settings.showToc}
-							<div 
+							<div
+								bind:this={tocWrapperEl}
 								transition:fly={{ x: settings.tocSide === 'left' ? -settings.tocWidth : settings.tocWidth, duration: 300, opacity: 1, easing: cubicOut }}
-								class="toc-overlay-wrapper" 
+								class="toc-overlay-wrapper"
 								class:is-overhanging={isOverhanging} 
 								class:is-pinned={settings.pinnedToc}
 								class:is-resizing={isTocResizing}
@@ -3655,6 +3690,13 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 										ontoggleFold={toggleFold} 
 										oncopyref={(text: string, slug: string) => copyHeadingReference(text, slug)}
 										onjump={(id: string, text: string, sourceLine: number | null) => {
+											// A floating outline that is covering the text has done its
+											// job the moment you pick an entry: it exists to be called
+											// up, used once and dismissed. Pinned it is a permanent
+											// sidebar and stays; not overhanging it is sitting in the
+											// margin harming nothing, and closing it would take away a
+											// behaviour that was already fine.
+											if (isOverhanging && !settings.pinnedToc) settings.showToc = false;
 											if (isEditing && editorPane) {
 												// Same renderer-to-buffer shift as the context menu: the
 												// outline reads `data-sourcepos` too, and has been landing

@@ -42,6 +42,8 @@
 	// when user clicks a toc entry, lock active id until scroll catches up
 	let clickLock: string | null = null;
 	let clickLockTimer: ReturnType<typeof setTimeout> | null = null;
+	/** How long a jump's own smooth scroll is given to settle. */
+	const CLICK_LOCK_MS = 600;
 
 	$effect(() => {
 		if (htmlContent && markdownBody) {
@@ -167,6 +169,41 @@
 		activeTargetEl = null;
 	}
 
+	/**
+	 * The highlight is worn by an element in the PREVIEW, which outlives this
+	 * component. Going away while one is showing — the outline collapsing itself
+	 * after a jump, or the reader hiding it by hand — used to leave that mark on
+	 * the heading with nothing able to clear it: the listeners left with the
+	 * component, and a later instance starts with its own `activeTargetEl` and
+	 * cannot see what an earlier one marked. So hand the clearing over to
+	 * listeners that belong to nobody, and take them all off the first time the
+	 * reader moves.
+	 */
+	function releaseStrandedHighlight(el: HTMLElement) {
+		const stranded = activeTargetEl;
+		if (!stranded) return;
+		activeTargetEl = null;
+
+		const clear = () => {
+			stranded.classList.remove('toc-target-active');
+			el.removeEventListener('scroll', clear);
+			el.removeEventListener('pointerdown', clear);
+			window.removeEventListener('keydown', clear);
+		};
+		const listen = () => {
+			el.addEventListener('scroll', clear, { passive: true });
+			el.addEventListener('pointerdown', clear, { passive: true });
+			window.addEventListener('keydown', clear, { passive: true });
+		};
+
+		// Exactly what `clickLock` is for, and the reason it cannot simply be
+		// read here: the jump's own smooth scroll is still running, and it must
+		// not be mistaken for the reader scrolling away from what they just
+		// asked to see. The timer outlives the component, the lock does not.
+		if (clickLock) setTimeout(listen, CLICK_LOCK_MS);
+		else listen();
+	}
+
 	function handleScroll() {
 		// The lock is here for the jump's OWN smooth scroll, which would
 		// otherwise clear the highlight before the reader has seen it.
@@ -242,6 +279,7 @@
 				el.removeEventListener('scroll', handleScroll);
 				el.removeEventListener('pointerdown', handleReaderAction);
 				window.removeEventListener('keydown', handleReaderAction);
+				releaseStrandedHighlight(el);
 			};
 		}
 	});
@@ -273,7 +311,7 @@
 
 			// release lock after scroll settles
 			if (clickLockTimer) clearTimeout(clickLockTimer);
-			clickLockTimer = setTimeout(() => { clickLock = null; }, 600);
+			clickLockTimer = setTimeout(() => { clickLock = null; }, CLICK_LOCK_MS);
 		}
 	}
 </script>
