@@ -353,7 +353,26 @@ test('a soft-wrapped paragraph resolves to the paragraph, never to its <br>', ()
 	for (const line of [1, 2, 3]) {
 		const match = findAnchorElement(body, line);
 		assert.ok(match, `line ${line} must resolve`);
-		assert.equal((match.element as ShimElement).tagName, 'P', `line ${line} resolved to a boxless element`);
+
+		const element = match.element as ShimElement;
+		assert.notEqual(element.tagName, 'BR', `line ${line} resolved to a boxless element`);
+
+		// Lines after the first now resolve to the soft-line anchor that
+		// `processSoftLineAnchors` puts beside each break — a narrower answer
+		// than the paragraph, and a better one: it reports the position of that
+		// line rather than the top of the block containing it. The anchor is an
+		// empty inline-block, so unlike the `<br>` it has a box to measure,
+		// which is the property this test exists to protect.
+		if (element.getAttribute('class') === 'source-line-anchor') {
+			assert.deepEqual(
+				{ startLine: match.startLine, endLine: match.endLine },
+				{ startLine: line, endLine: line },
+				`the anchor for line ${line} must name that line`,
+			);
+			continue;
+		}
+
+		assert.equal(element.tagName, 'P', `line ${line} resolved to ${element.tagName}`);
 		assert.deepEqual({ startLine: match.startLine, endLine: match.endLine }, { startLine: 1, endLine: 3 });
 	}
 });

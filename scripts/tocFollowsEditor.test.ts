@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { readSource, sliceBetween } from './sourceTree.js';
+import { functionSource, readSource, sliceBetween } from './sourceTree.js';
 
 import { activeTocIdForLine, sourceLineOf } from '../src/lib/utils/tocFollow.js';
 
@@ -101,10 +101,17 @@ test('the editor position reaches the outline whether or not scroll sync is on',
 	// The line is recorded before the sync check, not inside it: following the
 	// editor is not the same feature as moving the preview, and #169 asks for it
 	// in editor-only mode, where there is no preview to move.
-	assert.match(
-		viewerSource,
-		/function handleEditorScrollSync\(position: ScrollSyncPosition\) \{\s*\n\s*if \(position\.line !== undefined\) tocActiveLine = position\.line;/,
-	);
+	//
+	// The line is converted on the way in: `position` is in the editor's
+	// numbering and the outline is built from `data-sourcepos`, which counts
+	// from the body. See jumpToSelectedFragment.test.ts for that boundary.
+	const handler = functionSource(viewerSource, 'handleEditorScrollSync');
+	const record = handler.indexOf('tocActiveLine =');
+	const syncCheck = handler.indexOf('isScrollSynced');
+
+	assert.ok(record !== -1 && syncCheck !== -1, 'both statements must still be here');
+	assert.ok(record < syncCheck, 'the outline is fed before the sync check, not inside it');
+	assert.match(handler, /if \(position\.line !== undefined\) tocActiveLine = toRendererLine\(position\.line\);/);
 });
 
 test('the preview feeds the same state, off the line it already measures', () => {

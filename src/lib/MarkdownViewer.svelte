@@ -1168,7 +1168,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 
 		const line = getSourceLineAtPreviewOffset(target, target.scrollTop, measurePreviewBox);
 
-		return line === null ? position : { ...position, line };
+		return line === null ? position : { ...position, line: toBufferLine(line) };
 	}
 
 	function scrollPreviewToSyncPosition(position: ScrollSyncPosition) {
@@ -1178,7 +1178,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		let targetScroll: number | null = null;
 
 		if (position.section === 'body' && position.line !== undefined) {
-			const offset = getPreviewOffsetForSourceLine(markdownBody, position.line, measurePreviewBox);
+			const offset = getPreviewOffsetForSourceLine(
+				markdownBody,
+				toRendererLine(position.line),
+				measurePreviewBox,
+			);
 			if (offset !== null) targetScroll = offset;
 		}
 
@@ -1217,7 +1221,8 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 	let tocActiveLine = $state<number | null>(null);
 
 	function handleEditorScrollSync(position: ScrollSyncPosition) {
-		if (position.line !== undefined) tocActiveLine = position.line;
+		// The outline is built from `data-sourcepos`, so it counts from the body.
+		if (position.line !== undefined) tocActiveLine = toRendererLine(position.line);
 
 		if (tabManager.activeTab?.isScrollSynced) {
 			scrollPreviewToSyncPosition(position);
@@ -1791,6 +1796,22 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		const offset = frontMatterLineOffset(rawContent);
 		if (!offset) return range;
 		return { startLine: range.startLine + offset, endLine: range.endLine + offset };
+	}
+
+	/**
+	 * The same conversion for a single line, in both directions.
+	 *
+	 * `ScrollSyncPosition.line` is a BUFFER line, because the editor is the only
+	 * pane that can produce one and the buffer is all it knows. Everything on the
+	 * preview side — `data-sourcepos`, the outline built from it — counts from
+	 * the first line of the body. Every crossing between the two has to say so.
+	 */
+	function toBufferLine(line: number): number {
+		return line + frontMatterLineOffset(rawContent);
+	}
+
+	function toRendererLine(line: number): number {
+		return line - frontMatterLineOffset(rawContent);
 	}
 
 	async function saveContent(tabId?: string): Promise<boolean> {
@@ -3867,6 +3888,25 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		aspect-ratio: 16 / 9;
 		object-fit: cover;
 		border-radius: 8px;
+	}
+
+	/*
+	 * A measurable position for a soft line break, so split-view scroll sync
+	 * can resolve a line inside a long paragraph instead of interpolating
+	 * across the whole block. See `processSoftLineAnchors`.
+	 *
+	 * `inline-block` is the point — it is what gives the element a CSS box, and
+	 * therefore an `offsetTop` the anchor lookup can read. Everything else here
+	 * is about taking that box back out of the layout: no width, no height, and
+	 * `vertical-align: top` so a zero-height box cannot sit on the baseline and
+	 * push the line it is on. It holds no text, so selection and copy step over
+	 * it.
+	 */
+	:global(.source-line-anchor) {
+		display: inline-block;
+		width: 0;
+		height: 0;
+		vertical-align: top;
 	}
 
 	:global(.mermaid-diagram) {

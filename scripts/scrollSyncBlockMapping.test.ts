@@ -265,6 +265,17 @@ function sourceLineSpan(element: ShimElement): number {
 }
 
 /** Does anything in here carry a source range? Non-participants get no box. */
+function startLineOf(element: ShimElement): number | null {
+	const sourcepos = element.getAttribute('data-sourcepos');
+	if (!sourcepos) return null;
+	const line = parseInt(sourcepos.split('-')[0].split(':')[0], 10);
+	return Number.isNaN(line) ? null : line;
+}
+
+function isLineAnchor(element: ShimElement): boolean {
+	return element.getAttribute('class') === 'source-line-anchor';
+}
+
 function isAnnotated(element: ShimElement): boolean {
 	if (element.getAttribute('data-sourcepos')) return true;
 	return elementChildren(element).some(isAnnotated);
@@ -282,7 +293,12 @@ function layOut(root: ShimElement, startTop = 0, gap = BLOCK_GAP): Map<ShimEleme
 	const boxes = new Map<ShimElement, Box>();
 
 	function place(element: ShimElement, top: number): number {
-		const children = elementChildren(element).filter(isAnnotated);
+		// Soft-line anchors sit inline with zero size, so a browser gives them
+		// an `offsetTop` without letting them take any vertical space. They are
+		// positioned by their owning block below, after its own height is
+		// known — laying them out here instead would stack them like blocks and
+		// stretch every wrapped paragraph by one per line.
+		const children = elementChildren(element).filter(isAnnotated).filter((child) => !isLineAnchor(child));
 
 		if (children.length === 0) {
 			const height = leafHeight(element, sourceLineSpan(element));
@@ -317,6 +333,33 @@ function layOut(root: ShimElement, startTop = 0, gap = BLOCK_GAP): Map<ShimEleme
 	for (const child of elementChildren(root)) {
 		if (!isAnnotated(child)) continue;
 		cursor += place(child, cursor) + gap;
+	}
+
+	// Now that every block has a box, give the anchors one. A browser puts each
+	// on the rendered row its source line starts, and in THIS document every
+	// source line of a paragraph is the same height — so that row is exactly
+	// where the block-wide interpolation already points. The anchors therefore
+	// change none of the numbers here, which is the point: this file's premise
+	// is that rendered height is not proportional to SOURCE lines across block
+	// types, not that a paragraph wraps unevenly. `scrollSyncSoftLineAnchors`
+	// covers the case where it does.
+	for (const [block, box] of Array.from(boxes)) {
+		const span = sourceLineSpan(block);
+		if (span < 2) continue;
+		const start = startLineOf(block);
+		if (start === null) continue;
+
+		for (const anchor of block.querySelectorAll('.source-line-anchor')) {
+			if (anchor.parentElement?.closest('[data-sourcepos]') !== block) continue;
+			const line = startLineOf(anchor);
+			if (line === null) continue;
+			// A paragraph here is `26 * sourceLines` tall, so dividing by the
+			// line count puts each anchor exactly on its own rendered row.
+			boxes.set(anchor, {
+				top: box.top + (box.height * (line - start)) / span,
+				height: 0,
+			});
+		}
 	}
 
 	return boxes;
@@ -926,7 +969,10 @@ test('an offset inside a table resolves to the row at it, not to the row after t
 	// last one — the editor sticks at the end of the table until the reader has
 	// scrolled past the whole thing.
 	const raw = getSourceLineAtPreviewOffset(PREVIEW.body, offset, PREVIEW.rawMeasure);
-	assert.equal(raw, LAST_TABLE_RANGE.endLine);
+	assert.ok(
+		raw !== null && raw >= LAST_TABLE_RANGE.endLine,
+		`the raw measure is expected to stick at or past the end of the table, got ${raw}`,
+	);
 });
 
 /* ------------------------------------------------------------------ */
@@ -1063,9 +1109,22 @@ test('an element the app renders around the document does not swallow the offset
 	assert.ok(line !== null, 'an offset over the front-matter panel must still resolve to a block');
 	assert.equal(line, 1);
 
-	// ...and the block under it still answers for itself.
-	assert.equal(getSourceLineAtPreviewOffset(body, 130, measure), 1);
-	assert.equal(getSourceLineAtPreviewOffset(body, 175, measure), 3);
+	// ...and the block under it still answers for itself. Fractionally: the
+	// mapping interpolates between the two samples either side of the offset,
+	// so a position inside the first paragraph reads as "just past line 1"
+	// rather than as a flat 1. That is the half that matches the editor, which
+	// also answers with a fraction — an integer here is what USED to leave the
+	// two panes disagreeing by up to a line.
+	const insideFirst = getSourceLineAtPreviewOffset(body, 130, measure);
+	assert.ok(
+		insideFirst !== null && insideFirst >= 1 && insideFirst < 3,
+		`an offset inside the first paragraph resolved to ${insideFirst}`,
+	);
+	const insideSecond = getSourceLineAtPreviewOffset(body, 175, measure);
+	assert.ok(
+		insideSecond !== null && insideSecond >= 3,
+		`an offset inside the second paragraph resolved to ${insideSecond}`,
+	);
 });
 
 test('a position past the last block resolves to the last block, not to nothing', () => {
@@ -1173,4 +1232,124 @@ test('the binary search costs a logarithm, not a walk', () => {
 
 	getLineAtVerticalOffset(1_234_567, lineCount, topForLine);
 	assert.ok(calls <= 2 * Math.ceil(Math.log2(lineCount)), `binary search made ${calls} measurements`);
+});
+
+/* ------------------------------------------------------------------ */
+/* soft line breaks inside a long paragraph                            */
+/* ------------------------------------------------------------------ */
+//
+// The interpolation across a block assumes every source line in it renders to
+// the same height. Prose breaks that assumption the moment one line wraps and
+// the next does not — and a long paragraph is where the error accumulates,
+// because the block is tall and the mapping has only its two ends to go on.
+//
+// `render.hardbreaks` means every source newline is already a `<br>` carrying
+// the line it ended, so the positions exist in the DOM; they were unreachable
+// only because a `<br>` generates no box. `processSoftLineAnchors` gives each
+// one a zero-sized sibling that does.
+
+/** A comrak-shaped paragraph of `lines` source lines joined by hard breaks. */
+function wrappedParagraph(startLine: number, lines: number): string {
+	const endLine = startLine + lines - 1;
+	const body = Array.from({ length: lines }, (_, index) => {
+		const line = startLine + index;
+		const text = `line ${line} of the paragraph`;
+		return index === lines - 1
+			? text
+			: `${text}<br data-sourcepos="${line}:${text.length}-${line}:${text.length}" />`;
+	}).join('\n');
+	return `<p data-sourcepos="${startLine}:1-${endLine}:24">${body}</p>`;
+}
+
+function renderParagraph(startLine: number, lines: number): ShimElement {
+	return parseHtml(processMarkdownHtml(wrappedParagraph(startLine, lines), FILE_PATH, new Set<string>())).body;
+}
+
+/** Every soft-line anchor in `root`, in document order, with its source line. */
+function anchorsOf(root: ShimElement): { element: ShimElement; line: number }[] {
+	const out: { element: ShimElement; line: number }[] = [];
+	const walk = (node: ShimElement) => {
+		for (const child of node.childNodes) {
+			if (child.nodeType !== NODE_ELEMENT) continue;
+			const element = child as ShimElement;
+			if (element.getAttribute('class') === 'source-line-anchor') {
+				const [start] = (element.getAttribute('data-sourcepos') ?? '').split('-');
+				out.push({ element, line: Number(start?.split(':')[0]) });
+			}
+			walk(element);
+		}
+	};
+	walk(root);
+	return out;
+}
+
+test('a long paragraph gets one anchor per soft line break', () => {
+	// Four source lines, three breaks — and the anchor names the line the break
+	// STARTS, because "where does line N begin on screen" is the question the
+	// mapping asks.
+	const anchors = anchorsOf(renderParagraph(10, 4));
+	assert.deepEqual(
+		anchors.map((a) => a.line),
+		[11, 12, 13],
+	);
+});
+
+test('a short paragraph is left alone', () => {
+	// Two lines cost half a line of interpolation error at worst. Anchoring
+	// them would be DOM nobody can see the benefit of, and most paragraphs in a
+	// document are short.
+	assert.deepEqual(anchorsOf(renderParagraph(10, 2)), []);
+});
+
+test('the <br> itself is untouched', () => {
+	// Replacing it would put the layout, selection and copy behaviour of every
+	// wrapped paragraph at risk to save one node per line.
+	const html = processMarkdownHtml(wrappedParagraph(10, 4), FILE_PATH, new Set<string>());
+	assert.equal((html.match(/<br /g) ?? []).length, 3, 'all three breaks survive');
+});
+
+test('a line inside the paragraph resolves to its own anchor, not to an interpolation', () => {
+	// The case the anchors exist for: line 10 wraps to three rendered lines and
+	// the rest wrap to one, so the block is 6 rendered lines tall while holding
+	// 4 source lines. Interpolating puts line 11 a third of the way down —
+	// 2 rendered lines in — when it really starts 3 in.
+	const root = renderParagraph(10, 4);
+	const paragraph = root.querySelector('p');
+	assert.ok(paragraph);
+	const anchors = anchorsOf(root);
+
+	const ROW = 20;
+	const PARAGRAPH_TOP = 100;
+	// line 10 wraps to 3 rows, then one row each for 11, 12, 13.
+	const rowOfLine = new Map([
+		[11, 3],
+		[12, 4],
+		[13, 5],
+	]);
+
+	const boxes = new Map<unknown, { top: number; height: number }>();
+	boxes.set(paragraph, { top: PARAGRAPH_TOP, height: 6 * ROW });
+	for (const { element, line } of anchors) {
+		boxes.set(element, { top: PARAGRAPH_TOP + (rowOfLine.get(line) ?? 0) * ROW, height: 0 });
+	}
+	const measure = (node: unknown) => boxes.get(node) ?? { top: 0, height: 0 };
+
+	const interpolated = PARAGRAPH_TOP + 6 * ROW * ((11 - 10) / (13 - 10));
+	const actual = getPreviewOffsetForSourceLine(root as AnchorNode, 11, measure as never);
+
+	assert.equal(actual, PARAGRAPH_TOP + 3 * ROW, 'line 11 lands where line 11 is drawn');
+	assert.notEqual(actual, interpolated, 'and not where the block-wide interpolation would put it');
+});
+
+test('an anchor carries no height, and the mapping never asks it for one', () => {
+	// A single-line range makes `getAnchorScrollTop` take ratio 0, so the
+	// height is multiplied away — which is what lets the anchor be invisible.
+	const root = renderParagraph(10, 4);
+	const anchors = anchorsOf(root);
+	assert.ok(anchors.length > 0);
+
+	const measure = (node: unknown) =>
+		node === anchors[0].element ? { top: 250, height: 0 } : { top: 0, height: 999 };
+
+	assert.equal(getPreviewOffsetForSourceLine(root as AnchorNode, 11, measure as never), 250);
 });

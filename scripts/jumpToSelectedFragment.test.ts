@@ -337,11 +337,60 @@ test('every renderer line reaching the editor goes through the shift', () => {
 	);
 });
 
+// Scroll sync crosses the same boundary in BOTH directions, and it was the
+// consumer this file forgot: `ScrollSyncPosition.line` is a buffer line,
+// because the editor is the only pane that can produce one, while everything
+// the preview answers with counts from the body. On a document with front
+// matter the panes drifted apart by exactly that many lines — a constant
+// offset, unaffected by how precise the block mapping underneath got.
+
+test('scroll sync converts in both directions', () => {
+	const capture = functionSource(viewerSource, 'getPreviewScrollSyncPosition');
+	assert.match(
+		capture,
+		/line: toBufferLine\(line\)/,
+		'a line read off the preview is shifted before the editor sees it',
+	);
+
+	const apply = functionSource(viewerSource, 'scrollPreviewToSyncPosition');
+	assert.match(
+		apply,
+		/toRendererLine\(position\.line\)/,
+		'a line coming from the editor is shifted back before the preview seeks',
+	);
+});
+
+test('the outline is fed body lines from both panes', () => {
+	// `tocActiveLine` has two writers. The preview's already answers in body
+	// lines (`getPreviewScrollAnchor`); the editor's has to be converted, or the
+	// highlighted heading changes depending on which pane you scrolled.
+	const fromEditor = functionSource(viewerSource, 'handleEditorScrollSync');
+	assert.match(fromEditor, /tocActiveLine = toRendererLine\(position\.line\)/);
+
+	const fromPreview = functionSource(viewerSource, 'getPreviewScrollAnchor');
+	assert.doesNotMatch(fromPreview, /toBufferLine|toRendererLine/, 'already a body line');
+});
+
 test('the shift reads the buffer, not the rendered body', () => {
 	// `frontMatterLineOffset(rawContent)` — measuring the render would answer 0
 	// forever, since the render is what the front matter was stripped out of.
-	const shift = functionSource(viewerSource, 'toBufferRange');
-	assert.match(shift, /frontMatterLineOffset\(rawContent\)/);
+	for (const name of ['toBufferRange', 'toBufferLine', 'toRendererLine']) {
+		assert.match(functionSource(viewerSource, name), /frontMatterLineOffset\(rawContent\)/, name);
+	}
+});
+
+// The menu is opened BY right-clicking a selection, and two of its items act
+// on that selection (Copy, Edit). Anything that moves focus off the document
+// stops the selection being painted, so the highlight disappears under the
+// menu that exists to act on it.
+
+test('the context menu does not take focus away from the selection', () => {
+	const menuSource = readSource('src/lib/components/ContextMenu.svelte');
+	assert.doesNotMatch(menuSource, /\.focus\(\)/, 'focusing the menu unpaints the selection');
+
+	// Escape still closes it — from the window, since the menu never has focus.
+	assert.match(menuSource, /window\.addEventListener\('keydown'/);
+	assert.match(menuSource, /e\.key === 'Escape'/);
 });
 
 test('the selection is read before anything switches mode', () => {

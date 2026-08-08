@@ -27,12 +27,26 @@
 		}
 	});
 
+	/**
+	 * Escape closes the menu, and it listens on the window rather than on the
+	 * menu itself.
+	 *
+	 * The menu used to focus itself so its own `keydown` would fire. But this
+	 * menu is opened by right-clicking the preview, and right-clicking a
+	 * selection is how you copy or edit it — moving focus off the document
+	 * stops the selection being painted, so the highlight vanished under the
+	 * menu that was opened to act on it. Nothing else here wanted focus: there
+	 * is no arrow-key navigation, and the overlay handles click-to-dismiss.
+	 */
 	$effect(() => {
-		if (show && menuEl) {
-			setTimeout(() => {
-				menuEl?.focus();
-			}, 10);
-		}
+		if (!show) return;
+
+		const onKeydown = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') onhide();
+		};
+
+		window.addEventListener('keydown', onKeydown);
+		return () => window.removeEventListener('keydown', onKeydown);
 	});
 
 	let adjustedX = $derived(menuEl && x + menuEl.offsetWidth > innerWidth ? innerWidth - menuEl.offsetWidth - 8 : x);
@@ -52,8 +66,7 @@
 			onclick={(e) => e.stopPropagation()}
 			oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
 			role="menu"
-			tabindex="-1"
-			onkeydown={(e) => e.key === 'Escape' && onhide()}>
+			tabindex="-1">
 			{#each items as item}
 				{#if item.separator}
 					<div class="menu-separator"></div>

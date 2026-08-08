@@ -1,4 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { parseSourceposLineRange } from "./previewAnchor.js";
 import { carrySourcepos } from "./richContent.js";
 
 const alertIcons: Record<string, string> = {
@@ -461,6 +462,77 @@ function processTaskItems(root: Element) {
 	}
 }
 
+/**
+ * How many source lines a block has to span before its soft line breaks are
+ * worth anchoring.
+ *
+ * Two lines cost half a line of interpolation error at worst, which nobody can
+ * see; the anchors are for the long paragraphs where the error accumulates.
+ * Keeping short blocks untouched is most of the DOM saving, because most
+ * paragraphs are short.
+ */
+const LINE_ANCHOR_MIN_SPAN = 3;
+
+/**
+ * Give each soft line break inside a long block a measurable position.
+ *
+ * Split-view scroll sync is asymmetric. The editor answers "which line is at
+ * this pixel" from Monaco's real layout, so it knows the height of every line
+ * including its wraps. The preview answers the reverse by interpolating across
+ * the block that owns the line — which assumes every source line in the block
+ * renders to the same height. Prose breaks that assumption whenever one line
+ * wraps to three and the next to one, and a long paragraph is where the error
+ * shows.
+ *
+ * The information to do better is already in the DOM. `render.hardbreaks` is
+ * on, so every source newline becomes a `<br>`, and comrak stamps each one
+ * with the line it ended. What a `<br>` cannot do is be measured: it generates
+ * no CSS box, which is why `BOXLESS_TAGS` in previewAnchor.ts excludes it —
+ * resolving to one hands the caller `offsetTop = 0` and scrolls to the top of
+ * the document.
+ *
+ * So each break gets a sibling that does generate a box, carrying the line the
+ * break starts rather than the one it ends. Zero-width and zero-height, so it
+ * changes nothing on screen; `previewAnchor` needs only `offsetTop` from it,
+ * because a single-line range never interpolates and never reads the height.
+ *
+ * The `<br>` itself is left alone. Replacing it would put the layout, text
+ * selection and copy behaviour of every wrapped paragraph at risk to save one
+ * node per line.
+ */
+function processSoftLineAnchors(root: Element, doc: Document) {
+	for (const block of Array.from(root.querySelectorAll("[data-sourcepos]"))) {
+		const range = parseSourceposLineRange(block.getAttribute("data-sourcepos"));
+		if (!range || range.endLine - range.startLine + 1 < LINE_ANCHOR_MIN_SPAN) continue;
+
+		for (const br of Array.from(block.querySelectorAll("br[data-sourcepos]"))) {
+			// Only the breaks this block owns. A nested block keeps its own, and
+			// it will be visited in its own turn if it is long enough to qualify.
+			//
+			// From the PARENT: `closest` matches the element it starts on, and
+			// the `<br>` carries a `data-sourcepos` of its own, so starting on
+			// it answers with the `<br>` every time and nothing would qualify.
+			if (br.parentElement?.closest("[data-sourcepos]") !== block) continue;
+
+			const at = parseSourceposLineRange(br.getAttribute("data-sourcepos"));
+			if (!at) continue;
+
+			// The line AFTER the break: the anchor marks where the next source
+			// line starts on screen, which is the question the mapping asks.
+			const line = at.endLine + 1;
+			if (line > range.endLine) continue;
+
+			const anchor = doc.createElement("span");
+			anchor.className = "source-line-anchor";
+			anchor.setAttribute("data-sourcepos", `${line}:1-${line}:1`);
+			anchor.setAttribute("aria-hidden", "true");
+			// `insertBefore` rather than `after`: it is the older API, and the
+			// render-protocol DOM the tests drive implements it.
+			br.parentNode?.insertBefore(anchor, br.nextSibling);
+		}
+	}
+}
+
 export function processMarkdownHtml(
 	html: string,
 	filePath: string,
@@ -674,6 +746,7 @@ export function processMarkdownHtml(
 	processBlockIds(doc.body, doc);
 	processTaskItems(doc.body);
 	processInlineMath(doc.body);
+	processSoftLineAnchors(doc.body, doc);
 
 	const headings = Array.from(doc.querySelectorAll("h1, h2, h3, h4, h5, h6"));
 	// The heading↔wrapper pairing only needs to be unique within this
