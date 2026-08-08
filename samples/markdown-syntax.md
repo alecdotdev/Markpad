@@ -12,6 +12,8 @@ description: "Every syntax Markpad renders, what it looks like, and what happens
 
 That is the whole design of this file: the answer to "can it do X?" and the answer to "how do I write X?" are the same paragraph, seen from two sides.
 
+**There is a third use for it: give the file to an AI.** Attach it to a chat and the assistant knows exactly what Markpad can render. Ask it to reformat a document you already have, or to write a new one that uses the whole range — callouts, task lists, tables, footnotes, maths, Mermaid diagrams. Save the reply as a `.md`, open it here, and it looks the way it was meant to.
+
 If you are reading it on GitHub instead, that is useful too — the difference between what you see there and what you see in Markpad is exactly what the compatibility column below is about.
 
 ---
@@ -458,6 +460,8 @@ Pandoc and CriticMarkup mark added text with `++`: this sentence has ++an insert
 
 한국어 문장도 마찬가지입니다. **굵게**와 `코드`.
 
+In the editor those three paragraphs are treated as prose rather than as code: `Alt`/`Option` + `←`/`→` and double-click stop at word boundaries *inside* a Chinese or Japanese clause instead of swallowing the whole sentence, and neither the fullwidth punctuation nor the ideographic space an IME produces is outlined as a suspicious character.
+
 Symbols and emoji: → ← ↔ ⇒ ∑ ∏ √ ∞ ≈ ≠ ≤ ≥ ± × ÷ °  🚀 📘 ✅ ⚠️
 
 ## 16. Raw HTML
@@ -479,8 +483,11 @@ Some of what Markpad adds is not a spelling to learn but behaviour you get for f
 
 - **Click a task box** in the preview and the file is edited. The `[ ]` becomes `[x]` on disk, on the right line, even in a nested list.
 - **Hover a heading** and an anchor appears. Right-click it for **Copy Reference**, which writes a link in whichever style this document already uses — `[[…]]` if the document uses wikilinks, `[…](#…)` if it uses standard links.
+- **Right-click any paragraph, list item or heading** and choose **Edit**: the editor opens on exactly those lines, with them selected. `Ctrl`/`Cmd` + `E` does the same for whatever you have selected in the preview.
 - **Fold a heading** with the chevron beside it, and everything under it collapses. The folds are remembered per document.
-- **Open the table of contents** and it follows wherever you scroll, in the preview or in the editor, keeping the current heading centred.
+- **Scroll either pane of the split view** and the other follows by source line rather than by ratio, so the two stay together even this far down the document.
+- **Sticky scroll** keeps the heading you are currently inside pinned to the top of the editor. Toggle it in Settings.
+- **Open the table of contents** and it follows wherever you scroll, in the preview or in the editor, keeping the current heading centred. Unpinned, it gets out of the way rather than sitting on the text: it collapses when you pick an entry, and when you reach past it to touch what it was covering.
 - **Type `](#` or `[[#`** in the editor and every heading in the document is offered as a completion.
 - **The front matter** at the top of this file — the `title` and `description` between `---` lines — is shown as a panel rather than as text, and is editable there.
 - **Export** this page to HTML, or print it to PDF, and the maths and diagrams come with it.

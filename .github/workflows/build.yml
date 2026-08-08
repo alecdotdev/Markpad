@@ -100,8 +100,23 @@ jobs:
             echo "| | x86-64 | [\`Markpad_${VERSION}_amd64.deb\`](${BASE}/Markpad_${VERSION}_amd64.deb) | Debian, Ubuntu |"
             echo "| | x86-64 | [\`Markpad-${VERSION}-1.x86_64.rpm\`](${BASE}/Markpad-${VERSION}-1.x86_64.rpm) | Fedora, RHEL, openSUSE |"
             echo
+            echo '> [!NOTE]'
+            echo '> **Windows SmartScreen Notice**: Windows executables are not currently signed with an Authenticode code signing certificate. Windows SmartScreen may flag the binaries as an unrecognized file or false positive Trojan. You can safely bypass SmartScreen by clicking *"More info"* → *"Run anyway"*.'
+            echo
+            echo '> [!NOTE]'
+            echo '> **macOS Gatekeeper Notice**: the `.dmg` is not yet notarized, so the first launch is refused — *"Markpad cannot be opened because the developer cannot be verified"* — and the dialog offers only **Cancel** and **Move to Trash**. Two ways past it, both one-time:'
+            echo '>'
+            echo '> - **Control-click** (right-click) `Markpad.app` in Finder → **Open** → **Open**. That dialog has the button the double-click one does not.'
+            echo '> - Or double-click once and press **Cancel**, then go to **System Settings → Privacy & Security**, scroll to **Security**, and press **Open Anyway** beside the message naming Markpad. Authenticate with your password or Touch ID and confirm.'
+            echo '>'
+            echo '> Being unsigned also means macOS grants file access per prompt instead of remembering it, so Markpad may keep asking for permission — most visibly with auto-save on (it can be turned off in Settings; closing a tab still offers to save) and in documents with many local images, which can ask once per image. Signing the app yourself on your own Mac ends that: see [this comment on #209](https://github.com/sftwrdotdev/Markpad/issues/209#issuecomment-5225897226) — a code-signing certificate made in Keychain Access plus `codesign --force --deep`, or the Sentinel app. It has to be redone after each update.'
+            echo
             echo 'The two Windows files differ only in that one installs and one does not.'
             echo 'Package managers: `choco install markpad-app` (Windows), `sudo snap install markpad` (Linux).'
+            echo
+            echo '## What Markpad renders'
+            echo
+            echo "Every syntax Markpad renders is in one document — [**download \`markdown-syntax.md\`**](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/v${VERSION}/samples/markdown-syntax.md) ([简体中文](https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/v${VERSION}/samples/markdown-syntax.zh-CN.md)) and open it in Markpad: the preview shows each feature working, the editor beside it shows how each one is written. Give the same file to an AI and it knows exactly what Markpad can render: ask it to reformat a document you already have, or to write a new one that uses the whole range — callouts, tables, footnotes, maths, diagrams — and open the result here. [Read it on GitHub](https://github.com/${GITHUB_REPOSITORY}/blob/v${VERSION}/samples/markdown-syntax.md)."
             echo
             echo '---'
             echo 'RELEASE_BODY'

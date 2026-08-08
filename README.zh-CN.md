@@ -7,7 +7,7 @@
 
   <p>一个轻量、克制的 Markdown 阅读器与编辑器，同时支持 Windows、macOS 和 Linux。</p>
 
-  <a href="https://markpad.dev">官网</a> // <a href="#下载">下载</a> // <a href="samples/markdown-syntax.zh-CN.md">Markdown 语法支持</a> // <a href="https://github.com/sftwrdotdev/Markpad/issues">反馈问题</a> // <a href="README.md">English</a>
+  <a href="https://markpad.dev">官网</a> // <a href="#下载">下载</a> // <a href="#markpad-能渲染什么">Markpad 能渲染什么</a> // <a href="https://github.com/sftwrdotdev/Markpad/issues">反馈问题</a> // <a href="README.md">English</a>
 </div>
 
 <br />
@@ -33,8 +33,8 @@
 - 多标签页、多窗口、窗口标签，以及会自己回来的会话
 - 文件在磁盘上被改动时自动重载
 - 导出 HTML、打印 PDF
-- 在标准 Markdown 之外还支持 wikilink、嵌入和提示框 —— 具体渲染成什么、
-  拿到别处会变成什么，见 **[Markdown 语法支持](samples/markdown-syntax.zh-CN.md)**
+- 在标准 Markdown 之外还支持 wikilink、嵌入和提示框 —— 见下面的
+  **[Markpad 能渲染什么](#markpad-能渲染什么)**
 
 **其余**
 - Windows、macOS、Linux
@@ -75,6 +75,10 @@ sudo snap install markpad
 两个 Windows 文件的区别只在装不装：`-setup.exe` 会把 Markpad 装进 Program Files 和开始菜单，不带 `-setup` 的那个放哪儿就在哪儿运行。
 
 > 通过 `.dmg`（macOS）、`*-setup.exe`（Windows NSIS）或 `.AppImage`（Linux）直接安装之后，Markpad 会通过应用内的 *检查更新…*（macOS 在应用菜单，其它平台在设置里）从 GitHub 发行版自更新。Snap、Chocolatey、`.deb` 和 `.rpm` 的用户请继续通过各自的分发渠道更新。
+
+## Markpad 能渲染什么
+
+Markpad 能渲染的每一种语法都在一份文档里 —— [**下载 `markdown-syntax.zh-CN.md`**](https://raw.githubusercontent.com/sftwrdotdev/Markpad/master/samples/markdown-syntax.zh-CN.md) 用 Markpad 打开：预览里是每一项真的渲染出来的样子，旁边的编辑器里是它怎么写的（也可以先[在 GitHub 上读](samples/markdown-syntax.zh-CN.md)）。把同一个文件交给 AI，它就完整知道 Markpad 能渲染什么：可以让它帮你把手上的文档重新排版，也可以让它用满这一整套写一份新的——提示框、表格、脚注、公式、图表——再拿 Markpad 打开。
 
 ## 从源码构建
 
