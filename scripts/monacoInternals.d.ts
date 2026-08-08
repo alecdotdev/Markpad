@@ -198,3 +198,36 @@ declare module 'monaco-editor/esm/vs/base/common/keybindings.js' {
 		os: 1 | 2 | 3,
 	): { readonly chords: readonly KeyCodeChord[] } | null;
 }
+
+declare module 'monaco-editor/esm/vs/editor/common/core/wordHelper.js' {
+	/**
+	 * The `wordSeparators` default. The editor does not set that option, so this
+	 * is the string its word classifier is actually built with.
+	 */
+	export const USUAL_WORD_SEPARATORS: string;
+}
+
+declare module 'monaco-editor/esm/vs/editor/common/core/wordCharacterClassifier.js' {
+	/**
+	 * Decides where words begin and end for ⌥←/→, double-click-to-select and
+	 * ⌥⌫. `intlSegmenterLocales` is `wordSegmenterLocales`: a non-empty list
+	 * builds an `Intl.Segmenter`, which is the only thing that finds word
+	 * boundaries in a script that writes no spaces.
+	 */
+	export interface WordCharacterClassifier {
+		/**
+		 * The next segmenter-found word at or after `offset`, or null once the
+		 * line is exhausted. Always null when no locales were given — there is
+		 * no segmenter to ask.
+		 */
+		findNextIntlWordAtOrAfterOffset(
+			lineContent: string,
+			offset: number,
+		): { index: number; segment: string } | null;
+	}
+
+	export function getMapForWordSeparators(
+		wordSeparators: string,
+		intlSegmenterLocales: readonly string[],
+	): WordCharacterClassifier;
+}

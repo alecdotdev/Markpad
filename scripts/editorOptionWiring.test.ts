@@ -311,16 +311,24 @@ const CJK_PROSE = [
 	'你好，世界。（测试）！？',
 ];
 
-test('the editor turns off ambiguous-character highlighting and nothing else', () => {
+test('the editor narrows the Unicode highlighter without switching it off', () => {
 	// Reports #186 and #94 are both Monaco outlining fullwidth punctuation.
-	// Narrowness is the assertion: `unicodeHighlight: false` or a third
-	// sub-option would also make the boxes go away, and would take the
-	// invisible-character warning with it.
+	// Narrowness is the assertion: `unicodeHighlight: false`, or turning
+	// `invisibleCharacters` off, would also make the boxes go away and would
+	// take the NBSP warning with it. Two overrides are allowed, and only two:
+	// the confusable rule off, and one character exempted from the invisible
+	// rule (#393 — U+3000 is the space bar under a CJK IME).
 	const options = createdEditorOptions();
 	assert.deepEqual(
-		options.unicodeHighlight,
-		{ ambiguousCharacters: false },
-		'exactly one sub-option is overridden',
+		Object.keys(options.unicodeHighlight as object).sort(),
+		['allowedCharacters', 'ambiguousCharacters'],
+		'no third sub-option, and invisibleCharacters is not among them',
+	);
+	assert.equal((options.unicodeHighlight as UnicodeHighlightOptions).ambiguousCharacters, false);
+	assert.deepEqual(
+		(options.unicodeHighlight as { allowedCharacters: Record<string, true> }).allowedCharacters,
+		{ '　': true },
+		'exactly one character is exempted',
 	);
 });
 
@@ -360,6 +368,55 @@ test('the invisible-character warning survives the fix', () => {
 
 	const found = outlined(['a b', 'x​z'], effective);
 	assert.equal(found.invisibleCharacterCount, 2, 'NBSP and zero-width space are still flagged');
+});
+
+// U+3000 IDEOGRAPHIC SPACE is what a CJK IME puts on the page when the author
+// presses the space bar, and it is in Monaco's invisible set — so #462 took the
+// boxes off the punctuation and left them on the space. `allowedLocales` cannot
+// help: `strings.js` getData() flattens every locale bucket into one 465-entry
+// set, so U+3000 is in it unconditionally. Only `allowedCharacters` reaches it.
+//
+// Note the fixtures above are Latin. Measured while fixing #393, a zero-width
+// space inside CJK text is not flagged at all — shouldHighlightNonBasicASCII()
+// suppresses it when the surrounding word holds no basic ASCII. So the hazard
+// this option guards is real, but not everywhere the comment above implies.
+const CJK_IDEOGRAPHIC_SPACE = [
+	'\u4eca\u5929\u3000\u5929\u6c14\u5f88\u597d\u3002',
+	'\u3000\u6bb5\u843d\u9996\u884c\u7f29\u8fdb\u4e24\u683c\u3002',
+	'\u5b89\u88c5\u4f9d\u8d56\u3000\u7136\u540e\u8fd0\u884c\u6d4b\u8bd5\u3002',
+];
+
+test('the space bar under a CJK IME is not outlined', () => {
+	const effective = effectiveUnicodeHighlight(createdEditorOptions().unicodeHighlight);
+	const found = outlined(CJK_IDEOGRAPHIC_SPACE, effective);
+	assert.equal(
+		found.ranges.length,
+		0,
+		`nothing outlined around U+3000, got ${JSON.stringify(
+			found.ranges.map((r) => CJK_IDEOGRAPHIC_SPACE[r.startLineNumber - 1]),
+		)}`,
+	);
+});
+
+test('the U+3000 fixtures still reproduce the bug once the exemption is taken away', () => {
+	// Same guard as the ambiguous-character pair above: without this, the test
+	// before it could pass because a Monaco upgrade dropped U+3000 from the
+	// invisible set, and would then be asserting nothing.
+	const withoutExemption = effectiveUnicodeHighlight({ ambiguousCharacters: false });
+	const found = outlined(CJK_IDEOGRAPHIC_SPACE, withoutExemption);
+	assert.ok(
+		found.invisibleCharacterCount >= 3,
+		`Monaco still boxes U+3000 by default, got ${found.invisibleCharacterCount}`,
+	);
+});
+
+test('exempting U+3000 does not exempt the NBSP that breaks a list', () => {
+	// The narrow exemption has to stay narrow: an NBSP after `-` stops the list
+	// from parsing, and that is why invisibleCharacters is still on.
+	const effective = effectiveUnicodeHighlight(createdEditorOptions().unicodeHighlight);
+	const found = outlined(['-\u00a0item', '\u4eca\u5929\u3000\u5929\u6c14'], effective);
+	assert.equal(found.invisibleCharacterCount, 1, 'the NBSP is flagged, the U+3000 is not');
+	assert.equal(found.ranges[0].startLineNumber, 1, 'and it is the NBSP line');
 });
 
 // ------------------------------------------------- the defaults left in force
@@ -479,4 +536,86 @@ test('the character that opens that dialog is one prose really carries', () => {
 		false,
 		'ordinary line endings are not what this is about',
 	);
+});
+
+
+// ─────────────────────────────────────────── wordSegmenterLocales
+//
+// Word-wise navigation splits on `wordSeparators`, and a language that puts no
+// spaces between its words offers none — so ⌥→ crosses a whole Chinese clause,
+// double-click selects it, ⌥⌫ deletes it. `wordSegmenterLocales` switches on
+// `Intl.Segmenter`, which knows where the words are.
+//
+// Driven through Monaco's own `getMapForWordSeparators`, the function
+// `wordOperations.js` and `cursorWordOperations.js` both call, rather than
+// asserting the option is spelled correctly in Editor.svelte.
+
+const { getMapForWordSeparators } = await import(
+	'monaco-editor/esm/vs/editor/common/core/wordCharacterClassifier.js'
+);
+// Monaco's own default — the editor does not set `wordSeparators`, so this is
+// what the classifier is built with in the app.
+const { USUAL_WORD_SEPARATORS } = await import(
+	'monaco-editor/esm/vs/editor/common/core/wordHelper.js'
+);
+
+/** Every word boundary Monaco would find on `line`, walking it end to end. */
+function wordStarts(line: string, locales: string[]): number[] {
+	const classifier = getMapForWordSeparators(USUAL_WORD_SEPARATORS, locales);
+	const starts: number[] = [];
+	for (let offset = 0; offset < line.length; ) {
+		const found = classifier.findNextIntlWordAtOrAfterOffset(line, offset);
+		if (!found) break;
+		starts.push(found.index);
+		offset = found.index + Math.max(1, found.segment.length);
+	}
+	return starts;
+}
+
+test('a Chinese clause is one word without the segmenter and several with it', () => {
+	// The sentence a reporter would type. No spaces, so `wordSeparators` has
+	// nothing to go on.
+	const line = '这是一个用于测试的段落';
+
+	assert.deepEqual(wordStarts(line, []), [], 'precondition: no segmenter, no boundaries');
+	assert.ok(wordStarts(line, ['zh', 'ja']).length > 1, 'the clause splits into words');
+});
+
+test('the list is a switch, not a whitelist — ICU dispatches by script', () => {
+	// None of these scripts are named in `wordSegmenterLocales`, and all of
+	// them segment. Worth pinning, because the obvious "cleanup" is to trim the
+	// list to match the languages in the comment, and that would change nothing
+	// while making the code claim something false.
+	const unnamed = {
+		thai: 'นี่คือประโยคภาษาไทยสำหรับทดสอบ',
+		khmer: 'នេះគឺជាប្រយោគភាសាខ្មែរ',
+		lao: 'ນີ້ແມ່ນປະໂຫຍກພາສາລາວ',
+	};
+
+	for (const [name, line] of Object.entries(unnamed)) {
+		assert.deepEqual(wordStarts(line, []), [], `precondition: ${name} has no boundaries unsegmented`);
+		assert.ok(wordStarts(line, ['zh', 'ja']).length > 1, `${name} segments without being listed`);
+	}
+
+	// And the two spellings that look like they should differ, do not.
+	const han = '私は日本語の文章を書いています';
+	assert.deepEqual(wordStarts(han, ['zh']), wordStarts(han, ['ja']));
+	assert.deepEqual(wordStarts(han, ['zh']), wordStarts(han, ['zh', 'ja']));
+});
+
+test('space-delimited languages are left exactly as they were', () => {
+	// The reason this can be turned on for everyone rather than keyed off the
+	// UI language: it costs the other half of the world nothing.
+	for (const line of [
+		'The quick brown fox jumps',
+		'이 문장은 한국어 표시를 테스트합니다',
+		'Đây là một câu tiếng Việt',
+		'Это предложение на русском',
+	]) {
+		assert.deepEqual(
+			wordStarts(line, ['zh', 'ja']),
+			[...line.matchAll(/\S+/g)].map((m) => m.index),
+			`segmentation moved a boundary in: ${line}`,
+		);
+	}
 });
