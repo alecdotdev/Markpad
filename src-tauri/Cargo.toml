@@ -51,6 +51,8 @@ font-kit = "0.14"
 base64 = "0.22"
 arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
+chardetng = "1"
+encoding_rs = "0.8"
 
 
 

@@ -39,6 +39,7 @@ function makeTab(overrides: Partial<Tab> = {}): Tab {
 		splitRatio: 0.3,
 		isScrollSynced: true,
 		hasReplacementChars: false,
+		encoding: 'UTF-8',
 		collapsedHeaders: new Set<string>(),
 		...overrides,
 	};

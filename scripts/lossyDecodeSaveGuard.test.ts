@@ -5,11 +5,17 @@ import type { Tab } from '../src/lib/stores/tabs.svelte.js';
 import { buildTransferredTab, snapshotTab, validateTransferPayload } from '../src/lib/utils/tabTransfer.js';
 import { offsetOf, readSource, sliceBetween } from './sourceTree.js';
 
-// Every read path decodes leniently (#371): a file in a legacy encoding
-// (GBK, Big5, Shift-JIS, EUC-KR, CP1251 ...) opens as U+FFFD mojibake instead
-// of failing. U+FFFD is not reversible — the original bytes are gone from the
-// buffer. Writing that buffer back over the source file (auto-save does it
-// 1.5s after the first keystroke) destroys the document permanently.
+// Every read path decodes leniently (#371): a file it cannot read opens with
+// U+FFFD substituted for the bytes it could not, instead of failing. U+FFFD is
+// not reversible — the original bytes are gone from the buffer. Writing that
+// buffer back over the source file (auto-save does it 1.5s after the first
+// keystroke) destroys the document permanently.
+//
+// Detection (#372) removed the common cause rather than the guard: a legacy
+// encoding (GBK, Big5, Shift-JIS, CP-1252 ...) is now read properly and
+// written back as itself — `documentEncodingRoundTrip.test.ts` drives that.
+// What is left here is the file NO encoding can read, which is still a buffer
+// that must never reach its own file.
 //
 // The guard: Rust reports the fidelity of every decode, the tab carries it —
 // through window restore and cross-window moves — and `documentSession`
@@ -31,17 +37,18 @@ const guard = () => sliceBetween(session, 'function refuseIfLossilyDecoded', 'fu
 
 test('one decoder, and it reports what it destroyed', () => {
 	// The fact is known exactly once — when the bytes are decoded — and was
-	// thrown away. `String::from_utf8` returning `Err` IS the fact, so the
-	// shared decoder from #371 carries it instead of growing a second path.
+	// thrown away. Detection (#372) made the decode able to succeed where it
+	// used to substitute, but not able to always succeed, so the decoder still
+	// carries the verdict rather than growing a second path.
 	assert.match(rust, /struct DecodedText \{[^}]*\bcontent: String,[^}]*\blossy: bool/s);
-	assert.match(rust, /fn decode_utf8_lossy\(bytes: Vec<u8>\) -> DecodedText/);
+	assert.match(rust, /fn decode_text\(bytes: &\[u8\]\) -> DecodedText/);
 	assert.match(rust, /fn read_to_string_lossy\(path: &str\) -> std::io::Result<DecodedText>/);
-	assert.equal(rust.match(/fn decode_utf8/g)?.length, 1, 'exactly one decoder');
+	assert.equal(rust.match(/fn decode_text\(/g)?.length, 1, 'exactly one decoder');
 });
 
 test('both read commands can report fidelity', () => {
-	assert.match(rust, /async fn open_markdown_preview\([^)]*\)\s*-> Result<\(String, String, bool, bool\), String>/s);
-	assert.match(rust, /async fn read_file_content_checked\(path: String\) -> Result<\(String, bool\), String>/);
+	assert.match(rust, /async fn open_markdown_preview\([^)]*\)\s*-> Result<\(String, String, bool, bool, String\), String>/s);
+	assert.match(rust, /async fn read_file_content_checked\(path: String\) -> Result<\(String, bool, String\), String>/);
 	assert.match(rust, /read_file_content_checked,/, 'the command must be registered');
 });
 
@@ -51,7 +58,7 @@ test('a preview cut inside a multi-byte character is not called lossy', () => {
 	// large CJK/emoji document out of saving — a guard worse than the bug.
 	const preview = sliceBetween(rust, 'fn build_markdown_preview', '#[tauri::command]');
 	const trim = offsetOf(preview, 'utf8_truncation_boundary');
-	assert.ok(trim < offsetOf(preview, 'decode_utf8_lossy'), 'the split tail is dropped before fidelity is judged');
+	assert.ok(trim < offsetOf(preview, 'decode_text('), 'the split tail is dropped before fidelity is judged');
 });
 
 test('the tab carries the fidelity of its buffer', () => {
@@ -66,7 +73,7 @@ test('the tab carries the fidelity of its buffer', () => {
 test('every load decides the flag instead of leaving it stale', () => {
 	// A reload of a file the user has since converted to UTF-8 must clear it.
 	const body = loadMarkdown();
-	assert.match(body, /as \[string, string, boolean, boolean\]/);
+	assert.match(body, /as \[string, string, boolean, boolean, string\]/);
 	assert.match(body, /setTabDecodedLossy\(activeId, lossy\)/);
 	// The full load REPLACES the preview's buffer, so it brings its own
 	// verdict: a file can be valid UTF-8 for the first 50KB and not after.
@@ -82,7 +89,7 @@ test('the editable-pane shortcut reports fidelity too', () => {
 	const body = loadMarkdown();
 	assert.match(
 		body,
-		/if \(initialIsEditing \|\| initialIsSplit\) \{\s*\[content, lossy\] = \(await invoke\('read_file_content_checked'/,
+		/if \(initialIsEditing \|\| initialIsSplit\) \{\s*\[content, lossy, encoding\] = \(await invoke\('read_file_content_checked'/,
 	);
 	// `ensureFullContent` was the one place the bare command survived, and only
 	// because it re-read a file whose tab loadMarkdown had already flagged —
@@ -147,9 +154,13 @@ test('saveContent is the choke point auto-save and the close dialogs share', () 
 
 test('Save As to a new file stays open as the escape hatch', () => {
 	const body = saveContentAs();
-	assert.match(body, /invoke\('save_file_content', \{ path: selected, content: snapshot \}\)/);
+	// Explicitly UTF-8, never the tab's own encoding: the copy exists to be
+	// readable when the original could not be read, or could not represent
+	// what the user typed into it.
+	assert.match(body, /invoke\('save_file_content', \{ path: selected, content: snapshot, encoding: 'UTF-8' \}\)/);
 	// Once written, the buffer matches a UTF-8 file of its own.
 	assert.match(body, /setTabDecodedLossy\(tab\.id, false\)/);
+	assert.match(body, /setTabEncoding\(tab\.id, 'UTF-8'\)/);
 });
 
 test('Save As onto the same file is still a destructive overwrite', () => {
@@ -174,7 +185,7 @@ test('the refusal tells the user what to do and is not repeated per keystroke', 
 	assert.match(body, /toast\.lossySaveBlocked/);
 	assert.match(body, /lossySaveWarnedTabs\.has\(tab\.id\)/);
 	const i18n = readSource('src/lib/utils/i18n.ts');
-	assert.match(i18n, /lossySaveBlocked: 'Not saved: this file is not UTF-8/);
+	assert.match(i18n, /lossySaveBlocked: 'Not saved: parts of this file could not be read in any encoding/);
 	assert.match(i18n, /use "Save As" to write a copy/);
 });
 
@@ -203,6 +214,7 @@ function makeTab(overrides: Partial<Tab> = {}): Tab {
 		splitRatio: 0.5,
 		isScrollSynced: false,
 		hasReplacementChars: true,
+		encoding: 'UTF-8',
 		collapsedHeaders: new Set<string>(),
 		...overrides,
 	};

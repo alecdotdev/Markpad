@@ -142,16 +142,32 @@ export interface Tab {
 	 */
 	isTruncated?: boolean;
 	/**
-	 * `rawContent` was decoded with U+FFFD substitutions because the file is
-	 * not UTF-8 (GBK, Big5, Shift-JIS ...). The buffer is NOT a copy of the
-	 * file and the original bytes cannot be recovered from it, so writing it
-	 * back over that file destroys the document — documentSession.saveContent
-	 * refuses to. Required, not optional: unlike `isTruncated` above, this one
+	 * `rawContent` was decoded with U+FFFD substitutions because NO encoding
+	 * could read the file: a truncated multi-byte tail, or bytes that are not
+	 * text at all. Not merely "not UTF-8" — a legacy codepage is detected and
+	 * decoded (see `encoding`), which is what #372 was about. The buffer is
+	 * NOT a copy of the file and the original bytes cannot be recovered from
+	 * it, so writing it back over that file destroys the document —
+	 * documentSession.saveContent refuses to. Required, not optional: unlike
+	 * `isTruncated` above, this one
 	 * DOES travel through a transfer payload, and a construction site that
 	 * forgets it would default to "safe to overwrite" — the failure mode here
 	 * is a destroyed document, so the compiler asks every one of them.
 	 */
 	hasReplacementChars: boolean;
+	/**
+	 * The encoding `rawContent` was decoded from, and the one a save writes it
+	 * back as: `UTF-8` (the default, and everything Markpad creates itself),
+	 * `UTF-8-BOM`, `UTF-16LE`, `UTF-16BE`, or a WHATWG label for a legacy
+	 * codepage — `GBK`, `Big5`, `Shift_JIS`, `windows-1252`. Set by whichever
+	 * read filled the buffer; the Rust `decode_text` decides it.
+	 *
+	 * Required for the same reason as `hasReplacementChars`: a construction
+	 * site that forgot it would silently rewrite a legacy document as UTF-8 —
+	 * not the data loss #372 reported, but still a change to the user's file
+	 * that nobody asked for and that other tools would notice.
+	 */
+	encoding: string;
 	/**
 	 * `path` as the FILESYSTEM identifies it: case folded, Unicode normalized
 	 * and symlinks resolved, the way the volume itself does those (see the Rust
@@ -307,7 +323,8 @@ class TabManager {
 					// Not persisted — see serializeState.
 					collapsedHeaders: new Set<string>(),
 					isTruncated: false,
-					hasReplacementChars: false
+					hasReplacementChars: false,
+					encoding: 'UTF-8'
 				});
 			}
 
@@ -443,6 +460,7 @@ class TabManager {
 			collapsedHeaders: new Set<string>(),
 			isTruncated: false,
 			hasReplacementChars: false,
+			encoding: 'UTF-8',
 			pathKey
 		});
 
@@ -476,7 +494,8 @@ class TabManager {
 			isScrollSynced: false,
 			collapsedHeaders: new Set<string>(),
 			isTruncated: false,
-			hasReplacementChars: false
+			hasReplacementChars: false,
+			encoding: 'UTF-8'
 		});
 
 		this.activeTabId = id;
@@ -510,7 +529,8 @@ class TabManager {
 			isScrollSynced: false,
 			collapsedHeaders: new Set<string>(),
 			isTruncated: false,
-			hasReplacementChars: false
+			hasReplacementChars: false,
+			encoding: 'UTF-8'
 		});
 
 		this.activeTabId = id;
@@ -667,6 +687,25 @@ class TabManager {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (tab) {
 			tab.hasReplacementChars = lossy;
+		}
+	}
+
+	/**
+	 * Record which encoding this buffer was decoded from, so the save writes
+	 * the file back as itself. Set by the same reads that set the flag above,
+	 * and for the same reason: it is a property of the buffer in hand, not a
+	 * memory of how the tab was first opened — a file converted to UTF-8 since
+	 * the load must stop being written as GBK.
+	 *
+	 * Separate from `setTabDecodedLossy` rather than an argument to it: they
+	 * answer different questions ("could this be read?" and "what was it read
+	 * as?"), and every caller that has one has the other, so folding them
+	 * together would buy a line and cost the name.
+	 */
+	setTabEncoding(id: string, encoding: string) {
+		const tab = this.tabs.find((t) => t.id === id);
+		if (tab) {
+			tab.encoding = encoding;
 		}
 	}
 

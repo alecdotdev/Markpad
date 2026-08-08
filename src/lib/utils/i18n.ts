@@ -271,7 +271,8 @@ export const translations: Record<LanguageCode, Translation> = {
             savedNewerEdits: 'Saved — staying in edit mode because you have newer edits',
             openExportedFileFailed: 'Could not open exported file',
             partialDocument: 'Cannot edit yet — this file is not fully loaded',
-            lossySaveBlocked: 'Not saved: this file is not UTF-8, so parts of it became "�" when it was opened. Saving would destroy the original — use "Save As" to write a copy',
+            lossySaveBlocked: 'Not saved: parts of this file could not be read in any encoding and became "�" when it was opened. Saving would destroy the original — use "Save As" to write a copy',
+            encodingUnmappable: 'Not saved: {{encoding}} cannot represent every character this document now contains (an emoji, most likely). Use "Save As" to write a copy as UTF-8',
             restoreInterrupted: 'Markpad did not finish restoring your session last time',
             restoreInterruptedDeferred: 'Markpad did not finish opening {path} last time, so it was skipped. Open it yourself to try again'
         },
@@ -333,8 +334,7 @@ export const translations: Record<LanguageCode, Translation> = {
                 lineCol: 'Ln {{line}}, Col {{col}}',
                 selected: '{{count}} selected',
                 selections: '{{count}} selections',
-                words: '{{count}} words',
-                utf8: 'UTF-8'
+                words: '{{count}} words'
             }
         },
         tooltip: {
@@ -600,7 +600,8 @@ export const translations: Record<LanguageCode, Translation> = {
 			savedNewerEdits: '已保存 — 因为存在更新的编辑,继续保持编辑模式',
 			openExportedFileFailed: '无法打开导出的文件',
 			partialDocument: '暂时无法编辑 — 文件尚未完整加载',
-			lossySaveBlocked: '未保存：此文件不是 UTF-8 编码，打开时部分内容已变成“�”。直接保存会破坏原文件 — 请用“另存为”写入新文件'
+			lossySaveBlocked: '未保存：此文件的部分内容无法用任何编码读取，打开时已变成“�”。直接保存会破坏原文件 — 请用“另存为”写入新文件',
+			encodingUnmappable: '未保存：{{encoding}} 无法表示文档中新增的部分字符（多半是表情符号）。请用“另存为”写入一份 UTF-8 副本'
         },
         externalChange: {
             message: '此文件在你有未保存修改时被外部程序改动。',
@@ -660,8 +661,7 @@ export const translations: Record<LanguageCode, Translation> = {
                 lineCol: '行 {{line}}, 列 {{col}}',
                 selected: '已选择 {{count}}',
                 selections: '{{count}} 个选择',
-                words: '{{count}} 字',
-                utf8: 'UTF-8'
+                words: '{{count}} 字'
             }
         },
         tooltip: {
@@ -884,7 +884,8 @@ export const translations: Record<LanguageCode, Translation> = {
             unsupportedFile: 'サポートされていないファイル形式: {{filename}}',
             autoSaveFailed: '自動保存に失敗しました — 未保存の変更はメモリ内に残っています',
             savedNewerEdits: '保存しました — 新しい編集があるため編集モードを継続します',
-            lossySaveBlocked: '保存しませんでした：このファイルは UTF-8 ではないため、開いた時点で一部が「�」に置き換わっています。上書き保存すると元のファイルが壊れます —「名前を付けて保存」で新しいファイルに書き出してください'
+            lossySaveBlocked: '保存しませんでした：このファイルの一部はどの文字コードでも読めず、開いた時点で「�」に置き換わっています。上書き保存すると元のファイルが壊れます —「名前を付けて保存」で新しいファイルに書き出してください',
+            encodingUnmappable: '保存しませんでした：{{encoding}} ではこの文書に含まれる一部の文字（多くは絵文字）を表現できません。「名前を付けて保存」で UTF-8 の複製を作成してください'
         },
         modal: {
             confirmExit: '終了を確認',
@@ -908,8 +909,7 @@ export const translations: Record<LanguageCode, Translation> = {
                 lineCol: '行 {{line}}, 列 {{col}}',
                 selected: '{{count}} 選択',
                 selections: '{{count}} つの選択',
-                words: '{{count}} 語',
-                utf8: 'UTF-8'
+                words: '{{count}} 語'
             }
         },
         tooltip: {
@@ -1176,7 +1176,8 @@ export const translations: Record<LanguageCode, Translation> = {
             savedNewerEdits: '已儲存——因有更新的編輯內容，繼續保持編輯模式',
             openExportedFileFailed: '無法開啟匯出的檔案',
             partialDocument: '尚無法編輯 — 此檔案尚未完全讀取',
-            lossySaveBlocked: '未儲存：此檔案不是 UTF-8 編碼，開啟時部分內容已變成「�」。直接儲存會破壞原檔案 — 請用「另存新檔」寫入新檔案'
+            lossySaveBlocked: '未儲存：此檔案的部分內容無法用任何編碼讀取，開啟時已變成「�」。直接儲存會破壞原檔案 — 請用「另存新檔」寫入新檔案',
+            encodingUnmappable: '未儲存：{{encoding}} 無法表示此文件新增的部分字元（多半是表情符號）。請用「另存新檔」寫入一份 UTF-8 複本'
         },
         externalChange: {
             message: '當您有未儲存的變更時，此檔案在磁碟上已被修改。',
@@ -1236,8 +1237,7 @@ export const translations: Record<LanguageCode, Translation> = {
                 lineCol: '第 {{line}} 行，第 {{col}} 欄',
                 selected: '已選取 {{count}} 個字元',
                 selections: '已選取 {{count}} 處',
-                words: '{{count}} 個字詞',
-                utf8: 'UTF-8'
+                words: '{{count}} 個字詞'
             }
         },
         tooltip: {
@@ -1490,7 +1490,8 @@ export const translations: Record<LanguageCode, Translation> = {
             autoSaveFailed: '자동 저장 실패 — 저장되지 않은 변경 사항은 메모리에 남아 있습니다',
             savedNewerEdits: '저장됨 — 새로운 편집이 있어 편집 모드를 유지합니다',
             openExportedFileFailed: '내보낸 파일을 열 수 없습니다',
-            lossySaveBlocked: '저장하지 않음: 이 파일은 UTF-8이 아니어서 열 때 일부가 "�"로 바뀌었습니다. 덮어쓰면 원본이 손상됩니다 — "다른 이름으로 저장"으로 새 파일에 저장하세요'
+            lossySaveBlocked: '저장하지 않음: 이 파일의 일부는 어떤 인코딩으로도 읽을 수 없어 열 때 "�"로 바뀌었습니다. 덮어쓰면 원본이 손상됩니다 — "다른 이름으로 저장"으로 새 파일에 저장하세요',
+            encodingUnmappable: '저장하지 않음: {{encoding}}(으)로는 이 문서에 포함된 일부 문자(대개 이모지)를 표현할 수 없습니다. "다른 이름으로 저장"으로 UTF-8 사본을 만드세요'
         },
         modal: {
             confirmExit: '종료 확인',
@@ -1544,7 +1545,6 @@ export const translations: Record<LanguageCode, Translation> = {
                 selected: '{{count}}개 선택됨',
                 selections: '{{count}}개 선택 영역',
                 words: '{{count}}개 단어',
-                utf8: 'UTF-8',
                 lines: '{{count}}개 줄'
             }
         },
@@ -1768,7 +1768,8 @@ export const translations: Record<LanguageCode, Translation> = {
             unsupportedFile: 'Неподдерживаемый тип файла: {{filename}}',
             autoSaveFailed: 'Автосохранение не удалось — несохранённые правки остались только в памяти',
             savedNewerEdits: 'Сохранено — остаюсь в режиме редактирования, так как есть более новые правки',
-            lossySaveBlocked: 'Не сохранено: файл не в кодировке UTF-8, при открытии часть содержимого стала «�». Сохранение уничтожит оригинал — используйте «Сохранить как» для записи копии'
+            lossySaveBlocked: 'Не сохранено: часть содержимого файла не читается ни в одной кодировке и при открытии стала «�». Сохранение уничтожит оригинал — используйте «Сохранить как» для записи копии',
+            encodingUnmappable: 'Не сохранено: кодировка {{encoding}} не может представить некоторые символы этого документа (скорее всего, эмодзи). Используйте «Сохранить как», чтобы записать копию в UTF-8'
         },
         modal: {
             confirmExit: 'Подтвердить выход',

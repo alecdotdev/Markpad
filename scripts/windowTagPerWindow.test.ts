@@ -68,6 +68,7 @@ const TRANSFER_PAYLOAD = JSON.stringify({
 	isSplit: false,
 	isScrollSynced: false,
 	hasReplacementChars: false,
+	encoding: 'UTF-8',
 	splitRatio: 0.5,
 	scrollTop: 0,
 	scrollPercentage: 0,
@@ -95,7 +96,7 @@ g.window.__TAURI_INTERNALS__ = {
 			case 'claim_detached_tab':
 				return Promise.resolve(TRANSFER_PAYLOAD);
 			case 'read_file_content_checked':
-				return Promise.resolve(['# a', false]);
+				return Promise.resolve(['# a', false, 'UTF-8']);
 			default:
 				return Promise.resolve(null);
 		}

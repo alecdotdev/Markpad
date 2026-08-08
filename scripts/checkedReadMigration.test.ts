@@ -174,7 +174,7 @@ test('the unchecked read command is gone, and nothing calls it', () => {
 
 test('entering the editor reads the fidelity and stores it', () => {
 	const toggle = sliceBetween(viewer, 'async function toggleEdit', 'async function saveContent');
-	assert.match(toggle, /\[content, lossy\] = \(await invoke\('read_file_content_checked', \{ path: tab\.path \}\)\)/);
+	assert.match(toggle, /\[content, lossy, encoding\] = \(await invoke\('read_file_content_checked', \{ path: tab\.path \}\)\)/);
 	const read = offsetOf(toggle, 'read_file_content_checked');
 	const flag = offsetOf(toggle, 'setTabDecodedLossy(tab.id, lossy)');
 	const store = offsetOf(toggle, 'setTabRawContent(tab.id, content)');
@@ -183,7 +183,7 @@ test('entering the editor reads the fidelity and stores it', () => {
 
 test('entering split view reads the fidelity and stores it', () => {
 	const enter = sliceBetween(viewer, 'async function toggleSplitView', '} else {');
-	assert.match(enter, /\[content, lossy\] = \(await invoke\('read_file_content_checked', \{ path: tab\.path \}\)\)/);
+	assert.match(enter, /\[content, lossy, encoding\] = \(await invoke\('read_file_content_checked', \{ path: tab\.path \}\)\)/);
 	const flag = offsetOf(enter, 'setTabDecodedLossy(tab.id, lossy)');
 	const store = offsetOf(enter, 'setTabRawContent(tab.id, content)');
 	assert.ok(flag < store, 'flag the tab before the buffer is published');

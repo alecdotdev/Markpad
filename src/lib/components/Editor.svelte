@@ -96,6 +96,22 @@
 	let wordCount = $state(0);
 	let currentLanguage = $state("markdown");
 	let lineEnding = $state<"LF" | "CRLF">("LF");
+	/**
+	 * The encoding the document was decoded from, and the one a save writes it
+	 * back as (#372).
+	 *
+	 * Derived from the tab rather than synced from the model like `lineEnding`
+	 * is: a line ending is a property of the Monaco buffer, an encoding is a
+	 * property of the file that buffer came from. The store already holds it,
+	 * so a copy kept in sync here could only go stale.
+	 *
+	 * This slot used to be the literal string `UTF-8`, which was true of every
+	 * file Markpad could open. Detection made it a lie for exactly the
+	 * documents the indicator matters most for — a GBK file now opens, reads
+	 * correctly and saves back as GBK, and the status bar was still claiming
+	 * UTF-8.
+	 */
+	let encoding = $derived(tabManager.activeTab?.encoding ?? 'UTF-8');
 	let currentTabId = tabManager.activeTabId;
 
 	// A Monaco action captures its label when it is registered, so actions built
@@ -1887,7 +1903,7 @@
 		     puts it on `Tab.encoding`. Wire this to that field when it lands —
 		     duplicating the detection to make the label true sooner would leave
 		     two answers to one question. -->
-		<div class="status-item">{t('editor.status.utf8')}</div>
+		<div class="status-item">{encoding}</div>
 	</div>
 {/if}
 

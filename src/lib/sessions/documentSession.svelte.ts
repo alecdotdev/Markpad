@@ -217,8 +217,11 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			// the fidelity again costs nothing and makes the flag a property of
 			// the buffer instead of a memory of how it was obtained; it also
 			// CLEARS the flag for a file converted to UTF-8 since the load.
-			const [full, lossy] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean];
+			const [full, lossy, encoding] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean, string];
 			tabManager.setTabDecodedLossy(tabId, lossy);
+			// The preview's answer came from the first 50KB; this one is the
+			// whole file's, and it is the one every save from here on uses.
+			tabManager.setTabEncoding(tabId, encoding);
 			tabManager.setTabRawContent(tabId, full);
 			return true;
 		} catch (error) {
@@ -233,9 +236,9 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 
 	/**
 	 * Refuse to write a buffer back over the file it was decoded from when
-	 * that decode was lossy: the file is not UTF-8, the bytes it disagreed
-	 * with are already U+FFFD in the buffer, and the original is unrecoverable
-	 * from it. Every writer — Ctrl+S, the auto-save timer in
+	 * that decode was lossy: no encoding could read the file, the bytes
+	 * nothing could read are already U+FFFD in the buffer, and the original is
+	 * unrecoverable from it. Every writer — Ctrl+S, the auto-save timer in
 	 * MarkdownViewer.svelte, the close dialogs in canCloseTab, the task
 	 * checkbox — funnels through saveContent/saveContentAs, so this is the
 	 * one place that has to hold.
@@ -244,9 +247,10 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	 * genuine UTF-8 file, which is correct and is the user's way out; an
 	 * untitled buffer (path === '') has no source file to destroy.
 	 *
-	 * This is damage control, not encoding support: Markpad cannot read GBK
-	 * or Shift-JIS in the first place (that needs a real decoder), and this
-	 * only stops it from overwriting what it could not read.
+	 * Detection (#372) narrowed this a great deal without replacing it: GBK,
+	 * Big5, Shift-JIS and the rest are now read properly and written back as
+	 * themselves, so the everyday legacy document never reaches here. What is
+	 * left is the file nothing can read, and no decoder makes that go away.
 	 *
 	 * "The same file" is the filesystem's judgement, not the string's: a Save As
 	 * typed as `/notes/Legacy.md` for a tab opened as `/notes/legacy.md` is the
@@ -256,6 +260,51 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	 * `targetPath !== tab.path` stays as the cheap first test so the common
 	 * Ctrl+S case never consults anything further.
 	 */
+	/**
+	 * The prefix `encode_text` refuses with when the document's encoding has no
+	 * representation for something the buffer now holds — an emoji pasted into
+	 * a GBK file being the way most people will meet it.
+	 */
+	const UNMAPPABLE_CODE = 'ENCODING_UNMAPPABLE';
+
+	/**
+	 * A save failure, said in a way the user can act on, and what to show
+	 * beside it.
+	 *
+	 * The translation that matters here is not English-to-Chinese. It is
+	 * `ENCODING_UNMAPPABLE` — a fact about the program — turned into "this
+	 * document is GBK, GBK cannot hold that character, write a UTF-8 copy
+	 * instead": a fact about what the user should do next. That the result then
+	 * exists in six languages is the cheap half, and it rides on machinery the
+	 * app already has.
+	 *
+	 * Which is also the rule for what belongs here. A failure the user can act
+	 * on gets a code and a sentence this side writes. A failure they cannot —
+	 * the 91 places that hand back an OS error — keeps the OS's own words,
+	 * because those words are the whole of the information and the only string
+	 * worth searching for. "Permission denied (os error 13)", translated, is a
+	 * sentence nobody can look up.
+	 *
+	 * `onError` renders `${message}: ${detail}`, so `detail` is in front of the
+	 * user too: the document's path for a refusal we explained, the raw error
+	 * for one we did not. Returning the marker here printed it to the user,
+	 * which is the failure this shape exists to prevent.
+	 */
+	function describeSaveFailure(error: unknown, tab: Tab): { message: string; detail: unknown } {
+		if (!String(error).includes(UNMAPPABLE_CODE)) {
+			return { message: 'Failed to save file', detail: error };
+		}
+
+		// `tab.encoding` is what was handed to the command that just refused,
+		// so it is the encoding that could not hold the character. Rust used to
+		// send the label back and this read it off the error; the round trip
+		// was telling us something we had said ourselves a moment earlier.
+		return {
+			message: t('toast.encodingUnmappable', settings.language).replace('{{encoding}}', tab.encoding),
+			detail: tab.path,
+		};
+	}
+
 	function refuseIfLossilyDecoded(tab: Tab, targetPath: string, targetKey?: string): boolean {
 		if (!tab.hasReplacementChars || targetPath === '') return false;
 		if (targetPath !== tab.path && !isSameFilePath({ path: targetPath, pathKey: targetKey }, tab)) return false;
@@ -414,16 +463,19 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				let content: string;
 				let isFull: boolean;
 				let lossy: boolean;
+				let encoding: string;
 				if (initialIsEditing || initialIsSplit) {
-					[content, lossy] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean];
+					[content, lossy, encoding] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean, string];
 					isFull = true;
 				} else {
-					[, content, isFull, lossy] = (await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 })) as [string, string, boolean, boolean];
+					[, content, isFull, lossy, encoding] = (await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 })) as [string, string, boolean, boolean, string];
 				}
 				// Decided on every load, before the buffer can reach a writer.
-				// Both branches report it, so this also CLEARS the flag on a
-				// file the user has since converted to UTF-8.
+				// Both branches report both, so this also CLEARS the flag on a
+				// file the user has since converted to UTF-8 — and repoints the
+				// save at the encoding it converted to.
 				tabManager.setTabDecodedLossy(activeId, lossy);
+				tabManager.setTabEncoding(activeId, encoding);
 				lossySaveWarnedTabs.delete(activeId);
 				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath, pathKey);
 				const processed = await options.renderMarkdown(content, filePath, foldsForTab(activeId));
@@ -440,8 +492,8 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 					};
 					updateLoading(activeId, true);
 					options.measureInitialViewport();
-					(invoke('read_file_content_checked', { path: filePath }) as Promise<[string, boolean]>)
-						.then(([fullContent, fullLossy]) => {
+					(invoke('read_file_content_checked', { path: filePath }) as Promise<[string, boolean, string]>)
+						.then(([fullContent, fullLossy, fullEncoding]) => {
 							const applyFull = () => {
 								try {
 									if (options.isScrolling()) return void setTimeout(applyFull, 100);
@@ -453,9 +505,11 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 											tabManager.setTabRawContent(activeId, fullContent);
 											// This buffer REPLACES the preview's, so it
 											// carries its own verdict — the preview only
-											// saw the first 50KB and a file can be valid
-											// UTF-8 up to there and not after.
+											// saw the first 50KB, and both the fidelity
+											// and the detected encoding of a prefix can
+											// differ from the whole file's.
 											tabManager.setTabDecodedLossy(activeId, fullLossy);
+											tabManager.setTabEncoding(activeId, fullEncoding);
 											updateLoading(activeId, false);
 											if (tabManager.activeTabId === activeId) setTimeout(options.renderRichContent, 10);
 										})
@@ -477,8 +531,9 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 						});
 				}
 			} else {
-				const [content, lossy] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean];
+				const [content, lossy, encoding] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean, string];
 				tabManager.setTabDecodedLossy(activeId, lossy);
+				tabManager.setTabEncoding(activeId, encoding);
 				lossySaveWarnedTabs.delete(activeId);
 				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath, pathKey);
 				if (tab) tab.isEditing = true;
@@ -544,7 +599,12 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			const snapshot = tab.rawContent;
 			markSelfWrite(targetPath);
 			try {
-				await invoke('save_file_content', { path: targetPath, content: snapshot });
+				// The tab's own encoding, so a GBK or Shift-JIS document is
+				// written back as the file it was opened from rather than
+				// silently converted to UTF-8 by every auto-save. An untitled
+				// buffer saved through the dialog above still carries the
+				// `UTF-8` it was created with, which is what it should be.
+				await invoke('save_file_content', { path: targetPath, content: snapshot, encoding: tab.encoding });
 				markSelfWrite(targetPath);
 				if (tab.path === '') {
 					tabManager.updateTabPath(tab.id, targetPath, targetKey);
@@ -555,7 +615,8 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				return true;
 			} catch (error) {
 				clearSelfWrite(targetPath);
-				options.onError('Failed to save file', error);
+				const { message, detail } = describeSaveFailure(error, tab);
+				options.onError(message, detail);
 				return false;
 			}
 		});
@@ -592,12 +653,19 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			const snapshot = tab.rawContent;
 			markSelfWrite(selected);
 			try {
-				await invoke('save_file_content', { path: selected, content: snapshot });
+				// Deliberately UTF-8, not `tab.encoding`. Save As is the way out
+				// of both failure modes this file guards: a buffer nothing could
+				// decode, and one holding a character its own encoding cannot
+				// represent. Writing the copy in the encoding that caused the
+				// problem would take the exit away.
+				await invoke('save_file_content', { path: selected, content: snapshot, encoding: 'UTF-8' });
 				markSelfWrite(selected);
 				tabManager.updateTabPath(tab.id, selected, selectedKey);
 				// The buffer now has a UTF-8 file of its own that it matches
-				// exactly, so it is safe to save from here on.
+				// exactly, so it is safe to save from here on — and every save
+				// from here on has to agree about what that file is.
 				tabManager.setTabDecodedLossy(tab.id, false);
+				tabManager.setTabEncoding(tab.id, 'UTF-8');
 				lossySaveWarnedTabs.delete(tab.id);
 				options.saveRecentFile(selected);
 				tab.originalContent = snapshot;
@@ -605,7 +673,8 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				return true;
 			} catch (error) {
 				clearSelfWrite(selected);
-				options.onError('Failed to save file as', error);
+				const { message, detail } = describeSaveFailure(error, tab);
+				options.onError(message === 'Failed to save file' ? 'Failed to save file as' : message, detail);
 				return false;
 			}
 		});

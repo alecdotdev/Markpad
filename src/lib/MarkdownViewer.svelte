@@ -1659,8 +1659,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 						// its own verdict instead of relying on the one
 						// `loadMarkdown` left behind — a file can be converted
 						// to UTF-8 (or away from it) between the two reads.
-						const [content, lossy] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean];
+						const [content, lossy, encoding] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean, string];
 						tabManager.setTabDecodedLossy(tab.id, lossy);
+						tabManager.setTabEncoding(tab.id, encoding);
 						// Goes through the store so a tab that held only the
 						// large-file preview slice stops being flagged partial.
 						tabManager.setTabRawContent(tab.id, content);
@@ -2262,7 +2263,7 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		});
 		if (dest) {
 			try {
-				await invoke('save_file_content', { path: dest, content: svg });
+				await invoke('save_file_content', { path: dest, content: svg, encoding: 'UTF-8' });
 				addToast('Diagram saved as SVG');
 			} catch (e) {
 				addToast(`Failed to save diagram: ${e}`, 'error');
@@ -2532,8 +2533,9 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 					// Checked, like every other read that fills an editable
 					// buffer: split view is an editor, so this tab must carry
 					// the fidelity of its own decode rather than inherit one.
-					const [content, lossy] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean];
+					const [content, lossy, encoding] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean, string];
 					tabManager.setTabDecodedLossy(tab.id, lossy);
+					tabManager.setTabEncoding(tab.id, encoding);
 					tabManager.setTabRawContent(tab.id, content);
 				} catch (e) {
 					console.error('Failed to load raw content for split view', e);
