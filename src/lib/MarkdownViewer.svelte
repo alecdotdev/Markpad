@@ -97,6 +97,7 @@ import {
 } from './utils/scrollSync.js';
 import { settings, TOC_WIDTH_RANGE } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
+import { formatChord } from './utils/shortcuts.js';
 import { createWindowSession } from './sessions/windowSession.svelte.js';
 import { createDocumentSession, type LoadMarkdownOptions } from './sessions/documentSession.svelte.js';
 
@@ -2326,11 +2327,24 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		if (!editorPane) return;
 		e.preventDefault();
 
+		// Monaco's menu printed a chord beside every item. Kept for the two
+		// below, where the menu entry is most of how anyone finds out the
+		// shortcut exists, and dropped for cut/copy/paste, which nobody needs
+		// told.
+		//
+		// `formatChord` rather than two literals, so the Mac and Windows
+		// spellings cannot drift apart. F1 has no modifier and is the same
+		// everywhere.
+		const chord = (c: string) => formatChord(c, settings.osType === 'macos' ? 'Cmd' : 'Ctrl');
+
 		docContextMenu = {
 			show: true,
 			x: e.clientX,
 			y: e.clientY,
 			items: [
+				// No chord printed beside these three: ⌘X/⌘C/⌘V are the one set of
+				// shortcuts nobody needs told, and the reminder costs a column of
+				// width in every language.
 				{ label: t('menu.cut', uiLanguage), onClick: () => editorPane?.cutToClipboard() },
 				{ label: t('menu.copy', uiLanguage), onClick: () => editorPane?.copyToClipboard() },
 				{ label: t('menu.paste', uiLanguage), onClick: () => editorPane?.pasteFromClipboard() },
@@ -2345,10 +2359,12 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 				// English whatever the app's language is.
 				{
 					label: t('menu.commandPalette', uiLanguage),
+					shortcut: 'F1',
 					onClick: () => editorPane?.runEditorAction('editor.action.quickCommand'),
 				},
 				{
 					label: t('menu.changeAllOccurrences', uiLanguage),
+					shortcut: chord('Mod+F2'),
 					onClick: () => editorPane?.runEditorAction('editor.action.changeAll'),
 				},
 			],
