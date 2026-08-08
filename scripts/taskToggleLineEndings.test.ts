@@ -93,9 +93,23 @@ async function toggledContent(doc: string, sourceLine: number, nowChecked: boole
 	return write ? (write.args.content as string) : null;
 }
 
-/** The same document in both line endings, so a case can be run over each. */
+/**
+ * The same document in both line endings, so a case can be run over each.
+ *
+ * The blank line before the list is not decoration — it is the condition that
+ * makes this reachable on LF. `\s*` is greedy and `/m` `^` matches at the
+ * start of the blank line, so the match ate the blank line's terminator and
+ * `offset` landed one line early. Every list written the ordinary way, with a
+ * blank line above it, hit this on every platform; CRLF widened it from the
+ * first task of each block to all of them.
+ */
 function document(eol: string) {
-	return ['intro', '- [ ] one', '- [ ] two', '- [ ] three'].join(eol) + eol;
+	return ['intro', '', '- [ ] one', '- [ ] two', '- [ ] three'].join(eol) + eol;
+}
+
+/** A list that starts immediately after prose — the shape that always worked. */
+function documentWithoutBlankLine(eol: string) {
+	return ['intro', '- [ ] one', '- [ ] two'].join(eol) + eol;
 }
 
 for (const [name, eol] of [
@@ -105,31 +119,31 @@ for (const [name, eol] of [
 	test(`${name}: the task the reader clicked is the task that changes`, async () => {
 		// Line 3 is `- [ ] two`. Under the old pattern this resolved to line 2
 		// and rewrote `one` instead — a silent, invisible wrong write.
-		const written = await toggledContent(document(eol), 3, true);
+		const written = await toggledContent(document(eol), 4, true);
 		assert.ok(written, 'the toggle wrote');
-		assert.equal(written, ['intro', '- [ ] one', '- [x] two', '- [ ] three'].join(eol) + eol);
+		assert.equal(written, ['intro', '', '- [ ] one', '- [x] two', '- [ ] three'].join(eol) + eol);
 	});
 
 	test(`${name}: the last task toggles at all`, async () => {
 		// Line 4 is the last task. Under the old pattern nothing matched line 4,
 		// so the write was skipped entirely and the control snapped back. This
 		// is the symptom #148 reports.
-		const written = await toggledContent(document(eol), 4, true);
+		const written = await toggledContent(document(eol), 5, true);
 		assert.ok(written, 'the toggle wrote instead of silently refusing');
-		assert.equal(written, ['intro', '- [ ] one', '- [ ] two', '- [x] three'].join(eol) + eol);
+		assert.equal(written, ['intro', '', '- [ ] one', '- [ ] two', '- [x] three'].join(eol) + eol);
 	});
 
 	test(`${name}: unticking is the same arithmetic`, async () => {
-		const doc = ['intro', '- [x] one', '- [x] two'].join(eol) + eol;
-		const written = await toggledContent(doc, 3, false);
-		assert.equal(written, ['intro', '- [x] one', '- [ ] two'].join(eol) + eol);
+		const doc = ['intro', '', '- [x] one', '- [x] two'].join(eol) + eol;
+		const written = await toggledContent(doc, 4, false);
+		assert.equal(written, ['intro', '', '- [x] one', '- [ ] two'].join(eol) + eol);
 	});
 
 	test(`${name}: only one line changes`, async () => {
 		// The failure mode this guards is a match that spans the previous line's
 		// terminator: the replacement then rewrites two lines at once.
 		const before = document(eol);
-		const written = await toggledContent(before, 3, true);
+		const written = await toggledContent(before, 4, true);
 		assert.ok(written);
 		const changed = written!
 			.split(eol)
@@ -140,13 +154,13 @@ for (const [name, eol] of [
 	test(`${name}: the shapes the write-back claims to support`, async () => {
 		// Ordered, parenthesised, quoted, nested and `*`/`+` bullets all go
 		// through the same pattern; the CRLF bug hit every one of them.
-		const doc = ['intro', '1. [ ] ordered', '2) [ ] paren', '> - [ ] quoted', '  * [ ] nested', '+ [ ] plus'].join(eol) + eol;
+		const doc = ['intro', '', '1. [ ] ordered', '2) [ ] paren', '> - [ ] quoted', '  * [ ] nested', '+ [ ] plus'].join(eol) + eol;
 		for (const [line, expected] of [
-			[2, '1. [x] ordered'],
-			[3, '2) [x] paren'],
-			[4, '> - [x] quoted'],
-			[5, '  * [x] nested'],
-			[6, '+ [x] plus'],
+			[3, '1. [x] ordered'],
+			[4, '2) [x] paren'],
+			[5, '> - [x] quoted'],
+			[6, '  * [x] nested'],
+			[7, '+ [x] plus'],
 		] as const) {
 			const written = await toggledContent(doc, line, true);
 			assert.ok(written, `line ${line} wrote`);
@@ -158,7 +172,37 @@ for (const [name, eol] of [
 test('a tab-indented task keeps its indentation', async () => {
 	// `[ \t]*` has to admit a tab, or a tab-indented task stops being found at
 	// all — the failure the narrowing could plausibly have introduced.
-	const doc = ['intro', '\t- [ ] tabbed'].join('\r\n') + '\r\n';
-	const written = await toggledContent(doc, 2, true);
-	assert.equal(written, ['intro', '\t- [x] tabbed'].join('\r\n') + '\r\n');
+	const doc = ['intro', '', '\t- [ ] tabbed'].join('\r\n') + '\r\n';
+	const written = await toggledContent(doc, 3, true);
+	assert.equal(written, ['intro', '', '\t- [x] tabbed'].join('\r\n') + '\r\n');
+});
+
+// The condition, isolated. A list that begins immediately after prose was
+// always correct on LF — which is why the first version of this file, whose
+// fixtures had no blank line, passed on LF and hid half the bug.
+for (const [name, eol] of [
+	['LF', '\n'],
+	['CRLF', '\r\n'],
+] as const) {
+	test(`${name}: a list with no blank line above it`, async () => {
+		const written = await toggledContent(documentWithoutBlankLine(eol), 3, true);
+		assert.equal(written, ['intro', '- [ ] one', '- [x] two'].join(eol) + eol);
+	});
+}
+
+test('LF: the first task after a blank line is the one that regressed', async () => {
+	// On LF only the first task of each block was wrong: `\s*` could eat the
+	// blank line's single `\n`, but not a task line above it. That is why
+	// samples/stress-test.md — 44 tasks, LF — had exactly six wrong, one per
+	// block. CRLF widened it to every task, because `^` also matches between
+	// a `\r` and its `\n`.
+	const doc = ['intro', '', '- [ ] one', '- [ ] two'].join('\n') + '\n';
+	const written = await toggledContent(doc, 3, true);
+	assert.equal(written, ['intro', '', '- [x] one', '- [ ] two'].join('\n') + '\n');
+});
+
+test('LF: two blank lines above the list', async () => {
+	const doc = ['intro', '', '', '- [ ] one'].join('\n') + '\n';
+	const written = await toggledContent(doc, 4, true);
+	assert.equal(written, ['intro', '', '', '- [x] one'].join('\n') + '\n');
 });
