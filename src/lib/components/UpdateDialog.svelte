@@ -343,6 +343,13 @@
 		word-break: break-word;
 		font-family: var(--win-font);
 		font-size: 13px;
+		/* styles.css puts `user-select: none` on the app root so the chrome does
+		   not behave like a web page, and only `.markdown-body` opts back in.
+		   That reaches this box too, which is not chrome: it is release text,
+		   and the release link inside it is the one thing here a user has to be
+		   able to take somewhere else (#532). */
+		user-select: text;
+		-webkit-user-select: text;
 		color: var(--color-fg-muted);
 	}
 
