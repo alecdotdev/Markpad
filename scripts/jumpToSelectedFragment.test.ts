@@ -379,6 +379,20 @@ test('the shift reads the buffer, not the rendered body', () => {
 	}
 });
 
+// The menu is opened BY right-clicking a selection, and two of its items act
+// on that selection (Copy, Edit). Anything that moves focus off the document
+// stops the selection being painted, so the highlight disappears under the
+// menu that exists to act on it.
+
+test('the context menu does not take focus away from the selection', () => {
+	const menuSource = readSource('src/lib/components/ContextMenu.svelte');
+	assert.doesNotMatch(menuSource, /\.focus\(\)/, 'focusing the menu unpaints the selection');
+
+	// Escape still closes it — from the window, since the menu never has focus.
+	assert.match(menuSource, /window\.addEventListener\('keydown'/);
+	assert.match(menuSource, /e\.key === 'Escape'/);
+});
+
 test('the selection is read before anything switches mode', () => {
 	// `toggleEdit` and `editSourceRange` both flip `isEditing`, and a selection
 	// read after that would answer for the editor rather than for the preview
