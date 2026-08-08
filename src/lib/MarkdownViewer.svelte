@@ -24,7 +24,7 @@
 	import { hasRealFilePath } from './utils/tabFileActions.js';
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
-import { sanitizeMarkdownHtml } from './utils/sanitize.js';
+import { MARKDOWN_LINK_EXTENSIONS, sanitizeMarkdownHtml } from './utils/sanitize.js';
 import {
 	renderDiagramsForPrint,
 	resolveMermaidTheme,
@@ -1976,7 +1976,11 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		const selected = await open({
 			multiple: true,
 			filters: [
-				{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] },
+				// The one list every other part of the app already treats as a
+				// Markpad document — including `.txt`, which loads, renders and
+				// saves like any other note (#535). Hardcoding a shorter list here
+				// only hid those files behind "All Files".
+				{ name: 'Markdown', extensions: MARKDOWN_LINK_EXTENSIONS },
 				{ name: 'All Files', extensions: ['*'] },
 			],
 		});
