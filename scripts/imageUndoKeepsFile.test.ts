@@ -76,6 +76,7 @@ g.window.__TAURI_INTERNALS__ = {
 };
 
 const { tabManager } = await import('../src/lib/stores/tabs.svelte.js');
+const { lineEndingLabel } = await import('../src/lib/utils/tabModels.js');
 
 // ------------------------------------------------- the component, as written
 
@@ -142,6 +143,10 @@ function createDocument(initial: string) {
 			getValueInRange: (range: FakeRange) => buffer.slice(range.startColumn - 1, range.endColumn - 1),
 			getLineContent: () => buffer,
 			getLanguageId: () => 'markdown',
+			// Read by the status-bar refresh below; line endings are not this
+			// file's subject and are tested against real Monaco buffers in
+			// editorLineEnding.test.ts.
+			getEOL: () => '\n',
 		}),
 		getPosition: () => ({ lineNumber: 1, column: buffer.length + 1 }),
 		getSelection: () => null,
@@ -228,10 +233,11 @@ type Component = {
  * the statements that run are the component's own.
  */
 const factorySource = ts.transpileModule(
-	`const __component = (invoke, settings, tabManager, monaco, editor) => {
+	`const __component = (invoke, settings, tabManager, monaco, editor, lineEndingLabel) => {
 		let value = '';
 		let wordCount = 0;
 		let currentLanguage = 'markdown';
+		let lineEnding = 'LF';
 
 		// The status-bar refresh the content-change listener calls. Lifted from
 		// the component rather than stubbed, so the listener under test runs
@@ -288,6 +294,7 @@ function createComponent(backend: Backend, editor: unknown): Component {
 		tabManager: unknown,
 		monaco: unknown,
 		editor: unknown,
+		lineEndingLabel: unknown,
 	) => Component;
 
 	return factory(
@@ -296,6 +303,7 @@ function createComponent(backend: Backend, editor: unknown): Component {
 		tabManager,
 		monacoStub,
 		editor,
+		lineEndingLabel,
 	);
 }
 
