@@ -381,14 +381,51 @@
 			// not. Latin technical terms inside CJK prose are the normal case,
 			// and `**粗体**，` triggers it with no Latin word at all.
 			//
-			// invisibleCharacters stays at its default: a stray zero-width space
-			// or NBSP is a real hazard in Markdown (an NBSP after `-` stops a
-			// list from parsing) and it never fires on something typed on
-			// purpose. nonBasicASCII needs no setting — it defaults to
+			// invisibleCharacters stays on, but not for the reason first written
+			// here. That comment claimed it "never fires on something typed on
+			// purpose"; measured against this Monaco build, U+3000 IDEOGRAPHIC
+			// SPACE — the space bar under every CJK IME — is in the invisible
+			// set and gets outlined, which is the same complaint as #186/#94 one
+			// option over. The set is the flattened union of every locale bucket
+			// (`strings.js` getData()), 465 code points, so `allowedLocales`
+			// cannot exclude it; only `allowedCharacters` can.
+			//
+			// The rest stays on because the NBSP hazard is real: an NBSP after
+			// `-` stops a list from parsing. Worth recording that the other
+			// stated hazard does NOT hold — a zero-width space inside CJK text
+			// is not flagged at all, because shouldHighlightNonBasicASCII()
+			// suppresses it when the surrounding word has no basic ASCII.
+			//
+			// nonBasicASCII needs no setting — it defaults to
 			// `inUntrustedWorkspace` and standalone Monaco's workspace-trust
 			// service returns true unconditionally, so it is already off; were it
 			// on, every ideograph would be boxed rather than the punctuation.
-			unicodeHighlight: { ambiguousCharacters: false },
+			unicodeHighlight: {
+				ambiguousCharacters: false,
+				allowedCharacters: { "　": true },
+			},
+			// Word-wise navigation — ⌥←/→, double-click-to-select, ⌥⌫ — splits on
+			// `wordSeparators`, and a language that does not put spaces between
+			// its words has none. So a whole Chinese clause counts as one word:
+			// ⌥→ jumps the sentence, double-click selects it, ⌥⌫ deletes it.
+			//
+			// A non-empty list switches on `Intl.Segmenter` (see
+			// `wordCharacterClassifier.js`), which knows where the words are.
+			//
+			// It is closer to a switch than to a whitelist, and the naming hides
+			// that: ICU dispatches its dictionary breaking by SCRIPT, not by this
+			// list. Thai, Khmer, Lao, Burmese and Tibetan get segmented too and
+			// none of them are named here, while `['zh']`, `['ja']` and
+			// `['zh','ja']` all produce identical output — even on Han text,
+			// where the two dictionaries might have been expected to disagree.
+			// Written as the two the app has locales for, rather than a longer
+			// list that would read as a claim about coverage it does not make.
+			//
+			// Nothing is taken from space-delimited languages: Korean,
+			// Vietnamese, Russian and English segment word-for-word identically
+			// to splitting on whitespace. An unsupported tag is dropped by
+			// Monaco's own `validate()`, so this cannot fail closed.
+			wordSegmenterLocales: ['zh', 'ja'],
 			// The same argument one option over. U+2028 (LINE SEPARATOR) and
 			// U+2029 (PARAGRAPH SEPARATOR) break a JavaScript string literal,
 			// which is what Monaco's guard is for; in Markdown they are just
