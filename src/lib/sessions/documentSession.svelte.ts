@@ -429,6 +429,17 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 
 			const fullLoadRevision = (loadRevisionByTab.get(activeId) ?? 0) + 1;
 			loadRevisionByTab.set(activeId, fullLoadRevision);
+			// #547: every read below is an await, and this load may be overtaken
+			// while one is in flight — the startup path is delivered on two
+			// channels that nothing dedupes (`RunEvent::Opened` both stashes the
+			// path for `send_markdown_path` and emits `file-path`; argv is read by
+			// both as well), so two loads can run on one tab. The full-load stage
+			// already refuses to apply a stale result; the first stage did not, and
+			// an older preview landing last overwrote the winner's complete buffer
+			// with its 50KB slice, re-raising `isTruncated` — after which every save
+			// is refused and nothing retries. Same revision test, applied to every
+			// write a load makes.
+			const isCurrentLoad = () => loadRevisionByTab.get(activeId) === fullLoadRevision;
 			const isMarkdown = hasMarkdownLinkExtension(filePath);
 			const tab = tabManager.tabs.find((item) => item.id === activeId);
 
@@ -470,6 +481,10 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				} else {
 					[, content, isFull, lossy, encoding] = (await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 })) as [string, string, boolean, boolean, string];
 				}
+				// Ahead of the encoding verdict, not just the buffer: a prefix's
+				// detected encoding can differ from the whole file's, and
+				// `tab.encoding` is what the save writes with.
+				if (!isCurrentLoad()) return;
 				// Decided on every load, before the buffer can reach a writer.
 				// Both branches report both, so this also CLEARS the flag on a
 				// file the user has since converted to UTF-8 — and repoints the
@@ -479,6 +494,7 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				lossySaveWarnedTabs.delete(activeId);
 				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath, pathKey);
 				const processed = await options.renderMarkdown(content, filePath, foldsForTab(activeId));
+				if (!isCurrentLoad()) return;
 				tabManager.updateTabContent(activeId, processed);
 				// `isFull === false` means this is only the leading slice of a
 				// large file. Marking the tab keeps anything downstream from
@@ -532,6 +548,10 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				}
 			} else {
 				const [content, lossy, encoding] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean, string];
+				// Same race, same guard: this branch reads the whole file, so it
+				// cannot strand a slice, but a stale one still overwrites the
+				// winner's buffer and encoding and flips the tab into the editor.
+				if (!isCurrentLoad()) return;
 				tabManager.setTabDecodedLossy(activeId, lossy);
 				tabManager.setTabEncoding(activeId, encoding);
 				lossySaveWarnedTabs.delete(activeId);
