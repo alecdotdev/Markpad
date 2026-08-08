@@ -129,3 +129,30 @@ export function retainTabModels(liveTabIds: Iterable<string>): void {
 export function trackedTabModelIds(): string[] {
 	return [...models.keys()];
 }
+
+/**
+ * What the status bar calls this document's line ending.
+ *
+ * The model's own EOL, not a detector run over the text, because the model IS
+ * the document once it is open and Monaco has already decided this: the buffer
+ * builder counts the endings in the source and rewrites the WHOLE buffer to the
+ * majority one (ties go to LF) before the model exists — verified against the
+ * bundled Monaco 0.55.1 in `editorLineEnding.test.ts`. So a mixed-ending file is
+ * no longer mixed by the time anything can be shown about it, `getEOL()` is
+ * both what the buffer contains and what a save writes out, and asking a second
+ * question of `getValue()` could only ever produce a different answer by being
+ * wrong.
+ *
+ * That also settles `detectLineEnding` in `utils/frontMatter.ts`, which is
+ * first-CRLF-wins: it is not a rival to this and must not be lifted into one.
+ * It answers "which ending do I emit when rewriting this string's front matter
+ * block" about a string it is handed — normalized content, where any `\r\n`
+ * means every ending is `\r\n`, so the two agree wherever both can see the same
+ * document.
+ *
+ * Typed on the one method it calls rather than on `ITextModel` so the test can
+ * drive it with a real Monaco text buffer, which has an EOL but is not a model.
+ */
+export function lineEndingLabel(model: Pick<TextModel, 'getEOL'>): 'LF' | 'CRLF' {
+	return model.getEOL() === '\r\n' ? 'CRLF' : 'LF';
+}

@@ -68,7 +68,9 @@ g.window.__TAURI_INTERNALS__ = {
 };
 
 const { tabManager } = await import('../src/lib/stores/tabs.svelte.js');
-const { getTabModel, tabModelUri, trackedTabModelIds } = await import('../src/lib/utils/tabModels.js');
+const { getTabModel, lineEndingLabel, tabModelUri, trackedTabModelIds } = await import(
+	'../src/lib/utils/tabModels.js'
+);
 const { buildTransferredTab } = await import('../src/lib/utils/tabTransfer.js');
 
 // ------------------------------------------------- the component, as written
@@ -165,6 +167,16 @@ class FakeModel {
 
 	getLanguageId() {
 		return this.language;
+	}
+
+	/**
+	 * Fixed, because nothing here is about line endings: the status-bar label
+	 * that reads this is driven against real Monaco buffers in
+	 * `editorLineEnding.test.ts`, and a fake that guessed an EOL from its
+	 * buffer would be a second implementation of exactly what that fix removed.
+	 */
+	getEOL() {
+		return '\n';
 	}
 
 	setLanguage(language: string) {
@@ -322,12 +334,13 @@ type Component = {
  * Types are erased, nothing else: the statements that run are the component's.
  */
 const factorySource = ts.transpileModule(
-	`const __component = (tabManager, monaco, editor, getTabModel, tabModelUri) => {
+	`const __component = (tabManager, monaco, editor, getTabModel, tabModelUri, lineEndingLabel) => {
 		let value = '';
 		let currentTabId = null;
 		let language = 'markdown';
 		let currentLanguage = 'markdown';
 		let wordCount = 0;
+		let lineEnding = 'LF';
 		const editorReady = true;
 
 		${lifted('syncStatusFromModel', 'function syncStatusFromModel() {}')}
@@ -359,9 +372,10 @@ function createComponent(editor: Editor): Component {
 		editor: unknown,
 		getTabModel: unknown,
 		tabModelUri: unknown,
+		lineEndingLabel: unknown,
 	) => Component;
 
-	return factory(tabManager, monacoStub, editor, getTabModel, tabModelUri);
+	return factory(tabManager, monacoStub, editor, getTabModel, tabModelUri, lineEndingLabel);
 }
 
 type Harness = {

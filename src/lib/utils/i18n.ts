@@ -334,7 +334,6 @@ export const translations: Record<LanguageCode, Translation> = {
                 selected: '{{count}} selected',
                 selections: '{{count}} selections',
                 words: '{{count}} words',
-                crlf: 'CRLF',
                 utf8: 'UTF-8'
             }
         },
@@ -662,7 +661,6 @@ export const translations: Record<LanguageCode, Translation> = {
                 selected: '已选择 {{count}}',
                 selections: '{{count}} 个选择',
                 words: '{{count}} 字',
-                crlf: 'CRLF',
                 utf8: 'UTF-8'
             }
         },
@@ -911,7 +909,6 @@ export const translations: Record<LanguageCode, Translation> = {
                 selected: '{{count}} 選択',
                 selections: '{{count}} つの選択',
                 words: '{{count}} 語',
-                crlf: 'CRLF',
                 utf8: 'UTF-8'
             }
         },
@@ -1240,7 +1237,6 @@ export const translations: Record<LanguageCode, Translation> = {
                 selected: '已選取 {{count}} 個字元',
                 selections: '已選取 {{count}} 處',
                 words: '{{count}} 個字詞',
-                crlf: 'CRLF',
                 utf8: 'UTF-8'
             }
         },
@@ -1548,7 +1544,6 @@ export const translations: Record<LanguageCode, Translation> = {
                 selected: '{{count}}개 선택됨',
                 selections: '{{count}}개 선택 영역',
                 words: '{{count}}개 단어',
-                crlf: 'CRLF',
                 utf8: 'UTF-8',
                 lines: '{{count}}개 줄'
             }

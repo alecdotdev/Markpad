@@ -1,5 +1,4 @@
-// Types for the two Monaco internals `editorOptionWiring.test.ts` drives
-// directly.
+// Types for the Monaco internals this test suite drives directly.
 //
 // Monaco ships declarations for its public API surface (`monaco-editor`) only.
 // The option registry and the Unicode highlighter are plain ESM modules that
@@ -144,6 +143,32 @@ declare module 'monaco-editor/esm/vs/editor/common/standalone/standaloneEnums.js
 	 * which every assertion in that file fails on.
 	 */
 	export const KeyCode: Record<string, number>;
+
+	/** `create()`'s fallback ending, used only for text with no line break at all. */
+	export const DefaultEndOfLine: { readonly LF: 1; readonly CRLF: 2 };
+}
+
+// The text buffer itself, for `editorLineEnding.test.ts`. A `TextModel` needs a
+// browser to build; the buffer under it does not, and it is where the EOL of a
+// document is decided — `createTextBufferFactory` is these three calls.
+declare module 'monaco-editor/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBufferBuilder.js' {
+	/** Only the two members the test reads; this is not the whole buffer API. */
+	export interface TextBuffer {
+		getEOL(): '\n' | '\r\n';
+		/** Chunks of the buffer's own text, `null` at the end. */
+		createSnapshot(preserveBOM: boolean): { read(): string | null };
+	}
+
+	export class PieceTreeTextBufferBuilder {
+		acceptChunk(chunk: string): void;
+		/**
+		 * `normalizeEOL` defaults to true here and is left at its default by
+		 * `createTextBufferFactory`, i.e. by every model Markpad creates.
+		 */
+		finish(normalizeEOL?: boolean): {
+			create(defaultEOL: 1 | 2): { textBuffer: TextBuffer };
+		};
+	}
 }
 
 declare module 'monaco-editor/esm/vs/base/common/keyCodes.js' {

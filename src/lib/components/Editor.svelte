@@ -5,7 +5,7 @@
 	import { t, type LanguageCode } from '../utils/i18n.js';
 	import { MARKDOWN_LANGUAGE_ID, shouldLinkifyPastedUrl } from '../utils/pasteContext.js';
 	import { toggleLineMarker, type LineMarkerToolId } from '../utils/editorToolbar.js';
-	import { getTabModel, tabModelUri } from '../utils/tabModels.js';
+	import { getTabModel, lineEndingLabel, tabModelUri } from '../utils/tabModels.js';
 	import { installVimScrollCommands } from '../utils/vimScrollCommands.js';
 	import {
 		headingLinkContext,
@@ -95,6 +95,7 @@
 	let cursorCount = $state(0);
 	let wordCount = $state(0);
 	let currentLanguage = $state("markdown");
+	let lineEnding = $state<"LF" | "CRLF">("LF");
 	let currentTabId = tabManager.activeTabId;
 
 	// A Monaco action captures its label when it is registered, so actions built
@@ -169,7 +170,7 @@
 
 	/**
 	 * The status-bar readings that are properties of the DOCUMENT rather than of
-	 * an edit: the language and the word count.
+	 * an edit: the language, the word count and the line ending.
 	 *
 	 * They used to be refreshed only by `onDidChangeModelContent`, which was
 	 * enough while a tab switch went through `setValue` — that fires a content
@@ -181,6 +182,7 @@
 		const model = editor.getModel();
 		if (!model) return;
 		currentLanguage = model.getLanguageId();
+		lineEnding = lineEndingLabel(model);
 		const text = model.getValue();
 		wordCount = (text.match(/\S+/g) || []).filter((w) => /\w/.test(w)).length;
 	}
@@ -1824,7 +1826,15 @@
 		<div class="status-item">
 			{currentLanguage}
 		</div>
-		<div class="status-item">{t('editor.status.crlf')}</div>
+		<!-- Not translated, like the language id and the zoom level above it:
+		     "LF" and "CRLF" are acronyms, and the `crlf` key they replace held
+		     the same ASCII in all five locales that bothered to define it. -->
+		<div class="status-item">{lineEnding}</div>
+		<!-- Still hardcoded, and still the only thing here that is: the document's
+		     real encoding is detected in `fix/non-utf8-documents` (#372), which
+		     puts it on `Tab.encoding`. Wire this to that field when it lands —
+		     duplicating the detection to make the label true sooner would leave
+		     two answers to one question. -->
 		<div class="status-item">{t('editor.status.utf8')}</div>
 	</div>
 {/if}
