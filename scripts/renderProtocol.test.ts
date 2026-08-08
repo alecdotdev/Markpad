@@ -9,11 +9,12 @@
  * statement must not turn these red, and changing what the preview actually
  * produces must.
  *
- * The four protocols covered are the ones that have already regressed:
+ * The five protocols covered are the ones that have already regressed:
  *   1. task-list markers and source positions (checkbox click → source line)
  *   2. `$$…$$` underscore protection (issue #174)
  *   3. heading ids and fold anchors (#371)
  *   4. raw HTML checkboxes are not markdown tasks (#319)
+ *   5. media substitutions keep the source range of the markup they replaced
  */
 
 import assert from 'node:assert/strict';
@@ -536,4 +537,62 @@ test('a checkbox outside a list item is left alone by the task pass', () => {
 	assert.equal(checkbox.closest('li'), null);
 	assert.equal(checkbox.hasAttribute('data-task-checkbox'), false);
 	assert.equal(checkbox.closest('p')?.textContent.trim(), 'A paragraph with  inline.');
+});
+
+// --- protocol 5: media substitutions keep their source range -------------
+
+/**
+ * `processMarkdownHtml` does not restyle a media `<img>`, it *replaces* it: an
+ * `.mp4`/`.mp3` src becomes a freshly created `<video>`/`<audio>`, a YouTube
+ * src becomes a thumbnail `<a>`. A fresh element starts with no attributes, so
+ * unless the source range is carried across, the tallest thing in the preview
+ * is the one element that maps to no source line — the same defect
+ * `carrySourcepos` was written for on Mermaid diagrams. Both halves of scroll
+ * sync then attribute the player's pixels to whichever neighbouring block is
+ * nearest, and the panes disagree by its height for as long as it is on
+ * screen; "edit what I right-clicked" degrades to the enclosing paragraph.
+ */
+/**
+ * A local media src is rewritten through Tauri's asset protocol, which lives
+ * on `window`. Without it the rewrite throws into `processMarkdownHtml`'s own
+ * catch and these fixtures would exercise the fallback path instead of the
+ * one the preview takes. Set after the imports above so DOMPurify's module
+ * init still sees no window.
+ */
+(globalThis as unknown as Record<string, unknown>).window = {
+	__TAURI_INTERNALS__: { convertFileSrc: (path: string) => `asset://localhost/${path}` },
+};
+
+const MEDIA_FIXTURES = [
+	{ name: 'videoImage', selector: 'video' },
+	{ name: 'audioImage', selector: 'audio' },
+	{ name: 'youtubeImage', selector: 'a.youtube-link' },
+	{ name: 'youtubeLink', selector: 'a.youtube-link' },
+] as const satisfies readonly { name: FixtureName; selector: string }[];
+
+/** The range comrak put on the element the substitution consumed. */
+function rendererSourcepos(name: FixtureName): string {
+	const source = parseHtml(renderFixtures[name].html).body.querySelector('img, p a');
+	return source?.getAttribute('data-sourcepos') ?? '';
+}
+
+test('a media element inherits the source range of the markup it replaced', () => {
+	for (const { name, selector } of MEDIA_FIXTURES) {
+		const [media] = render(name).querySelectorAll(selector);
+		assert.ok(media, `${name}: no ${selector} was produced`);
+
+		const expected = rendererSourcepos(name);
+		assert.match(expected, /^\d+:\d+-\d+:\d+$/, `${name}: fixture lost its source range`);
+		assert.equal(
+			media.getAttribute('data-sourcepos'),
+			expected,
+			`${name}: the replacement maps to no source line, so scroll sync has to guess`,
+		);
+	}
+});
+
+test('a replaced video reports the line it was written on, not the first one', () => {
+	const [video] = render('videoImageSurrounded').querySelectorAll('video');
+
+	assert.equal(video.getAttribute('data-sourcepos'), '3:1-3:17');
 });
