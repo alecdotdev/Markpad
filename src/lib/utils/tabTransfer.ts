@@ -39,6 +39,13 @@ export interface TransferableTab {
 	 * looks safe to save. See `Tab.hasReplacementChars`.
 	 */
 	hasReplacementChars: boolean;
+	/**
+	 * Travels for the same reason and with the same consequence: the buffer is
+	 * a decode of a file in this encoding, and a destination window that
+	 * defaulted to UTF-8 would rewrite the user's GBK document the first time
+	 * it auto-saved after the move.
+	 */
+	encoding: string;
 	splitRatio: number;
 	scrollTop: number;
 	scrollPercentage: number;
@@ -47,7 +54,7 @@ export interface TransferableTab {
 	history: string[];
 }
 
-const STRING_FIELDS = ['path', 'title', 'rawContent', 'originalContent'] as const;
+const STRING_FIELDS = ['path', 'title', 'rawContent', 'originalContent', 'encoding'] as const;
 const BOOLEAN_FIELDS = [
 	'isDirty',
 	'isEditing',
@@ -75,6 +82,7 @@ export function snapshotTab(tab: Tab): TransferableTab {
 		isSplit: tab.isSplit,
 		isScrollSynced: tab.isScrollSynced,
 		hasReplacementChars: tab.hasReplacementChars,
+		encoding: tab.encoding,
 		splitRatio: tab.splitRatio,
 		scrollTop: tab.scrollTop,
 		scrollPercentage: tab.scrollPercentage,
@@ -128,6 +136,7 @@ export function validateTransferPayload(json: string): TransferableTab | null {
 		isSplit: obj.isSplit as boolean,
 		isScrollSynced: obj.isScrollSynced as boolean,
 		hasReplacementChars: obj.hasReplacementChars as boolean,
+		encoding: obj.encoding as string,
 		splitRatio: obj.splitRatio as number,
 		scrollTop: obj.scrollTop as number,
 		scrollPercentage: obj.scrollPercentage as number,
@@ -188,5 +197,6 @@ export function buildTransferredTab(
 		isScrollSynced: snap.isScrollSynced,
 		collapsedHeaders: new Set<string>(),
 		hasReplacementChars: snap.hasReplacementChars,
+		encoding: snap.encoding,
 	};
 }

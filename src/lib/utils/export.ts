@@ -449,7 +449,7 @@ export async function exportAsHtml(ctx: ExportContext): Promise<ExportHtmlResult
 	});
 
 	try {
-		await invoke('save_file_content', { path: selected, content: fullHtml });
+		await invoke('save_file_content', { path: selected, content: fullHtml, encoding: 'UTF-8' });
 		return {
 			path: selected,
 			embeddedImages: article.embeddedImages,

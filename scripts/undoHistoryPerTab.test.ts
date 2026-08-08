@@ -745,6 +745,7 @@ test('a tab moved to another window has its model disposed on the way out', () =
 			scrollPercentage: 0,
 			anchorLine: 0,
 			hasReplacementChars: false,
+			encoding: 'UTF-8',
 			history: ['/docs/a.md'],
 			historyIndex: 0,
 		},

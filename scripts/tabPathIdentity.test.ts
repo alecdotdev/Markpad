@@ -172,6 +172,7 @@ test('a tab arriving from another window does not duplicate a file open here', (
 		splitRatio: 0.5,
 		isScrollSynced: false,
 		hasReplacementChars: false,
+		encoding: 'UTF-8',
 		history: ['/notes/shared.md'],
 		historyIndex: 0,
 	});

@@ -284,41 +284,156 @@ pub(crate) fn canonical_identity(path: &Path) -> std::io::Result<PathBuf> {
     }
 }
 
-/// Text decoded from a file, together with the fidelity of that decode.
+/// The encoding label of a plain UTF-8 file — the default for a new buffer
+/// and for everything Markpad generates itself (HTML and SVG exports).
+const UTF8_LABEL: &str = "UTF-8";
+/// UTF-8 with a leading byte order mark. Not a WHATWG label, because WHATWG
+/// has no name for it: `encoding_rs` reports both as "UTF-8" and the BOM is
+/// carried out of band. Windows editors write it constantly and a save that
+/// dropped it would change the file for every other tool that reads it.
+const UTF8_BOM_LABEL: &str = "UTF-8-BOM";
+const UTF16LE_LABEL: &str = "UTF-16LE";
+const UTF16BE_LABEL: &str = "UTF-16BE";
+
+/// Text decoded from a file, together with the fidelity of that decode and
+/// the encoding it has to be written back as.
 struct DecodedText {
     content: String,
-    /// `true` when the bytes were not valid UTF-8 and every offending byte was
-    /// replaced with U+FFFD. `content` is then a destructive rendering of the
+    /// `true` when the decoder could not represent some of the bytes and put
+    /// U+FFFD in their place. `content` is then a destructive rendering of the
     /// file: the original bytes cannot be recovered from it, so writing it
     /// back over the source file destroys the document permanently. This is
     /// known exactly once — at the moment of decoding — so it travels to the
     /// frontend with the text it describes, and the frontend refuses that
     /// write (see `documentSession.saveContent`).
+    ///
+    /// Detection made this rare rather than routine: a GBK document used to
+    /// set it on every byte above ASCII, and now sets it only when nothing
+    /// decodes the file cleanly — a truncated multi-byte tail, or bytes that
+    /// are not text at all.
     lossy: bool,
+    /// What `encode_text` needs to turn the buffer back into the bytes it came
+    /// from: a WHATWG label (`GBK`, `Big5`, `Shift_JIS`, `windows-1252`, …) or
+    /// one of the four constants above. Travels to the frontend, is kept on
+    /// the tab, and comes back with the save.
+    ///
+    /// Always `UTF-8` when `lossy`, so the rescue copy a user writes with Save
+    /// As is Unicode rather than a re-encoding of replacement characters.
+    encoding: String,
 }
 
-/// Decode `bytes` as UTF-8, substituting U+FFFD for invalid sequences rather
-/// than rejecting the whole file. `read_to_string` refuses a document on its
-/// first invalid byte, which made a legacy-encoded (GBK/Big5/Shift-JIS) file
-/// openable or not purely by size: the truncated-preview path has always
-/// decoded leniently, so the same file failed at 50 KB and succeeded at
-/// 51 KB. Every read path now uses one decoder — and every read path reports
-/// whether that decoder had to destroy anything.
-fn decode_utf8_lossy(bytes: Vec<u8>) -> DecodedText {
-    match String::from_utf8(bytes) {
-        Ok(content) => DecodedText {
-            content,
+/// Decode a document, detecting its encoding the way a browser does.
+///
+/// Three steps, in the order of how much they can be trusted:
+///
+/// 1. **A byte order mark decides on its own.** UTF-8, UTF-16LE and UTF-16BE
+///    BOMs are unambiguous, and Windows-authored Markdown is full of them.
+/// 2. **Valid UTF-8 is UTF-8.** No heuristic gets a say over the encoding
+///    every modern file is actually in, and this keeps the common path free.
+/// 3. **Otherwise guess**, with `chardetng` — the detector Firefox ships for
+///    exactly this question — and decode with what it says. UTF-8 is denied
+///    because step 2 has already ruled it out; ISO-2022-JP is allowed, which
+///    a browser must not do (it can smuggle script through an escape
+///    sequence) and a text editor has no reason not to.
+///
+/// Before this, every read decoded as UTF-8 and substituted U+FFFD, so a
+/// legacy-encoded (GBK/Big5/Shift-JIS/CP-1252) document opened as mojibake
+/// that could not be saved. The detection is a heuristic and can be wrong;
+/// what protects the file is not the guess but `lossy` plus writing back
+/// through the same encoding, so bytes the guess reproduces exactly are
+/// unchanged and bytes it cannot are never written at all.
+fn decode_text(bytes: &[u8]) -> DecodedText {
+    let decoded = |encoding: &'static encoding_rs::Encoding, label: &str, body: &[u8]| {
+        let (content, had_errors) = encoding.decode_without_bom_handling(body);
+        DecodedText {
+            content: content.into_owned(),
+            lossy: had_errors,
+            encoding: if had_errors { UTF8_LABEL } else { label }.to_owned(),
+        }
+    };
+
+    if let Some((encoding, bom_len)) = encoding_rs::Encoding::for_bom(bytes) {
+        let label = if encoding == encoding_rs::UTF_8 {
+            UTF8_BOM_LABEL
+        } else {
+            encoding.name()
+        };
+        return decoded(encoding, label, &bytes[bom_len..]);
+    }
+
+    if let Ok(content) = std::str::from_utf8(bytes) {
+        return DecodedText {
+            content: content.to_owned(),
             lossy: false,
-        },
-        Err(error) => DecodedText {
-            content: String::from_utf8_lossy(error.as_bytes()).into_owned(),
-            lossy: true,
-        },
+            encoding: UTF8_LABEL.to_owned(),
+        };
+    }
+
+    let mut detector = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Allow);
+    detector.feed(bytes, true);
+    let encoding = detector.guess(None, chardetng::Utf8Detection::Deny);
+    decoded(encoding, encoding.name(), bytes)
+}
+
+/// Turn a buffer back into bytes in `label`'s encoding, or refuse.
+///
+/// The refusals are the point. A legacy encoding covers a fraction of Unicode,
+/// so an emoji pasted into a Shift-JIS document has no representation in it —
+/// and `encoding_rs::Encoding::encode` would quietly write `&#128512;`, a
+/// numeric character reference that is only meaningful in HTML. Reporting the
+/// failure leaves the buffer dirty and puts the reason in a toast, which is
+/// how the read-only case behaves (#373); writing a corrupted approximation is
+/// the same data loss this whole change exists to remove, arriving from the
+/// other direction.
+///
+/// UTF-16 is encoded here rather than by `encoding_rs`, whose UTF-16 encoders
+/// are defined by WHATWG to emit UTF-8 — correct for the web, and a silent
+/// change of the file's encoding for an editor. Every other label is checked
+/// against `output_encoding` for the same substitution.
+fn encode_text(content: &str, label: &str) -> Result<Vec<u8>, String> {
+    let utf16 = |big_endian: bool| {
+        let mut bytes = if big_endian {
+            vec![0xFE, 0xFF]
+        } else {
+            vec![0xFF, 0xFE]
+        };
+        for unit in content.encode_utf16() {
+            let pair = if big_endian {
+                unit.to_be_bytes()
+            } else {
+                unit.to_le_bytes()
+            };
+            bytes.extend_from_slice(&pair);
+        }
+        Ok(bytes)
+    };
+
+    match label {
+        UTF8_LABEL => Ok(content.as_bytes().to_vec()),
+        UTF8_BOM_LABEL => {
+            let mut bytes = vec![0xEF, 0xBB, 0xBF];
+            bytes.extend_from_slice(content.as_bytes());
+            Ok(bytes)
+        }
+        UTF16LE_LABEL => utf16(false),
+        UTF16BE_LABEL => utf16(true),
+        _ => {
+            let encoding = encoding_rs::Encoding::for_label(label.as_bytes())
+                .filter(|encoding| encoding.output_encoding() == *encoding)
+                .ok_or_else(|| format!("Unknown text encoding: {label}"))?;
+            let (bytes, _, unmappable) = encoding.encode(content);
+            if unmappable {
+                return Err(format!(
+                    "This document is {label}, which cannot represent every character it now contains. Use \"Save As\" to write it as UTF-8."
+                ));
+            }
+            Ok(bytes.into_owned())
+        }
     }
 }
 
 fn read_to_string_lossy(path: &str) -> std::io::Result<DecodedText> {
-    Ok(decode_utf8_lossy(fs::read(path)?))
+    Ok(decode_text(&fs::read(path)?))
 }
 
 /// Length of `bytes` with an incomplete trailing UTF-8 sequence removed.
@@ -1698,21 +1813,12 @@ fn annotate_task_checkboxes(html: String, markdown: &str) -> String {
         .into_owned()
 }
 
-#[tauri::command]
-async fn open_markdown(path: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-        Ok(convert_markdown(&content))
-    })
-    .await
-    .unwrap_or_else(|e| Err(e.to_string()))
-}
-
 struct MarkdownPreview {
     html: String,
     content: String,
     is_full: bool,
     lossy: bool,
+    encoding: String,
 }
 
 /// The body of `open_markdown_preview`, kept synchronous and path-taking so
@@ -1731,6 +1837,7 @@ fn build_markdown_preview(path: &Path, max_bytes: usize) -> Result<MarkdownPrevi
             content: decoded.content,
             is_full: true,
             lossy: decoded.lossy,
+            encoding: decoded.encoding,
         });
     }
 
@@ -1750,7 +1857,13 @@ fn build_markdown_preview(path: &Path, max_bytes: usize) -> Result<MarkdownPrevi
     // fell inside one of its characters.
     vec_buf.truncate(utf8_truncation_boundary(&vec_buf));
 
-    let preview = decode_utf8_lossy(vec_buf);
+    // Detection runs on the prefix, so it can differ from what the whole file
+    // would say — and a legacy multi-byte character cut in half here is a
+    // `lossy` preview of a document that is perfectly decodable. Neither
+    // matters for the file's safety: a truncated buffer is refused by
+    // `saveContent` outright, and the full read that precedes any edit
+    // (`ensureFullContent`) replaces both answers with the whole file's.
+    let preview = decode_text(&vec_buf);
 
     let html = convert_markdown(&preview.content);
     Ok(MarkdownPreview {
@@ -1758,17 +1871,18 @@ fn build_markdown_preview(path: &Path, max_bytes: usize) -> Result<MarkdownPrevi
         content: preview.content,
         is_full: false,
         lossy: preview.lossy,
+        encoding: preview.encoding,
     })
 }
 
-/// Returns `(html, content, is_full, lossy)`. See `DecodedText::lossy`: the
-/// frontend uses it to refuse writing the buffer back over a file it could
-/// not decode faithfully.
+/// Returns `(html, content, is_full, lossy, encoding)`. See `DecodedText`: the
+/// frontend refuses to write a `lossy` buffer back over its file, and saves a
+/// faithful one as the `encoding` it came in.
 #[tauri::command]
 async fn open_markdown_preview(
     path: String,
     max_bytes: usize,
-) -> Result<(String, String, bool, bool), String> {
+) -> Result<(String, String, bool, bool, String), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let preview = build_markdown_preview(Path::new(&path), max_bytes)?;
         Ok((
@@ -1776,6 +1890,7 @@ async fn open_markdown_preview(
             preview.content,
             preview.is_full,
             preview.lossy,
+            preview.encoding,
         ))
     })
     .await
@@ -1929,10 +2044,11 @@ async fn render_markdown(content: String) -> Result<String, String> {
     .unwrap_or_else(|e| Err(e.to_string()))
 }
 
-/// Reads a file, with the fidelity of the decode: returns `(content, lossy)`.
-/// Since every read path decodes leniently, a caller that puts the text into
-/// an EDITABLE buffer must carry `lossy` onto the tab — otherwise the first
-/// auto-save writes U+FFFD over a file that was merely in another encoding.
+/// Reads a file, with the fidelity of the decode and the encoding it was
+/// decoded from: returns `(content, lossy, encoding)`. A caller that puts the
+/// text into an EDITABLE buffer must carry BOTH onto the tab — `lossy` so the
+/// first auto-save does not write U+FFFD over a file that could not be read,
+/// and `encoding` so it does not write UTF-8 over one that could.
 ///
 /// This is now the only read-to-string command. Its sibling
 /// `read_file_content` returned the text and dropped the verdict; it survived
@@ -1949,10 +2065,10 @@ async fn render_markdown(content: String) -> Result<String, String> {
 /// returns. `spawn_blocking` moves the wait onto the blocking pool, which is
 /// what `tauri::async_runtime` provides it for.
 #[tauri::command]
-async fn read_file_content_checked(path: String) -> Result<(String, bool), String> {
+async fn read_file_content_checked(path: String) -> Result<(String, bool, String), String> {
     tauri::async_runtime::spawn_blocking(move || {
         read_to_string_lossy(&path)
-            .map(|decoded| (decoded.content, decoded.lossy))
+            .map(|decoded| (decoded.content, decoded.lossy, decoded.encoding))
             .map_err(|e| e.to_string())
     })
     .await
@@ -1998,13 +2114,26 @@ async fn read_file_as_data_url(path: String) -> Result<String, String> {
     .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// Writes `content` to `path` as `encoding` — the label the file was decoded
+/// from, so a legacy document is saved as the bytes it arrived as instead of
+/// being silently converted to UTF-8 behind the user's back. Callers with text
+/// Markpad generated itself (the HTML and SVG exports) pass `UTF-8`.
+///
+/// The label is not trusted: it makes a round trip through the frontend, and
+/// `encode_text` rejects one it does not recognise rather than falling back to
+/// a default that would write the wrong bytes.
+///
+/// Encoding happens BEFORE `atomic_write`, so a document with a character its
+/// encoding cannot represent fails without the file being touched at all.
+///
 /// Async because `atomic_write` fsyncs twice (the file, then its directory).
 /// On a network or removable volume that is seconds of blocking I/O, and on
 /// the main thread it would stall every window until the save completes.
 #[tauri::command]
-async fn save_file_content(path: String, content: String) -> Result<(), String> {
+async fn save_file_content(path: String, content: String, encoding: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        atomic_write(Path::new(&path), content.as_bytes()).map_err(|e| e.to_string())
+        let bytes = encode_text(&content, &encoding)?;
+        atomic_write(Path::new(&path), &bytes).map_err(|e| e.to_string())
     })
     .await
     .unwrap_or_else(|e| Err(e.to_string()))
@@ -2911,7 +3040,6 @@ pub fn run() {
             clipboard_write_text,
             clipboard_read_text,
             clipboard_read_image,
-            open_markdown,
             open_markdown_preview,
             render_markdown,
             list_heading_anchors,
@@ -3325,107 +3453,249 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
-    #[test]
-    fn every_read_path_decodes_legacy_encodings_leniently() {
-        // "中文" in GBK. `read_to_string` rejects the whole document on the
-        // first invalid byte, so the same file used to open or fail purely by
-        // size: the truncated-preview branch has always decoded leniently.
-        let gbk = [0xD6u8, 0xD0, 0xCE, 0xC4];
-        assert!(String::from_utf8(gbk.to_vec()).is_err());
-
-        let path = temp_path("gbk.txt");
-        fs::write(&path, gbk).unwrap();
-        assert!(
-            fs::read_to_string(&path).is_err(),
-            "strict decoding is expected to reject these bytes",
-        );
-
-        let decoded = read_to_string_lossy(path.to_str().unwrap())
-            .expect("lenient decoding must open the file instead of failing");
-        assert!(decoded.content.contains('\u{FFFD}'), "got: {:?}", decoded.content);
-
-        fs::remove_file(path).unwrap();
-    }
-
     // --- Decode fidelity ------------------------------------------------
     //
-    // Opening these files leniently is deliberate (above). What must never
-    // follow is writing the result back: U+FFFD is not reversible, so an
-    // auto-save 1.5s after the first keystroke would destroy a document that
-    // was merely in another encoding. Every read path therefore reports
-    // whether its decode was destructive, and the frontend refuses that write
-    // (documentSession.saveContent). These pin the reporting half.
-    const GBK_ZHONGWEN: &[u8] = &[0xD6, 0xD0, 0xCE, 0xC4];
+    // #372: a legacy-encoded document used to be decoded as UTF-8 with U+FFFD
+    // substituted for every byte the decoder disagreed with, and writing that
+    // buffer back destroyed the file — U+FFFD is not reversible. The decoder
+    // now detects the encoding instead, and the save writes the same encoding
+    // back, so the bytes on disk survive a save that changed nothing.
+    //
+    // The load-bearing assertion in most of these is the byte-for-byte round
+    // trip. Whether the detector names the encoding the author had in mind is
+    // a heuristic and can be wrong; what protects the document is that the
+    // bytes it produces are the bytes it was given.
 
-    #[test]
-    fn gbk_bytes_are_reported_as_a_lossy_decode() {
-        let decoded = decode_utf8_lossy(GBK_ZHONGWEN.to_vec());
-        assert!(decoded.lossy, "GBK bytes cannot decode faithfully as UTF-8");
+    /// A Simplified Chinese line long enough for the detector to have
+    /// something to work with — four bytes of CJK could be almost any legacy
+    /// codepage, and a real document never is that short.
+    const CHINESE_SAMPLE: &str = "# 中文标题\n\n这是一个用国标编码保存的文档，里面全是汉字。\n";
+
+    /// One realistic document per legacy encoding Markpad is likely to meet.
+    /// Each is text that encoding can represent and UTF-8 disagrees with.
+    const LEGACY_SAMPLES: [(&'static encoding_rs::Encoding, &str); 4] = [
+        (encoding_rs::GBK, CHINESE_SAMPLE),
+        (
+            encoding_rs::BIG5,
+            "# 中文標題\n\n這是一個用大五碼儲存的文件。\n",
+        ),
+        (
+            encoding_rs::SHIFT_JIS,
+            "# 日本語の見出し\n\nこれはシフトJISで保存された文書です。\n",
+        ),
+        (
+            encoding_rs::WINDOWS_1252,
+            "# Café résumé\n\nNaïve façade — priced at 50\u{A0}£.\n",
+        ),
+    ];
+
+    fn legacy_bytes(encoding: &'static encoding_rs::Encoding, text: &str) -> Vec<u8> {
+        let (bytes, _, unmappable) = encoding.encode(text);
         assert!(
-            decoded.content.contains('\u{FFFD}'),
-            "expected replacement characters, got {:?}",
-            decoded.content,
+            !unmappable,
+            "fixture must be representable in {}",
+            encoding.name()
         );
+        assert!(
+            std::str::from_utf8(&bytes).is_err(),
+            "fixture must not also be valid UTF-8, or it proves nothing",
+        );
+        bytes.into_owned()
+    }
+
+    /// The bug, in one assertion: these bytes must not come back as U+FFFD.
+    #[test]
+    fn a_legacy_encoded_document_decodes_instead_of_becoming_replacement_characters() {
+        for (encoding, text) in LEGACY_SAMPLES {
+            let decoded = decode_text(&legacy_bytes(encoding, text));
+
+            assert!(
+                !decoded.lossy,
+                "{} was reported as undecodable",
+                encoding.name()
+            );
+            assert!(
+                !decoded.content.contains('\u{FFFD}'),
+                "{} decoded to mojibake: {:?}",
+                encoding.name(),
+                decoded.content,
+            );
+            assert_eq!(
+                decoded.content,
+                text,
+                "{} decoded to the wrong text",
+                encoding.name()
+            );
+        }
+    }
+
+    /// The destructive path itself: open a legacy file, save it back
+    /// unchanged, and the file on disk must be the file that was opened. This
+    /// is the test that fails if anything ever routes a save through UTF-8
+    /// again.
+    #[test]
+    fn saving_an_unedited_legacy_document_reproduces_its_bytes_exactly() {
+        for (encoding, text) in LEGACY_SAMPLES {
+            let original = legacy_bytes(encoding, text);
+            let decoded = decode_text(&original);
+            assert!(!decoded.lossy, "{} decode was lossy", encoding.name());
+
+            let written = encode_text(&decoded.content, &decoded.encoding)
+                .unwrap_or_else(|e| panic!("{} could not be written back: {e}", encoding.name()));
+            assert_eq!(
+                written,
+                original,
+                "a save of an unedited {} document changed the file",
+                encoding.name(),
+            );
+        }
+    }
+
+    /// The reported symptom, from the other side: the U+FFFD buffer the old
+    /// decoder produced cannot be turned back into the document. Not a test of
+    /// current behaviour — a statement of why the round trip above has to be
+    /// the mechanism rather than a nicety.
+    #[test]
+    fn a_lossy_decode_cannot_be_reversed() {
+        let original = legacy_bytes(encoding_rs::GBK, CHINESE_SAMPLE);
+        let mojibake = String::from_utf8_lossy(&original).into_owned();
+
+        assert!(mojibake.contains('\u{FFFD}'));
+        assert_ne!(mojibake.into_bytes(), original);
     }
 
     #[test]
-    fn valid_utf8_is_reported_as_faithful() {
-        let decoded = decode_utf8_lossy("中文".as_bytes().to_vec());
+    fn valid_utf8_is_never_handed_to_the_detector() {
+        // Detection is a heuristic; UTF-8 is not. A file that decodes as UTF-8
+        // is UTF-8, whatever a frequency table thinks of it.
+        let decoded = decode_text("中文".as_bytes());
         assert!(!decoded.lossy);
         assert_eq!(decoded.content, "中文");
+        assert_eq!(decoded.encoding, UTF8_LABEL);
     }
 
     #[test]
-    fn read_file_content_checked_reports_a_lossy_file() {
-        // The tripwire that used to assert `read_file_content` REFUSES these
-        // bytes. #371 made every read path lenient, so refusing is no longer
-        // the protection — reporting is. A caller that fills an editable
-        // buffer must use this command and carry the flag onto the tab.
+    fn a_byte_order_mark_survives_the_round_trip() {
+        // Windows-authored Markdown, all three flavours. The BOM is kept out
+        // of the buffer — `\u{FEFF}# Title` is not a heading, so leaving it in
+        // silently un-renders the first line — and put back on the save.
+        for (label, bom) in [
+            (UTF8_BOM_LABEL, vec![0xEF, 0xBB, 0xBF]),
+            (UTF16LE_LABEL, vec![0xFF, 0xFE]),
+            (UTF16BE_LABEL, vec![0xFE, 0xFF]),
+        ] {
+            let text = "# Title\n\nBody.\n";
+            let mut original = bom;
+            match label {
+                UTF16LE_LABEL => original.extend(text.encode_utf16().flat_map(u16::to_le_bytes)),
+                UTF16BE_LABEL => original.extend(text.encode_utf16().flat_map(u16::to_be_bytes)),
+                _ => original.extend_from_slice(text.as_bytes()),
+            }
+
+            let decoded = decode_text(&original);
+            assert!(!decoded.lossy, "{label} decode was lossy");
+            assert_eq!(decoded.encoding, label);
+            assert_eq!(decoded.content, text, "{label} left the BOM in the buffer");
+            assert_eq!(
+                encode_text(&decoded.content, &decoded.encoding).unwrap(),
+                original,
+                "a save dropped or moved the {label} byte order mark",
+            );
+        }
+    }
+
+    #[test]
+    fn bytes_nothing_decodes_are_still_reported_as_lossy() {
+        // The guard that predates detection has to keep working, because
+        // detection does not make every file readable: a UTF-16 document with
+        // a half character at the end has no faithful reading, and the buffer
+        // it produces must not be written back over it. Reported as UTF-8 so
+        // the Save As rescue copy is Unicode rather than a re-encoding of
+        // replacement characters.
+        let truncated = [0xFF, 0xFE, b'A', 0x00, b'B'];
+
+        let decoded = decode_text(&truncated);
+        assert!(decoded.lossy, "got {:?}", decoded.content);
+        assert!(decoded.content.contains('\u{FFFD}'));
+        assert_eq!(decoded.encoding, UTF8_LABEL);
+    }
+
+    #[test]
+    fn a_character_the_encoding_cannot_represent_fails_the_save() {
+        // Typing an emoji into a GBK document. `encoding_rs::encode` would
+        // write `&#128512;` — an HTML escape, in a Markdown file, replacing
+        // the character the user typed. Refusing leaves the buffer dirty and
+        // sends the reason to a toast, which is how a read-only file behaves.
+        let error = encode_text("hello 😀", "GBK").unwrap_err();
+        assert!(error.contains("GBK"), "unhelpful message: {error}");
+        assert!(error.contains("Save As"), "no way out offered: {error}");
+
+        assert!(encode_text("hello 😀", UTF8_LABEL).is_ok());
+    }
+
+    #[test]
+    fn an_unrecognised_encoding_label_is_refused_rather_than_defaulted() {
+        // The label makes a round trip through the frontend, so it is untrusted
+        // input by the time it comes back. Falling back to UTF-8 here would
+        // write the wrong bytes over the file the label came from.
+        assert!(encode_text("text", "definitely-not-an-encoding").is_err());
+        // WHATWG defines the UTF-16 and `replacement` ENCODERS as emitting
+        // UTF-8, which for a browser is a security rule and for an editor is a
+        // silent conversion of the user's file. UTF-16 is handled before this
+        // branch; `replacement` has no business getting past it.
+        assert!(encode_text("text", "iso-2022-kr").is_err());
+    }
+
+    #[test]
+    fn read_file_content_checked_reports_the_encoding_it_used() {
         let path = temp_path("gbk-checked.md");
-        fs::write(&path, GBK_ZHONGWEN).unwrap();
+        let original = legacy_bytes(encoding_rs::GBK, CHINESE_SAMPLE);
+        fs::write(&path, &original).unwrap();
 
         let decoded = read_to_string_lossy(path.to_str().unwrap()).unwrap();
         fs::remove_file(&path).unwrap();
 
-        assert!(
-            decoded.lossy,
-            "read_file_content_checked returned mojibake without reporting it",
+        assert!(!decoded.lossy);
+        assert_eq!(decoded.content, CHINESE_SAMPLE);
+        assert_eq!(
+            encode_text(&decoded.content, &decoded.encoding).unwrap(),
+            original,
         );
-        assert!(decoded.content.contains('\u{FFFD}'));
     }
 
     #[test]
-    fn a_small_non_utf8_file_is_flagged_by_the_preview_too() {
-        // The ≤max_bytes branch. Before #371 it decoded strictly and could
-        // only fail, so it needed no flag; now it opens the same mojibake the
-        // truncated branch always did, and needs the same guard.
-        let path = temp_path("gbk-small.md");
-        let mut bytes = b"# ".to_vec();
-        bytes.extend_from_slice(GBK_ZHONGWEN);
-        fs::write(&path, &bytes).unwrap();
-
-        let preview = build_markdown_preview(&path, 50_000).unwrap();
-        fs::remove_file(&path).unwrap();
-
-        assert!(preview.is_full, "this file fits in the preview budget");
-        assert!(preview.lossy, "the save guard has nothing to go on without this");
-        assert!(preview.content.contains('\u{FFFD}'));
-    }
-
-    #[test]
-    fn an_oversized_non_utf8_preview_is_flagged() {
+    fn the_preview_decodes_a_legacy_file_at_both_sizes() {
+        // The two branches the issue's size table describes. They used to
+        // disagree — strict below the budget, lossy above it — so the same
+        // document opened or failed depending on how long it was. One decoder
+        // now serves both, and neither produces mojibake.
         let path = temp_path("gbk-preview.md");
-        let mut bytes = b"# ".to_vec();
-        bytes.extend_from_slice(GBK_ZHONGWEN);
-        bytes.extend_from_slice(b"\nplus enough text to exceed the preview budget\n");
-        fs::write(&path, &bytes).unwrap();
+        let mut original = legacy_bytes(encoding_rs::GBK, CHINESE_SAMPLE);
+        original.extend_from_slice(&legacy_bytes(encoding_rs::GBK, CHINESE_SAMPLE));
+        fs::write(&path, &original).unwrap();
 
-        let preview = build_markdown_preview(&path, 8).unwrap();
+        let whole = build_markdown_preview(&path, 50_000).unwrap();
+        assert!(whole.is_full);
+        assert!(
+            !whole.lossy,
+            "the small-file branch produced {:?}",
+            whole.content
+        );
+        assert_eq!(whole.encoding, "GBK");
+        assert_eq!(
+            encode_text(&whole.content, &whole.encoding).unwrap(),
+            original,
+        );
+
+        // Cut on a byte boundary the detector still has plenty of text before.
+        let cut = build_markdown_preview(&path, original.len() / 2).unwrap();
         fs::remove_file(&path).unwrap();
-
-        assert!(!preview.is_full);
-        assert!(preview.lossy);
-        assert!(preview.content.contains('\u{FFFD}'));
+        assert!(!cut.is_full);
+        assert!(
+            !cut.content.contains("\u{FFFD}\u{FFFD}"),
+            "the truncated branch fell back to mojibake: {:?}",
+            cut.content,
+        );
     }
 
     #[test]

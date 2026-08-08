@@ -139,6 +139,24 @@
 			],
 		};
 	}
+
+	/**
+	 * The path, plus the encoding when it is not the one everybody assumes.
+	 *
+	 * A save writes the document back as the encoding it was opened in, so a
+	 * GBK or Shift-JIS file stays GBK or Shift-JIS — which is right, and is
+	 * invisible unless something says so. This is the smallest place that can:
+	 * no chrome, no translation (encoding labels are not translated), and it
+	 * says nothing at all for the UTF-8 files that are almost every file.
+	 *
+	 * A status-bar control that lets the reader CHANGE the encoding — reopen
+	 * as, convert to — is the other half and is deliberately not here; see the
+	 * discussion on #372.
+	 */
+	function tabTooltip(tab: Tab): string {
+		const name = hasRealFilePath(tab.path) ? tab.path : tab.title;
+		return tab.encoding === 'UTF-8' ? name : `${name} (${tab.encoding})`;
+	}
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -147,7 +165,7 @@
 	class="tab {isActive ? 'active' : ''}"
 	class:last={isLast}
 	role="group"
-	title={hasRealFilePath(tab.path) ? tab.path : tab.title}
+	title={tabTooltip(tab)}
 	oncontextmenu={handleContextMenu}
 	onmouseenter={startTitleMarquee}
 	onmouseleave={stopTitleMarquee}>

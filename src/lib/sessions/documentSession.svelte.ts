@@ -217,8 +217,11 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			// the fidelity again costs nothing and makes the flag a property of
 			// the buffer instead of a memory of how it was obtained; it also
 			// CLEARS the flag for a file converted to UTF-8 since the load.
-			const [full, lossy] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean];
+			const [full, lossy, encoding] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean, string];
 			tabManager.setTabDecodedLossy(tabId, lossy);
+			// The preview's answer came from the first 50KB; this one is the
+			// whole file's, and it is the one every save from here on uses.
+			tabManager.setTabEncoding(tabId, encoding);
 			tabManager.setTabRawContent(tabId, full);
 			return true;
 		} catch (error) {
@@ -233,9 +236,9 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 
 	/**
 	 * Refuse to write a buffer back over the file it was decoded from when
-	 * that decode was lossy: the file is not UTF-8, the bytes it disagreed
-	 * with are already U+FFFD in the buffer, and the original is unrecoverable
-	 * from it. Every writer — Ctrl+S, the auto-save timer in
+	 * that decode was lossy: no encoding could read the file, the bytes
+	 * nothing could read are already U+FFFD in the buffer, and the original is
+	 * unrecoverable from it. Every writer — Ctrl+S, the auto-save timer in
 	 * MarkdownViewer.svelte, the close dialogs in canCloseTab, the task
 	 * checkbox — funnels through saveContent/saveContentAs, so this is the
 	 * one place that has to hold.
@@ -244,9 +247,10 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 	 * genuine UTF-8 file, which is correct and is the user's way out; an
 	 * untitled buffer (path === '') has no source file to destroy.
 	 *
-	 * This is damage control, not encoding support: Markpad cannot read GBK
-	 * or Shift-JIS in the first place (that needs a real decoder), and this
-	 * only stops it from overwriting what it could not read.
+	 * Detection (#372) narrowed this a great deal without replacing it: GBK,
+	 * Big5, Shift-JIS and the rest are now read properly and written back as
+	 * themselves, so the everyday legacy document never reaches here. What is
+	 * left is the file nothing can read, and no decoder makes that go away.
 	 *
 	 * "The same file" is the filesystem's judgement, not the string's: a Save As
 	 * typed as `/notes/Legacy.md` for a tab opened as `/notes/legacy.md` is the
@@ -414,16 +418,19 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 				let content: string;
 				let isFull: boolean;
 				let lossy: boolean;
+				let encoding: string;
 				if (initialIsEditing || initialIsSplit) {
-					[content, lossy] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean];
+					[content, lossy, encoding] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean, string];
 					isFull = true;
 				} else {
-					[, content, isFull, lossy] = (await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 })) as [string, string, boolean, boolean];
+					[, content, isFull, lossy, encoding] = (await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 })) as [string, string, boolean, boolean, string];
 				}
 				// Decided on every load, before the buffer can reach a writer.
-				// Both branches report it, so this also CLEARS the flag on a
-				// file the user has since converted to UTF-8.
+				// Both branches report both, so this also CLEARS the flag on a
+				// file the user has since converted to UTF-8 — and repoints the
+				// save at the encoding it converted to.
 				tabManager.setTabDecodedLossy(activeId, lossy);
+				tabManager.setTabEncoding(activeId, encoding);
 				lossySaveWarnedTabs.delete(activeId);
 				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath, pathKey);
 				const processed = await options.renderMarkdown(content, filePath, foldsForTab(activeId));
@@ -440,8 +447,8 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 					};
 					updateLoading(activeId, true);
 					options.measureInitialViewport();
-					(invoke('read_file_content_checked', { path: filePath }) as Promise<[string, boolean]>)
-						.then(([fullContent, fullLossy]) => {
+					(invoke('read_file_content_checked', { path: filePath }) as Promise<[string, boolean, string]>)
+						.then(([fullContent, fullLossy, fullEncoding]) => {
 							const applyFull = () => {
 								try {
 									if (options.isScrolling()) return void setTimeout(applyFull, 100);
@@ -453,9 +460,11 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 											tabManager.setTabRawContent(activeId, fullContent);
 											// This buffer REPLACES the preview's, so it
 											// carries its own verdict — the preview only
-											// saw the first 50KB and a file can be valid
-											// UTF-8 up to there and not after.
+											// saw the first 50KB, and both the fidelity
+											// and the detected encoding of a prefix can
+											// differ from the whole file's.
 											tabManager.setTabDecodedLossy(activeId, fullLossy);
+											tabManager.setTabEncoding(activeId, fullEncoding);
 											updateLoading(activeId, false);
 											if (tabManager.activeTabId === activeId) setTimeout(options.renderRichContent, 10);
 										})
@@ -477,8 +486,9 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 						});
 				}
 			} else {
-				const [content, lossy] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean];
+				const [content, lossy, encoding] = (await invoke('read_file_content_checked', { path: filePath })) as [string, boolean, string];
 				tabManager.setTabDecodedLossy(activeId, lossy);
+				tabManager.setTabEncoding(activeId, encoding);
 				lossySaveWarnedTabs.delete(activeId);
 				if (pendingNavigateTabId) tabManager.navigate(pendingNavigateTabId, filePath, pathKey);
 				if (tab) tab.isEditing = true;
@@ -544,7 +554,12 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			const snapshot = tab.rawContent;
 			markSelfWrite(targetPath);
 			try {
-				await invoke('save_file_content', { path: targetPath, content: snapshot });
+				// The tab's own encoding, so a GBK or Shift-JIS document is
+				// written back as the file it was opened from rather than
+				// silently converted to UTF-8 by every auto-save. An untitled
+				// buffer saved through the dialog above still carries the
+				// `UTF-8` it was created with, which is what it should be.
+				await invoke('save_file_content', { path: targetPath, content: snapshot, encoding: tab.encoding });
 				markSelfWrite(targetPath);
 				if (tab.path === '') {
 					tabManager.updateTabPath(tab.id, targetPath, targetKey);
@@ -592,12 +607,19 @@ export function createDocumentSession(options: DocumentSessionOptions) {
 			const snapshot = tab.rawContent;
 			markSelfWrite(selected);
 			try {
-				await invoke('save_file_content', { path: selected, content: snapshot });
+				// Deliberately UTF-8, not `tab.encoding`. Save As is the way out
+				// of both failure modes this file guards: a buffer nothing could
+				// decode, and one holding a character its own encoding cannot
+				// represent. Writing the copy in the encoding that caused the
+				// problem would take the exit away.
+				await invoke('save_file_content', { path: selected, content: snapshot, encoding: 'UTF-8' });
 				markSelfWrite(selected);
 				tabManager.updateTabPath(tab.id, selected, selectedKey);
 				// The buffer now has a UTF-8 file of its own that it matches
-				// exactly, so it is safe to save from here on.
+				// exactly, so it is safe to save from here on — and every save
+				// from here on has to agree about what that file is.
 				tabManager.setTabDecodedLossy(tab.id, false);
+				tabManager.setTabEncoding(tab.id, 'UTF-8');
 				lossySaveWarnedTabs.delete(tab.id);
 				options.saveRecentFile(selected);
 				tab.originalContent = snapshot;

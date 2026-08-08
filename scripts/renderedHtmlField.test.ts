@@ -450,6 +450,7 @@ test('every Tab construction site starts the rendered-HTML field empty', () => {
 		splitRatio: 0.5,
 		isScrollSynced: false,
 		hasReplacementChars: false,
+		encoding: 'UTF-8',
 	});
 
 	assert.equal(tabManager.tabs.length, 5, 'precondition: every construction site produced a tab');

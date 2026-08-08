@@ -261,15 +261,17 @@ export function createWindowSession(options: WindowSessionOptions) {
 					// that leaves nothing behind.
 					await writeProgress(progress);
 					try {
-						// `_checked`, because restore fills an editable buffer: reads
-						// decode leniently, so a file in a legacy encoding comes back
-						// as U+FFFD mojibake that must never be written over its
-						// source. Without this, reopening the app laundered the flag
-						// away and the next auto-save destroyed the document.
-						const [raw, lossy] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean];
+						// `_checked`, because restore fills an editable buffer, and
+						// both of its answers belong to the tab: `lossy` so a file
+						// nothing could decode is never written back over, and the
+						// encoding so a legacy one is written back as itself.
+						// Without this, reopening the app laundered them away and
+						// the next auto-save destroyed or converted the document.
+						const [raw, lossy, encoding] = (await invoke('read_file_content_checked', { path: tab.path })) as [string, boolean, string];
 						if (options.isDisposed()) return;
 						await options.applyRestoredContent(tab.id, raw);
 						tabManager.setTabDecodedLossy(tab.id, lossy);
+						tabManager.setTabEncoding(tab.id, encoding);
 						if (options.isDisposed()) return;
 					} catch (error) {
 						if (options.isDisposed()) return;
