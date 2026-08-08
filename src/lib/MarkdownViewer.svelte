@@ -3869,6 +3869,25 @@ import { createDocumentSession, type LoadMarkdownOptions } from './sessions/docu
 		border-radius: 8px;
 	}
 
+	/*
+	 * A measurable position for a soft line break, so split-view scroll sync
+	 * can resolve a line inside a long paragraph instead of interpolating
+	 * across the whole block. See `processSoftLineAnchors`.
+	 *
+	 * `inline-block` is the point — it is what gives the element a CSS box, and
+	 * therefore an `offsetTop` the anchor lookup can read. Everything else here
+	 * is about taking that box back out of the layout: no width, no height, and
+	 * `vertical-align: top` so a zero-height box cannot sit on the baseline and
+	 * push the line it is on. It holds no text, so selection and copy step over
+	 * it.
+	 */
+	:global(.source-line-anchor) {
+		display: inline-block;
+		width: 0;
+		height: 0;
+		vertical-align: top;
+	}
+
 	:global(.mermaid-diagram) {
 		margin: 1em 0;
 		display: flex;

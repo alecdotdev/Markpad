@@ -452,6 +452,117 @@ export function getAnchorScrollTop(
 	return Math.max(0, elementTop + elementHeight * ratio - offset);
 }
 
+/* ------------------------------------------------------------------ */
+/* the sample table                                                    */
+/* ------------------------------------------------------------------ */
+//
+// Scroll sync maps a pixel to a source line and back. It used to do that by
+// descending to the single narrowest annotated element containing the offset
+// and interpolating across ITS range — which has two problems that only show
+// up together.
+//
+// The first is that it measures every child at every level on the way down, so
+// the cost is linear in the size of the document on an event that fires many
+// times a second. The second is worse: adding more annotated elements makes it
+// LESS accurate, because a finer element is a narrower range, and an element
+// spanning a single line cannot interpolate at all — the answer quantises to
+// whole lines. Any attempt to improve the mapping by giving it more to work
+// with made it step instead of glide.
+//
+// So the model is the one VS Code's Markdown preview uses
+// (`extensions/markdown-language-features/preview-src/scroll-sync.ts`): a flat,
+// ordered table of (element, line) samples, a binary search for the pair the
+// offset falls between, and interpolation BETWEEN the two —
+//
+//     progress = (offset - previous.top) / (next.top - previous.top)
+//     line     = previous.line + progress * (next.line - previous.line)
+//
+// In that shape an extra sample is always an improvement: it splits an
+// interval, and interpolating across a shorter interval is never worse. It
+// also measures O(log n) elements instead of O(n).
+
+type LineSample = { element: AnchorNode; line: number };
+
+/**
+ * Every annotated element in document order, one sample each, deduplicated so
+ * that a line is represented by the innermost element that starts on it.
+ *
+ * A `<ul>` and its first `<li>` start on the same source line, as do a
+ * `<blockquote>` and its first paragraph. Keeping both would put two samples
+ * at one line and give the interval between them zero span. The inner one is
+ * kept because it is the one whose box actually bounds the text.
+ *
+ * Not memoised: this walks the tree without measuring anything, and the
+ * measuring is what costs. Caching it would mean invalidating on every render,
+ * and a stale table would silently map to the wrong lines.
+ */
+function collectLineSamples(root: AnchorNode): LineSample[] {
+	const samples: LineSample[] = [];
+
+	const visit = (node: AnchorNode) => {
+		for (const child of elementChildren(node)) {
+			// A collapsed fold is `height: 0; overflow: hidden`, and its
+			// children keep reporting the offsets they would have if it were
+			// open. Following them in would put samples below the fold at
+			// positions above it — which does not merely misplace those
+			// samples, it breaks the ordering the binary search depends on for
+			// everything after them. The fold answers for its own contents, at
+			// the one place the reader can actually see them.
+			//
+			// This is the same guard VS Code applies with `isVisible`, done by
+			// class so that building the table still costs no measurement.
+			if (isCollapsedContainer(child)) {
+				const span = ownRange(child) ?? resolveSpan(child);
+				if (span) samples.push({ element: child, line: span.startLine });
+				continue;
+			}
+
+			const own = ownRange(child);
+			if (!own) {
+				visit(child);
+				continue;
+			}
+
+			const before = samples.length;
+			visit(child);
+			// Only if no descendant already claimed this line.
+			if (samples[before]?.line !== own.startLine) {
+				samples.splice(before, 0, { element: child, line: own.startLine });
+			}
+		}
+	};
+
+	visit(root);
+	return samples;
+}
+
+/**
+ * The samples either side of `offset`: the last one at or above it, and the
+ * first one below.
+ *
+ * Binary search over `top`, which is monotonic in document order for the
+ * elements that survive the deduplication above — they are siblings or
+ * ancestors laid out in flow, so a later element never starts higher.
+ */
+function samplesAround(
+	samples: LineSample[],
+	offset: number,
+	measure: MeasureAnchorBox,
+): { previous: LineSample; next?: LineSample } {
+	let low = 0;
+	let high = samples.length - 1;
+
+	while (low < high) {
+		const mid = Math.ceil((low + high) / 2);
+		if (measure(samples[mid].element).top <= offset) low = mid;
+		else high = mid - 1;
+	}
+
+	const previous = samples[low];
+	const next = samples[low + 1];
+	return next ? { previous, next } : { previous };
+}
+
 /**
  * The source line rendered at `offset` in the preview's scroll content —
  * fractional, interpolated across the block that owns the offset.
@@ -469,17 +580,29 @@ export function getSourceLineAtPreviewOffset(
 	offset: number,
 	measure: MeasureAnchorBox,
 ): number | null {
-	const match = findAnchorElementAtOffset(root, offset, measure);
-	if (!match) return null;
+	if (!Number.isFinite(offset)) return null;
 
-	const box = measure(match.element);
-	if (!Number.isFinite(box.top) || !Number.isFinite(box.height)) return null;
+	const samples = collectLineSamples(root);
+	if (samples.length === 0) return null;
 
-	const totalLines = match.endLine - match.startLine;
-	if (totalLines <= 0 || box.height <= 0) return match.startLine;
+	const { previous, next } = samplesAround(samples, offset, measure);
+	const previousTop = measure(previous.element).top;
+	if (!Number.isFinite(previousTop)) return null;
 
-	const ratio = Math.max(0, Math.min(1, (offset - box.top) / box.height));
-	return match.startLine + totalLines * ratio;
+	if (next) {
+		const nextTop = measure(next.element).top;
+		const span = nextTop - previousTop;
+		if (!Number.isFinite(span) || span <= 0) return previous.line;
+
+		const progress = Math.max(0, Math.min(1, (offset - previousTop) / span));
+		return previous.line + progress * (next.line - previous.line);
+	}
+
+	// Past the last sample: its own height is all there is to go on, and a
+	// height of one rendered line is worth one source line.
+	const height = measure(previous.element).height;
+	if (!Number.isFinite(height) || height <= 0) return previous.line;
+	return previous.line + Math.max(0, (offset - previousTop) / height);
 }
 
 /**
@@ -495,11 +618,41 @@ export function getPreviewOffsetForSourceLine(
 	line: number,
 	measure: MeasureAnchorBox,
 ): number | null {
-	const match = findNearestAnchorElement(root, line);
-	if (!match) return null;
+	if (!Number.isFinite(line)) return null;
 
-	const box = measure(match.element);
-	if (!Number.isFinite(box.top) || !Number.isFinite(box.height)) return null;
+	const samples = collectLineSamples(root);
+	if (samples.length === 0) return null;
 
-	return getAnchorScrollTop(box.top, box.height, match, line, 0);
+	// The mirror of `samplesAround`, over lines rather than pixels. Both
+	// directions read the same table, so a round trip through the pair lands
+	// where it started.
+	let low = 0;
+	let high = samples.length - 1;
+	while (low < high) {
+		const mid = Math.ceil((low + high) / 2);
+		if (samples[mid].line <= line) low = mid;
+		else high = mid - 1;
+	}
+
+	const previous = samples[low];
+	const next = samples[low + 1];
+	const previousTop = measure(previous.element).top;
+	if (!Number.isFinite(previousTop)) return null;
+
+	if (next) {
+		const lineSpan = next.line - previous.line;
+		if (lineSpan <= 0) return Math.max(0, previousTop);
+
+		const nextTop = measure(next.element).top;
+		if (!Number.isFinite(nextTop)) return Math.max(0, previousTop);
+
+		const progress = Math.max(0, Math.min(1, (line - previous.line) / lineSpan));
+		return Math.max(0, previousTop + progress * (nextTop - previousTop));
+	}
+
+	// Past the last sample, as in the forward direction: one source line is
+	// worth one rendered line of the element's own height.
+	const height = measure(previous.element).height;
+	if (!Number.isFinite(height) || height <= 0) return Math.max(0, previousTop);
+	return Math.max(0, previousTop + (line - previous.line) * height);
 }
